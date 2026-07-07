@@ -1,0 +1,116 @@
+# Clotho dev stack — `just dev` / `docker compose -f docker-compose.dev.yml up`.
+# Postgres (control plane), MinIO (S3-compatible storage for Arachne), and the
+# six Clotho services as health-check stubs. Forgejo joins in Stage 3.
+
+name: clotho-dev
+
+x-clotho-service: &clotho-service
+  restart: unless-stopped
+  environment:
+    RUST_LOG: info
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: clotho
+      POSTGRES_PASSWORD: clotho-dev # dev-only credentials
+      POSTGRES_DB: clotho
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clotho"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: clotho
+      MINIO_ROOT_PASSWORD: clotho-dev # dev-only credentials
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  clotho-vcs:
+    <<: *clotho-service
+    build:
+      context: .
+      dockerfile: infra/docker/rust-services.Dockerfile
+      args: { SERVICE: clotho-vcs }
+    ports:
+      - "50051:50051"
+
+  clotho-storage:
+    <<: *clotho-service
+    build:
+      context: .
+      dockerfile: infra/docker/rust-services.Dockerfile
+      args: { SERVICE: clotho-storage }
+    ports:
+      - "50052:50052"
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  clotho-merge-queue:
+    <<: *clotho-service
+    build:
+      context: .
+      dockerfile: infra/docker/rust-services.Dockerfile
+      args: { SERVICE: clotho-merge-queue }
+    ports:
+      - "50053:50053"
+
+  clotho-agent-gateway:
+    <<: *clotho-service
+    build:
+      context: .
+      dockerfile: infra/docker/rust-services.Dockerfile
+      args: { SERVICE: clotho-agent-gateway }
+    ports:
+      - "50054:50054"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  clotho-diff:
+    <<: *clotho-service
+    build:
+      context: .
+      dockerfile: infra/docker/rust-services.Dockerfile
+      args: { SERVICE: clotho-diff }
+    ports:
+      - "50055:50055"
+
+  clotho-api-gateway:
+    <<: *clotho-service
+    build:
+      context: .
+      dockerfile: infra/docker/rust-services.Dockerfile
+      args: { SERVICE: clotho-api-gateway }
+    ports:
+      - "50056:50056"
+    depends_on:
+      - clotho-vcs
+      - clotho-storage
+      - clotho-merge-queue
+      - clotho-agent-gateway
+      - clotho-diff
+
+volumes:
+  postgres-data:
+  minio-data:
