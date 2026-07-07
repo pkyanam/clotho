@@ -1,0 +1,17 @@
+{
+  "name": "@clotho/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./tokens": "./src/tokens.ts",
+    "./tokens.css": "./styles/tokens.css",
+    "./fonts/*": "./fonts/*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}

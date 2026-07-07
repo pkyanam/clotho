@@ -1,0 +1,19 @@
+@import "tailwindcss";
+@import "@clotho/ui/tokens.css";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-border: var(--border);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --font-pixel: var(--font-geist-pixel);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+}

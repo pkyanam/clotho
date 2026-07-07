@@ -1,0 +1,95 @@
+/* ── clotho design tokens: pure black & white. no color, no grey fills. ────── */
+:root {
+  --background: #000000;
+  --foreground: #ffffff;
+  /* "muted"/"faint" kept as token names but mapped to white — text is always
+     white; hierarchy comes from size/weight/spacing, not grey. */
+  --muted: #ffffff;
+  --faint: #ffffff;
+  /* the only non-pure values: hairline borders so cards/sections have edges. */
+  --border: rgba(255, 255, 255, 0.16);
+  --border-strong: rgba(255, 255, 255, 0.32);
+  /* near-black surfaces — a barely-there lift off pure black so cards read
+     without introducing grey. */
+  --surface: #070707;
+  --surface-hover: #0c0c0c;
+  --panel: #0a0a0a;
+}
+
+/* base — tailwind consumers should keep these inside @layer base equivalents */
+html {
+  background: var(--background);
+  color-scheme: dark;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-pixel), ui-monospace, "SFMono-Regular",
+    monospace;
+  text-transform: lowercase; /* all text lowercase by design */
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: 0.01em;
+  line-height: 1.6;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+::selection {
+  background: #ffffff;
+  color: #000000;
+}
+/* visible keyboard focus — high-contrast white ring; the palette carries no
+   color, so focus cannot rely on hue. */
+:focus-visible {
+  outline: 2px solid var(--foreground);
+  outline-offset: 3px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ── component utilities ───────────────────────────────────────────────────── */
+/* hairline divider */
+.rule-hairline {
+  height: 1px;
+  width: 100%;
+  background: var(--border);
+}
+
+/* card hover affordance — a white edge appears, no color */
+.edge-hover {
+  position: relative;
+}
+.edge-hover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid transparent;
+  transition: border-color 0.25s ease;
+  pointer-events: none;
+}
+.edge-hover:hover::after {
+  border-color: var(--border-strong);
+}
+
+/* ── motion — one restrained first-load reveal ─────────────────────────────── */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes reveal-up {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .reveal {
+    animation: reveal-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation-delay: var(--reveal-delay, 0ms);
+  }
+}
