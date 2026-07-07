@@ -24,9 +24,13 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${geistPixel.variable} h-full antialiased`}>
-      <body className="flex min-h-full flex-col bg-background text-foreground">
-        <header className="sticky top-0 z-10 border-b bg-black/70 backdrop-blur-xl">
+    <html
+      lang="en"
+      data-mode="dark"
+      className={`${geistPixel.variable} h-full antialiased`}
+    >
+      <body className="flex min-h-full flex-col bg-kumo-canvas text-kumo-default">
+        <header className="sticky top-0 z-10 border-b border-kumo-hairline bg-kumo-canvas/70 backdrop-blur-xl">
           <div className="mx-auto flex h-14 max-w-6xl items-center px-6">
             <span className="text-sm">clotho</span>
           </div>

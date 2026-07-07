@@ -1,4 +1,16 @@
+/*
+ * clotho — hybrid belweave x cloudflare kumo.
+ *
+ * import order matters: kumo's theme tokens must register before tailwind
+ * so its semantic color utilities (`bg-kumo-*`, `text-kumo-*`, …) resolve.
+ * the `@source` directive tells tailwind v4 to scan kumo's dist for the
+ * utility classes its components use (node_modules is not scanned by default).
+ */
+@source "../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
+@import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
+
+/* belweave design tokens: pure black & white, geist pixel, hairline borders. */
 @import "@clotho/ui/tokens.css";
 
 @theme inline {
@@ -12,8 +24,95 @@
   --font-pixel: var(--font-geist-pixel);
 }
 
+/*
+ * clotho theme overlay on top of kumo's dark mode.
+ *
+ * kumo is run in `data-mode="dark"` (no `data-theme`), so its dark token set
+ * applies as the base. we then override the surface, text, border and brand
+ * tokens to the belweave palette — pure black surfaces, always-white text,
+ * hairline white borders, white-as-brand (no accent color). kumo's semantic
+ * status colors (info / success / warning / danger) and badge hues are kept
+ * intact: that is the "cloudflare" half of the hybrid, used by badges,
+ * banners and charts where belweave deliberately carries no color.
+ */
+:root[data-mode="dark"] {
+  /* surfaces — pure black, flat, a barely-there lift off the canvas */
+  --color-kumo-canvas: #000000;
+  --color-kumo-base: #070707;
+  --color-kumo-elevated: #0c0c0c;
+  --color-kumo-recessed: #0a0a0a;
+  --color-kumo-tint: #0c0c0c;
+  --color-kumo-contrast: #ffffff;
+  --color-kumo-overlay: #0a0a0a;
+  --color-kumo-control: #070707;
+  --color-kumo-interact: rgba(255, 255, 255, 0.1);
+  --color-kumo-fill: #0c0c0c;
+  --color-kumo-fill-hover: #111111;
+
+  /* text — always white; hierarchy comes from size/weight/spacing, not grey */
+  --text-color-kumo-default: #ffffff;
+  --text-color-kumo-strong: #ffffff;
+  --text-color-kumo-subtle: #ffffff;
+  --text-color-kumo-inactive: rgba(255, 255, 255, 0.5);
+  --text-color-kumo-placeholder: rgba(255, 255, 255, 0.4);
+  --text-color-kumo-inverse: #000000;
+
+  /* brand — no accent color; primary actions are white-on-black */
+  --color-kumo-brand: #ffffff;
+  --color-kumo-brand-hover: rgba(255, 255, 255, 0.88);
+  --text-color-kumo-brand: #ffffff;
+  --text-color-kumo-link: #ffffff;
+
+  /* borders & rings — the only structural lines are hairline white */
+  --color-kumo-hairline: rgba(255, 255, 255, 0.16);
+  --color-kumo-line: rgba(255, 255, 255, 0.16);
+  --color-kumo-focus: #ffffff;
+  --color-kumo-tip-stroke: rgba(255, 255, 255, 0.16);
+
+  /* shadows — belweave surfaces are flat; no drop or edge shadows */
+  --color-kumo-shadow-edge: transparent;
+  --color-kumo-shadow-drop: transparent;
+  --color-kumo-tip-shadow: transparent;
+}
+
+/*
+ * primary / destructive button emphasis.
+ *
+ * kumo derives the emphasis background from `--color-kumo-brand` via
+ * `color-mix(…, white 30%)` and forces `!text-white`. because clotho sets
+ * brand to white, that yields a white-on-white button. the emphasis vars
+ * are applied as inline styles by the button component, so we override them
+ * with `!important` to give primary actions a flat black background with a
+ * hairline white ring — the belweave "white-on-black" primary — while the
+ * forced white text finally reads.
+ */
+[data-kumo-component="Button"],
+[data-kumo-component="LinkButton"] {
+  --kumo-button-emphasis-bg: #000000 !important;
+  --kumo-button-emphasis-ring: rgba(255, 255, 255, 0.32) !important;
+  --kumo-button-emphasis-gradient-start: #0c0c0c !important;
+  --kumo-button-emphasis-gradient-end: #000000 !important;
+}
+
+/*
+ * geist pixel is the single typeface. route tailwind's `--font-sans` (and
+ * therefore kumo's `--default-font-family`) to it so every kumo component
+ * renders in geist pixel without per-component overrides.
+ */
+:root {
+  --font-sans: var(--font-geist-pixel), ui-monospace, "SFMono-Regular", monospace;
+  --default-font-family: var(--font-geist-pixel), ui-monospace, "SFMono-Regular",
+    monospace;
+}
+
 @layer base {
   * {
     border-color: var(--border);
+  }
+  /* belweave: all copy lowercase via css transform. text-transform inherits,
+     so kumo components pick it up unless they explicitly opt out. */
+  [data-kumo-component],
+  [data-kumo-part] {
+    text-transform: lowercase;
   }
 }

@@ -25,8 +25,12 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${geistPixel.variable} h-full antialiased`}>
-      <body className="min-h-full bg-background text-foreground">
+    <html
+      lang="en"
+      data-mode="dark"
+      className={`${geistPixel.variable} h-full antialiased`}
+    >
+      <body className="min-h-full bg-kumo-canvas text-kumo-default">
         {children}
       </body>
     </html>
