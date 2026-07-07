@@ -25,6 +25,11 @@ test-rust:
 test-js:
     pnpm turbo test
 
+# Storage dedup integration tests against the dev stack's MinIO (`just dev`
+# first). Override file size with CLOTHO_STORAGE_TEST_FILE_MB (default 256).
+test-storage:
+    CLOTHO_STORAGE_TEST_S3_ENDPOINT=http://localhost:9000 cargo test -p clotho-storage --test storage --release
+
 # Build everything
 build: build-rust build-js
 

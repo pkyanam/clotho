@@ -45,6 +45,21 @@ services:
       timeout: 3s
       retries: 10
 
+  # One-shot bucket provisioning: the app bucket plus the bucket the storage
+  # integration tests target (crates/clotho-storage/tests/storage.rs).
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mc alias set clotho http://minio:9000 clotho clotho-dev &&
+        mc mb --ignore-existing clotho/clotho-storage clotho/clotho-storage-test
+    restart: "no"
+
   clotho-vcs:
     <<: *clotho-service
     build:
@@ -65,11 +80,22 @@ services:
       context: .
       dockerfile: infra/docker/rust-services.Dockerfile
       args: { SERVICE: clotho-storage }
+    environment:
+      RUST_LOG: info
+      CLOTHO_STORAGE_DATA_DIR: /var/lib/clotho/storage
+      CLOTHO_STORAGE_S3_ENDPOINT: http://minio:9000
+      CLOTHO_STORAGE_S3_BUCKET: clotho-storage
+      CLOTHO_STORAGE_S3_ACCESS_KEY: clotho
+      CLOTHO_STORAGE_S3_SECRET_KEY: clotho-dev # dev-only credentials
     ports:
       - "50052:50052"
+    volumes:
+      - storage-data:/var/lib/clotho
     depends_on:
       minio:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
   clotho-merge-queue:
     <<: *clotho-service
@@ -120,3 +146,4 @@ volumes:
   postgres-data:
   minio-data:
   vcs-data:
+  storage-data:

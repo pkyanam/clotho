@@ -7,6 +7,17 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+async-trait.workspace = true
+bytes.workspace = true
 clotho-common.workspace = true
+object_store.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true
 tracing.workspace = true
+xet-core-structures.workspace = true
+xet-data.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

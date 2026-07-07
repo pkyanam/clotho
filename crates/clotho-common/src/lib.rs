@@ -19,4 +19,9 @@ pub mod pb {
             tonic::include_proto!("clotho.vcs.v1");
         }
     }
+    pub mod storage {
+        pub mod v1 {
+            tonic::include_proto!("clotho.storage.v1");
+        }
+    }
 }

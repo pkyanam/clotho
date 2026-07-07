@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package clotho.storage.v1;
+
+// The Arachne storage engine — Xet-style content-defined chunking and
+// chunk-level dedup against any S3-compatible object store. Files are
+// identified by their content hash; identical chunks are stored exactly once,
+// packed into ~64 MiB immutable xorbs.
+service Storage {
+  // Upload a file as a stream of byte blocks. The engine chunks the stream
+  // (GearHash CDC, ~64 KiB average), dedups every chunk against everything
+  // already stored, and only writes never-before-seen chunks to the object
+  // store. Returns the file's content hash and measured dedup metrics.
+  rpc UploadFile(stream UploadFileRequest) returns (UploadFileResponse);
+  // Reconstruct a file byte-identically from its content hash, streaming it
+  // back as byte blocks.
+  rpc DownloadFile(DownloadFileRequest) returns (stream DownloadFileResponse);
+  // Ground-truth storage usage, measured by listing the object store — for
+  // proving dedup with real byte counts, not estimates.
+  rpc GetStorageStats(GetStorageStatsRequest) returns (GetStorageStatsResponse);
+}
+
+message UploadFileRequest {
+  // The next block of file bytes, in order. Any block size works; a few MiB
+  // per message is a good default.
+  bytes data = 1;
+}
+
+message UploadFileResponse {
+  // Content hash of the whole file (hex MerkleHash) — the handle for download.
+  string file_hash = 1;
+  // Total file size in bytes.
+  uint64 file_size = 2;
+  // Bytes of chunks never seen before (stored for the first time).
+  uint64 new_bytes = 3;
+  // Bytes deduplicated against already-stored chunks.
+  uint64 deduped_bytes = 4;
+  // Chunk counts behind the byte figures above.
+  uint64 new_chunks = 5;
+  uint64 deduped_chunks = 6;
+  // Serialized bytes actually written to the object store for this upload
+  // (xorbs + shard metadata, after framing/compression).
+  uint64 stored_bytes_written = 7;
+}
+
+message DownloadFileRequest {
+  // Content hash returned by UploadFile.
+  string file_hash = 1;
+}
+
+message DownloadFileResponse {
+  bytes data = 1;
+}
+
+message GetStorageStatsRequest {}
+
+message GetStorageStatsResponse {
+  // Number and total serialized size of xorbs in the object store.
+  uint64 xorb_count = 1;
+  uint64 xorb_bytes = 2;
+  // Number and total size of shard (metadata) objects.
+  uint64 shard_count = 3;
+  uint64 shard_bytes = 4;
+  // xorb_bytes + shard_bytes.
+  uint64 total_bytes = 5;
+}

@@ -16,9 +16,23 @@ jobs:
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: Swatinem/rust-cache@v2
+      - name: Start MinIO (storage dedup integration tests)
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=clotho -e MINIO_ROOT_PASSWORD=clotho-dev \
+            minio/minio:latest server /data
+          docker run --rm --network host --entrypoint /bin/sh minio/mc:latest -c '
+            for i in $(seq 1 30); do
+              mc alias set ci http://localhost:9000 clotho clotho-dev && break; sleep 1;
+            done
+            mc mb --ignore-existing ci/clotho-storage-test'
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+        env:
+          CLOTHO_STORAGE_TEST_S3_ENDPOINT: http://localhost:9000
+          # Keep CI fast; run bigger files locally via CLOTHO_STORAGE_TEST_FILE_MB.
+          CLOTHO_STORAGE_TEST_FILE_MB: "64"
 
   js:
     runs-on: ubuntu-latest
