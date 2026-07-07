@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package clotho.vcs.v1;
+
+// The Clotho VCS engine — a jj-native, git-compatible version control service.
+// Backed by jj-lib embedded in-process (never the jj/git CLI). Every commit it
+// writes is a real git commit; the operation log is a first-class API.
+service Vcs {
+  // Create a new, empty repository (internal git backend).
+  rpc InitRepo(InitRepoRequest) returns (InitRepoResponse);
+  // Write a commit from explicit file contents (server-side tree build; no
+  // working copy involved, so there is no staging area to forget).
+  rpc Commit(CommitRequest) returns (CommitResponse);
+  // Record a named checkpoint in the operation log and return its id, so a
+  // supervisor can always restore an agent session to this exact state.
+  rpc Checkpoint(CheckpointRequest) returns (CheckpointResponse);
+  // Restore the repository view to a previous operation (checkpoint or any
+  // op-log entry). This is itself recorded as a new operation — nothing is
+  // ever erased.
+  rpc RestoreTo(RestoreToRequest) returns (RestoreToResponse);
+  // Query the repository's operation log, newest first.
+  rpc QueryOpLog(QueryOpLogRequest) returns (QueryOpLogResponse);
+}
+
+message InitRepoRequest {
+  // Repository name: [a-z0-9][a-z0-9-_]*, max 100 chars.
+  string name = 1;
+}
+
+message InitRepoResponse {
+  string name = 1;
+  // Operation id of the repo-creation operation (root of the op log).
+  string operation_id = 2;
+}
+
+message FileChange {
+  // Repo-relative path, e.g. "src/main.rs".
+  string path = 1;
+  bytes content = 2;
+  bool executable = 3;
+}
+
+message CommitRequest {
+  string repo = 1;
+  // Parent commit ids (hex). Empty means: commit on top of the repo's current
+  // head(s) — a merge commit if there are several.
+  repeated string parent_commit_ids = 2;
+  repeated FileChange files = 3;
+  // Paths to delete relative to the base tree.
+  repeated string deleted_paths = 4;
+  string message = 5;
+  string author_name = 6;
+  string author_email = 7;
+}
+
+message CommitResponse {
+  // Git-compatible commit id (hex sha).
+  string commit_id = 1;
+  // jj change id (hex) — stable across rewrites.
+  string change_id = 2;
+  // Operation-log entry this commit was recorded in.
+  string operation_id = 3;
+}
+
+message CheckpointRequest {
+  string repo = 1;
+  // Human/agent-readable label, e.g. "before refactoring auth".
+  string label = 2;
+}
+
+message CheckpointResponse {
+  string operation_id = 1;
+}
+
+message RestoreToRequest {
+  string repo = 1;
+  string operation_id = 2;
+}
+
+message RestoreToResponse {
+  // The new operation recording the restore.
+  string operation_id = 1;
+}
+
+message QueryOpLogRequest {
+  string repo = 1;
+  // 0 means no limit.
+  uint32 limit = 2;
+}
+
+message OpLogEntry {
+  string operation_id = 1;
+  string description = 2;
+  int64 start_time_millis = 3;
+  int64 end_time_millis = 4;
+  repeated string parent_operation_ids = 5;
+}
+
+message QueryOpLogResponse {
+  // Newest first.
+  repeated OpLogEntry entries = 1;
+}

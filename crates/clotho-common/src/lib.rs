@@ -14,4 +14,9 @@ pub mod pb {
             tonic::include_proto!("clotho.health.v1");
         }
     }
+    pub mod vcs {
+        pub mod v1 {
+            tonic::include_proto!("clotho.vcs.v1");
+        }
+    }
 }

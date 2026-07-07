@@ -26,8 +26,25 @@ now: humans and agents, working together, on the same repo, at the same time.
     │ (jj-lib)   │ │ (xet-core)   │ │ + merge-queue   │
     └─────┬──────┘ └──────┬───────┘ └────────┬────────┘
           │                │                    │
-     git objects      MinIO / S3         Postgres (identity, audit)
+     git objects      S3-compatible      Postgres (identity, audit)
+                      object store
 ```
+
+## No vendor lock-in
+
+Every major subsystem is swappable by design (vision spec §1, §4):
+
+- **Object storage:** Arachne targets the S3 *API*, not Amazon S3 — any
+  S3-compatible store works: MinIO (the local/dev emulator in
+  `docker-compose.dev.yml`), Cloudflare R2, Backblaze B2, Ceph/RGW, Garage,
+  or AWS S3 itself. Configuration is endpoint + credentials, never an
+  AWS-specific SDK path.
+- **Database:** Postgres primary, SQLite planned for single-node self-hosting,
+  with a documented adapter interface (vision spec §4.3).
+- **Compute/CI:** provider-agnostic via the Clotho Compute Interface — jobs
+  declare isolation/persistence needs, not providers (vision spec §4.1).
+- **Collaboration shell:** Forgejo is behind an API boundary, not woven into
+  Clotho's code.
 
 ## Repository layout
 

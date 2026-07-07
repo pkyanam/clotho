@@ -142,6 +142,7 @@ Each stage lists a goal, key tasks, and an exit condition. Stages 1–2 can star
 - Validate: programmatically create a repo, make commits from two separate simulated "agent workspaces" (using jj's workspace feature), confirm both land in one commit graph.
 - Write integration tests against a real throwaway git remote.
 - **Exit condition:** a test harness can create a repo, commit from two workspaces, and read a unified op log back — entirely through the gRPC API, no shelling out to the `jj` binary.
+- *Implementation note (2026-07-07):* the engine landed **workspace-less** — commits are built server-side as trees directly via the store, so there is no working copy, no staging area, and no single-writer working-copy lock at all. Two simulated agents committing through the gRPC API into one graph is covered by `crates/clotho-vcs/tests/vcs.rs`; jj's on-disk workspace feature becomes relevant in Stage 5 if the merge-queue needs materialized working copies rather than pure tree ops.
 
 ### Stage 2 — Arachne storage engine (Week 2–4, parallel with Stage 1)
 - Embed `xet-core` crates in `clotho-storage`; implement upload (chunk → xorb → S3 write) and download (reconstruct file from xorb + chunk ranges) against MinIO.

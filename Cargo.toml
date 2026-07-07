@@ -18,6 +18,13 @@ repository = "https://github.com/pkyanam/clotho"
 
 [workspace.dependencies]
 clotho-common = { path = "crates/clotho-common" }
+anyhow = "1.0"
+futures = "0.3"
+# Pre-1.0 and pinned exactly (ADR-0001): upgrade deliberately, never auto.
+jj-lib = "=0.43.0"
+# Matches the gix version jj-lib 0.43 uses (test-only, for verifying git objects).
+gix = "0.85"
+tempfile = "3"
 prost = "0.14.4"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["full"] }
