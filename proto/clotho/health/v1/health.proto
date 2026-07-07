@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package clotho.health.v1;
+
+// Minimal health-check service every Clotho service exposes.
+// Mirrors the shape of grpc.health.v1 but lives in Clotho's namespace so we
+// control its evolution (e.g. adding readiness detail per subsystem later).
+service Health {
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message HealthCheckRequest {
+  // Empty string means "the service as a whole".
+  string service = 1;
+}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    SERVING_STATUS_UNSPECIFIED = 0;
+    SERVING_STATUS_SERVING = 1;
+    SERVING_STATUS_NOT_SERVING = 2;
+  }
+  ServingStatus status = 1;
+  // The name of the service answering, e.g. "clotho-vcs".
+  string service_name = 2;
+  // Crate version of the running service.
+  string version = 3;
+}

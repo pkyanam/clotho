@@ -1,0 +1,12 @@
+[package]
+name = "clotho-api-gateway"
+description = "Edge API gateway — REST aggregation over Clotho services and Forgejo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+clotho-common.workspace = true
+tokio.workspace = true
+tracing.workspace = true

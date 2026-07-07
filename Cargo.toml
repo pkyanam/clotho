@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/clotho-common",
+    "crates/clotho-vcs",
+    "crates/clotho-storage",
+    "crates/clotho-merge-queue",
+    "crates/clotho-agent-gateway",
+    "crates/clotho-diff",
+    "crates/clotho-api-gateway",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/pkyanam/clotho"
+
+[workspace.dependencies]
+clotho-common = { path = "crates/clotho-common" }
+prost = "0.14.4"
+thiserror = "2.0.18"
+tokio = { version = "1.52.3", features = ["full"] }
+tonic = "0.14.6"
+tonic-prost = "0.14.6"
+tonic-prost-build = "0.14.6"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tokio-stream = { version = "0.1", features = ["net"] }

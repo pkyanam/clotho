@@ -1,0 +1,22 @@
+[package]
+name = "clotho-common"
+description = "Shared protobuf-generated types, error types, and tracing setup for Clotho services"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+prost.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tokio-stream.workspace = true
+
+[build-dependencies]
+tonic-prost-build.workspace = true

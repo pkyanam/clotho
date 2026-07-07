@@ -1,0 +1,12 @@
+[package]
+name = "clotho-agent-gateway"
+description = "Agent interface — MCP server, agent identity and permission enforcement"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+clotho-common.workspace = true
+tokio.workspace = true
+tracing.workspace = true

@@ -1,0 +1,12 @@
+[package]
+name = "clotho-vcs"
+description = "Clotho VCS engine — wraps jj-lib; init, commit, checkpoint, restore, op-log query"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+clotho-common.workspace = true
+tokio.workspace = true
+tracing.workspace = true
