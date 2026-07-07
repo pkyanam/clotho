@@ -36,6 +36,12 @@ test-storage:
 test-collab:
     CLOTHO_COLLAB_TEST_GATEWAY_URL=http://localhost:8080 cargo test -p clotho-api-gateway --test gateway
 
+# Stage 4 agent-interface integration test against the running dev stack
+# (`just dev` first): a real MCP client authenticates as a scoped agent
+# identity, checkpoints, breaks something, and restores — all over MCP.
+test-agent:
+    CLOTHO_AGENT_TEST_MCP_URL=http://localhost:8090 cargo test -p clotho-agent-gateway --test agent
+
 # Build everything
 build: build-rust build-js
 

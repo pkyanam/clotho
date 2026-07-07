@@ -7,6 +7,24 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+anyhow.workspace = true
+axum.workspace = true
+chrono.workspace = true
 clotho-common.workspace = true
+http.workspace = true
+rand.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
+tonic.workspace = true
 tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
+reqwest.workspace = true

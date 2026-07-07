@@ -61,11 +61,21 @@ jobs:
           TOKEN=$(docker exec forgejo su git -c "forgejo --config /data/gitea/conf/app.ini \
             admin user generate-access-token --username clotho --token-name ci --scopes all --raw")
           echo "CLOTHO_FORGEJO_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+      # The control-plane Postgres (agent identity + audit log), mirroring
+      # the `clotho` database of docker-compose.dev.yml.
+      - name: Start Postgres (agent-gateway integration tests)
+        run: |
+          docker run -d --name clotho-db -p 5432:5432 \
+            -e POSTGRES_USER=clotho -e POSTGRES_PASSWORD=clotho-dev -e POSTGRES_DB=clotho \
+            postgres:17-alpine
+          for i in $(seq 1 30); do
+            docker exec clotho-db pg_isready -U clotho >/dev/null 2>&1 && break; sleep 1;
+          done
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Start clotho-vcs and clotho-api-gateway (collab integration tests)
+      - name: Start Clotho services (collab + agent integration tests)
         run: |
-          cargo build --bin clotho-vcs --bin clotho-api-gateway
+          cargo build --bin clotho-vcs --bin clotho-api-gateway --bin clotho-diff --bin clotho-agent-gateway
           CLOTHO_VCS_DATA_DIR="$RUNNER_TEMP/vcs-repos" \
             CLOTHO_VCS_GIT_REPOS_DIR="$RUNNER_TEMP/git-repos/clotho" \
             nohup ./target/debug/clotho-vcs >"$RUNNER_TEMP/clotho-vcs.log" 2>&1 &
@@ -74,17 +84,27 @@ jobs:
             CLOTHO_FORGEJO_URL=http://localhost:3000 \
             CLOTHO_FORGEJO_OWNER=clotho \
             nohup ./target/debug/clotho-api-gateway >"$RUNNER_TEMP/clotho-api-gateway.log" 2>&1 &
+          nohup ./target/debug/clotho-diff >"$RUNNER_TEMP/clotho-diff.log" 2>&1 &
+          CLOTHO_AGENT_HTTP_ADDR=127.0.0.1:8090 \
+            CLOTHO_AGENT_DATABASE_URL=postgres://clotho:clotho-dev@localhost:5432/clotho \
+            CLOTHO_VCS_GRPC_URL=http://localhost:50051 \
+            CLOTHO_DIFF_GRPC_URL=http://localhost:50055 \
+            CLOTHO_AGENT_ADMIN_TOKEN=clotho-agent-admin-dev \
+            nohup ./target/debug/clotho-agent-gateway >"$RUNNER_TEMP/clotho-agent-gateway.log" 2>&1 &
       - run: cargo test --workspace
         env:
           CLOTHO_STORAGE_TEST_S3_ENDPOINT: http://localhost:9000
           # Keep CI fast; run bigger files locally via CLOTHO_STORAGE_TEST_FILE_MB.
           CLOTHO_STORAGE_TEST_FILE_MB: "64"
           CLOTHO_COLLAB_TEST_GATEWAY_URL: http://localhost:8080
-      - name: Dump collab service logs
+          CLOTHO_AGENT_TEST_MCP_URL: http://localhost:8090
+      - name: Dump service logs
         if: failure()
         run: |
           cat "$RUNNER_TEMP/clotho-vcs.log" || true
           cat "$RUNNER_TEMP/clotho-api-gateway.log" || true
+          cat "$RUNNER_TEMP/clotho-diff.log" || true
+          cat "$RUNNER_TEMP/clotho-agent-gateway.log" || true
           docker logs forgejo || true
 
   js:

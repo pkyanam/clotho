@@ -168,17 +168,32 @@ services:
     ports:
       - "50053:50053"
 
+  # Agent interface layer (docs/prd.md §5 Stage 4): MCP over streamable HTTP
+  # on 8090 plus the admin surface (create agents, mint scoped tokens, read
+  # the audit log); agent identity lives in the `clotho` Postgres database.
   clotho-agent-gateway:
     <<: *clotho-service
     build:
       context: .
       dockerfile: infra/docker/rust-services.Dockerfile
       args: { SERVICE: clotho-agent-gateway }
+    environment:
+      RUST_LOG: info
+      CLOTHO_AGENT_DATABASE_URL: postgres://clotho:clotho-dev@postgres:5432/clotho
+      CLOTHO_VCS_GRPC_URL: http://clotho-vcs:50051
+      CLOTHO_DIFF_GRPC_URL: http://clotho-diff:50055
+      CLOTHO_AGENT_HTTP_ADDR: 0.0.0.0:8090
+      CLOTHO_AGENT_ADMIN_TOKEN: clotho-agent-admin-dev # dev-only credentials
     ports:
       - "50054:50054"
+      - "8090:8090"
     depends_on:
       postgres:
         condition: service_healthy
+      clotho-vcs:
+        condition: service_started
+      clotho-diff:
+        condition: service_started
 
   clotho-diff:
     <<: *clotho-service

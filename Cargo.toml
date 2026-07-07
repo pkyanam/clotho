@@ -38,6 +38,26 @@ axum = "0.8"
 tree-sitter = "0.26"
 tree-sitter-rust = "0.24"
 tree-sitter-typescript = "0.23"
+# Official MCP Rust SDK (ADR-0004). Pinned exactly — fast-moving upstream
+# (three minor releases in the last month); upgrade deliberately, never auto.
+rmcp = { version = "=2.0.0", features = ["schemars", "transport-streamable-http-server"] }
+# Control-plane Postgres access + embedded migrations for agent identity.
+sqlx = { version = "0.9.0", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls-ring-webpki",
+    "postgres",
+    "macros",
+    "migrate",
+    "derive",
+    "uuid",
+    "chrono",
+] }
+sha2 = "0.10"
+rand = "0.10"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+http = "1"
+schemars = "1"
 # Plain-HTTP/JSON client for Forgejo's REST API; rustls so the runtime image
 # needs no OpenSSL.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
