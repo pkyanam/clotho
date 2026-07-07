@@ -15,10 +15,12 @@ RUN cargo build --release --bin "${SERVICE}"
 
 FROM debian:trixie-slim AS runtime
 ARG SERVICE
+# uid 1000 matches Forgejo's git user, so the shared git-repos volume is
+# writable from both sides (docker-compose.dev.yml, docs/adr/0003).
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --system --no-create-home clotho \
-    && mkdir -p /var/lib/clotho && chown clotho /var/lib/clotho
+    && useradd --system --uid 1000 --no-create-home clotho \
+    && mkdir -p /var/lib/clotho/git-repos && chown -R clotho /var/lib/clotho
 COPY --from=builder "/build/target/release/${SERVICE}" /usr/local/bin/service
 USER clotho
 WORKDIR /var/lib/clotho

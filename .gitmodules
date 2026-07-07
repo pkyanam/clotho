@@ -1,0 +1,5 @@
+[submodule "collab/forgejo"]
+	path = collab/forgejo
+	url = https://codeberg.org/forgejo/forgejo.git
+	shallow = true
+	branch = v15.0/forgejo

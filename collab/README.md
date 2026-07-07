@@ -8,13 +8,16 @@ permissions), PostgreSQL-backed.
 Forgejo ≥ v9.0 is **GPLv3**. Clotho itself is Apache-2.0. To keep the licensing
 boundary clean:
 
-- `collab/forgejo/` will be a **git submodule pinned to a Forgejo release**
-  (added in Stage 3) — never vendored or merged into Clotho's own
-  crates/packages.
+- `collab/forgejo/` is a **git submodule pinned to a Forgejo release tag**
+  (currently `v15.0.3`, the LTS line; shallow) — never vendored or merged
+  into Clotho's own crates/packages. The dev stack runs the unmodified
+  official container image at the same version.
 - Any modifications to Forgejo live as patch files in `collab/patches/`,
   applied at build time. Modified Forgejo code we distribute stays GPLv3.
-- The prototype plan (docs/prd.md §5, Stage 3) assumes **no Forgejo source
-  changes at all** — Clotho talks to Forgejo purely over its API and by pointing
-  it at git-compatible repos managed by `clotho-vcs`.
+- Stage 3 shipped with **no Forgejo source changes at all** — Clotho talks to
+  Forgejo purely over its REST API (adopt + repo/issue/PR endpoints) and by
+  pointing it at git-compatible repos managed by `clotho-vcs` on a shared
+  volume. See docs/adr/0003-forgejo-integration-adopt.md.
 
-See docs/prd.md §8 for the open decision on deeper integration.
+If you ever think you need to patch Forgejo source, stop: that is docs/prd.md
+§8 open decision #2 and needs a deliberate human call first.

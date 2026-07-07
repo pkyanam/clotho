@@ -13,9 +13,12 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::{Channel, Server};
 
 async fn start_server(root: &std::path::Path) -> VcsClient<Channel> {
+    serve(VcsEngine::new(root).unwrap()).await
+}
+
+async fn serve(engine: VcsEngine) -> VcsClient<Channel> {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let engine = VcsEngine::new(root).unwrap();
     tokio::spawn(
         Server::builder()
             .add_service(VcsService::new(engine).into_server())
@@ -142,6 +145,83 @@ async fn two_agents_commit_into_one_graph_with_unified_op_log() {
     assert!(descriptions.contains(&"commit: agent b: weave cloth"));
     // Newest first.
     assert_eq!(descriptions.first(), Some(&"commit: agent b: weave cloth"));
+}
+
+/// Stage 3 (docs/prd.md §5, docs/adr/0003): with an external git root, the
+/// backing bare git repo lands at `<git_root>/<name>.git`, `refs/heads/main`
+/// tracks every engine-written commit, and HEAD stays a symref to main — so a
+/// plain-git collaboration shell (Forgejo) sees an ordinary branch, and
+/// restores move the branch with the jj view.
+#[tokio::test]
+async fn external_git_root_mirrors_main_branch() {
+    let dir = tempfile::tempdir().unwrap();
+    let git_root = dir.path().join("git-repos");
+    let engine = VcsEngine::with_git_root(dir.path().join("jj"), Some(&git_root)).unwrap();
+    let mut client = serve(engine).await;
+
+    client
+        .init_repo(InitRepoRequest {
+            name: "spindle".into(),
+        })
+        .await
+        .unwrap();
+
+    // A fresh repo is a bare git repo with HEAD pointing at (unborn) main.
+    let git_repo = gix::open(git_root.join("spindle.git")).unwrap();
+    let head = git_repo.head_name().unwrap().expect("HEAD is symbolic");
+    assert_eq!(head.as_bstr(), "refs/heads/main");
+
+    let first = client
+        .commit(commit_req(
+            "spindle",
+            "agent-a",
+            "first",
+            vec![file("a.txt", "a\n")],
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let checkpoint = client
+        .checkpoint(CheckpointRequest {
+            repo: "spindle".into(),
+            label: "after first".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    let second = client
+        .commit(commit_req(
+            "spindle",
+            "agent-b",
+            "second",
+            vec![file("b.txt", "b\n")],
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // refs/heads/main tracks the newest commit; HEAD still points at main.
+    let git_repo = gix::open(git_root.join("spindle.git")).unwrap();
+    let main = git_repo.find_reference("refs/heads/main").unwrap();
+    assert_eq!(
+        main.id().to_string(),
+        second.commit_id,
+        "main must track the latest commit"
+    );
+    let head = git_repo.head_name().unwrap().expect("HEAD is symbolic");
+    assert_eq!(head.as_bstr(), "refs/heads/main");
+
+    // Restoring to the checkpoint moves main back with the jj view.
+    client
+        .restore_to(RestoreToRequest {
+            repo: "spindle".into(),
+            operation_id: checkpoint.operation_id,
+        })
+        .await
+        .unwrap();
+    let git_repo = gix::open(git_root.join("spindle.git")).unwrap();
+    let main = git_repo.find_reference("refs/heads/main").unwrap();
+    assert_eq!(main.id().to_string(), first.commit_id);
 }
 
 #[tokio::test]

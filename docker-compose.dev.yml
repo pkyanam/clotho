@@ -1,6 +1,7 @@
 # Clotho dev stack — `just dev` / `docker compose -f docker-compose.dev.yml up`.
-# Postgres (control plane), MinIO (S3-compatible storage for Arachne), and the
-# six Clotho services as health-check stubs. Forgejo joins in Stage 3.
+# Postgres (control plane + Forgejo), MinIO (S3-compatible storage for
+# Arachne), Forgejo (collaboration shell, pinned to the collab/forgejo
+# submodule tag), and the six Clotho services.
 
 name: clotho-dev
 
@@ -21,6 +22,9 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # Provisions Forgejo's own database/user; only runs when postgres-data
+      # is first created (run `just dev-down` once if upgrading a live stack).
+      - ./scripts/postgres:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U clotho"]
       interval: 5s
@@ -60,6 +64,59 @@ services:
         mc mb --ignore-existing clotho/clotho-storage clotho/clotho-storage-test
     restart: "no"
 
+  # Collaboration shell (docs/adr/0003): official image at the same version
+  # the collab/forgejo submodule is pinned to. Its repository root is the
+  # shared git-data volume where clotho-vcs creates the backing bare git
+  # repos, laid out as <owner>/<repo>.git for Forgejo's adopt flow.
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:15.0.3
+    restart: unless-stopped
+    environment:
+      # Match clotho-vcs's uid so both sides can write the shared git volume.
+      USER_UID: "1000"
+      USER_GID: "1000"
+      FORGEJO__database__DB_TYPE: postgres
+      FORGEJO__database__HOST: postgres:5432
+      FORGEJO__database__NAME: forgejo
+      FORGEJO__database__USER: forgejo
+      FORGEJO__database__PASSWD: forgejo-dev # dev-only credentials
+      # Skip the interactive install wizard; provisioning is scripted
+      # (scripts/forgejo/provision.sh) so a clean `up` is reproducible.
+      FORGEJO__security__INSTALL_LOCK: "true"
+      FORGEJO__server__ROOT_URL: http://localhost:3000/
+      FORGEJO__server__DISABLE_SSH: "true"
+      FORGEJO__repository__ROOT: /data/git/repositories
+      FORGEJO__repository__DEFAULT_BRANCH: main
+      # Lets the API gateway adopt the bare git repos clotho-vcs writes.
+      FORGEJO__repository__ALLOW_ADOPTION_OF_UNADOPTED_REPOSITORIES: "true"
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+    ports:
+      - "3000:3000"
+    volumes:
+      - forgejo-data:/data
+      - git-data:/data/git/repositories
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot Forgejo provisioning: admin user + API token for the gateway.
+  forgejo-init:
+    image: codeberg.org/forgejo/forgejo:15.0.3
+    entrypoint: ["/bin/sh", "/provision.sh"]
+    volumes:
+      - forgejo-data:/data
+      - forgejo-token:/run/clotho
+      - ./scripts/forgejo/provision.sh:/provision.sh:ro
+    depends_on:
+      forgejo:
+        condition: service_healthy
+    restart: "no"
+
   clotho-vcs:
     <<: *clotho-service
     build:
@@ -69,10 +126,15 @@ services:
     environment:
       RUST_LOG: info
       CLOTHO_VCS_DATA_DIR: /var/lib/clotho/vcs-repos
+      # Backing bare git repos land here, on the volume Forgejo reads as its
+      # repository root; `clotho` is the owner (the admin user) in Forgejo's
+      # <owner>/<repo>.git layout.
+      CLOTHO_VCS_GIT_REPOS_DIR: /var/lib/clotho/git-repos/clotho
     ports:
       - "50051:50051"
     volumes:
       - vcs-data:/var/lib/clotho
+      - git-data:/var/lib/clotho/git-repos
 
   clotho-storage:
     <<: *clotho-service
@@ -133,17 +195,38 @@ services:
       context: .
       dockerfile: infra/docker/rust-services.Dockerfile
       args: { SERVICE: clotho-api-gateway }
+    environment:
+      RUST_LOG: info
+      CLOTHO_GATEWAY_HTTP_ADDR: 0.0.0.0:8080
+      CLOTHO_VCS_GRPC_URL: http://clotho-vcs:50051
+      CLOTHO_FORGEJO_URL: http://forgejo:3000
+      CLOTHO_FORGEJO_OWNER: clotho
+      CLOTHO_FORGEJO_TOKEN_FILE: /run/clotho/forgejo-token
     ports:
       - "50056:50056"
+      - "8080:8080"
+    volumes:
+      - forgejo-token:/run/clotho:ro
     depends_on:
-      - clotho-vcs
-      - clotho-storage
-      - clotho-merge-queue
-      - clotho-agent-gateway
-      - clotho-diff
+      clotho-vcs:
+        condition: service_started
+      clotho-storage:
+        condition: service_started
+      clotho-merge-queue:
+        condition: service_started
+      clotho-agent-gateway:
+        condition: service_started
+      clotho-diff:
+        condition: service_started
+      forgejo-init:
+        condition: service_completed_successfully
 
 volumes:
   postgres-data:
   minio-data:
   vcs-data:
   storage-data:
+  forgejo-data:
+  forgejo-token:
+  # Bare git repos, written by clotho-vcs and read by Forgejo (docs/adr/0003).
+  git-data:

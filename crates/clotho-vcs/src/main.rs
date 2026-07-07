@@ -14,9 +14,12 @@ async fn main() -> Result<(), Error> {
 
     let data_dir =
         std::env::var("CLOTHO_VCS_DATA_DIR").unwrap_or_else(|_| "./data/vcs-repos".to_string());
-    let engine = VcsEngine::new(&data_dir)
+    // When set, backing bare git repos are created here as `<name>.git` — the
+    // directory Forgejo scans as its repository root (docs/adr/0003).
+    let git_repos_dir = std::env::var("CLOTHO_VCS_GIT_REPOS_DIR").ok();
+    let engine = VcsEngine::with_git_root(&data_dir, git_repos_dir.as_deref())
         .map_err(|e| Error::Config(format!("failed to initialize engine at {data_dir}: {e}")))?;
-    tracing::info!(service = SERVICE, %addr, data_dir, "gRPC server listening");
+    tracing::info!(service = SERVICE, %addr, data_dir, ?git_repos_dir, "gRPC server listening");
 
     Server::builder()
         .add_service(health::HealthService::new(SERVICE, env!("CARGO_PKG_VERSION")).into_server())

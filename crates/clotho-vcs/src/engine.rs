@@ -11,7 +11,7 @@
 //!   (itself recorded as a new operation — history is never erased).
 //! - Nothing here shells out to the `jj` or `git` binaries.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures::StreamExt as _;
@@ -21,9 +21,10 @@ use jj_lib::git_backend::GitBackend;
 use jj_lib::merge::Merge;
 use jj_lib::merged_tree_builder::MergedTreeBuilder;
 use jj_lib::object_id::ObjectId as _;
-use jj_lib::op_store::OperationId;
+use jj_lib::op_store::{OperationId, RefTarget};
 use jj_lib::op_walk;
 use jj_lib::operation::Operation;
+use jj_lib::ref_name::RefName;
 use jj_lib::repo::{ReadonlyRepo, Repo as _, RepoLoader, StoreFactories};
 use jj_lib::repo_path::RepoPathBuf;
 use jj_lib::settings::UserSettings;
@@ -80,6 +81,11 @@ pub struct OpLogEntry {
     pub parent_operation_ids: Vec<String>,
 }
 
+/// The bookmark the engine keeps pointing at the latest commit, exported to
+/// the backing git repo as `refs/heads/main` so plain-git consumers (Forgejo)
+/// see an ordinary branch.
+const MAIN_BOOKMARK: &str = "main";
+
 /// Manages all repositories under a single root directory.
 ///
 /// jj-lib's futures are not `Send`, so engine methods cannot run directly on
@@ -88,6 +94,12 @@ pub struct OpLogEntry {
 #[derive(Clone)]
 pub struct VcsEngine {
     root: PathBuf,
+    /// When set, each repo's backing bare git repository is created here as
+    /// `<git_root>/<name>.git` (jj's "external" git backend) instead of
+    /// inside the jj repo at `<repo>/store/git`. This is how the collaboration
+    /// shell (Forgejo) sees Clotho repos: its repository root is this same
+    /// directory, shared as a volume (docs/adr/0003).
+    git_root: Option<PathBuf>,
     settings: UserSettings,
 }
 
@@ -108,8 +120,21 @@ impl VcsEngine {
     }
 
     pub fn new(root: impl Into<PathBuf>) -> Result<Self, EngineError> {
+        Self::with_git_root(root, None::<PathBuf>)
+    }
+
+    /// Like [`VcsEngine::new`], but backing git repos are created under
+    /// `git_root` as `<name>.git` (see the `git_root` field docs).
+    pub fn with_git_root(
+        root: impl Into<PathBuf>,
+        git_root: Option<impl Into<PathBuf>>,
+    ) -> Result<Self, EngineError> {
         let root = root.into();
+        let git_root = git_root.map(Into::into);
         std::fs::create_dir_all(&root).map_err(EngineError::other)?;
+        if let Some(git_root) = &git_root {
+            std::fs::create_dir_all(git_root).map_err(EngineError::other)?;
+        }
 
         let mut config = StackedConfig::with_defaults();
         // The service-level identity; per-commit authors are set explicitly on
@@ -127,7 +152,11 @@ impl VcsEngine {
         config.add_layer(layer);
         let settings = UserSettings::from_config(config).map_err(EngineError::other)?;
 
-        Ok(Self { root, settings })
+        Ok(Self {
+            root,
+            git_root,
+            settings,
+        })
     }
 
     fn validate_name(name: &str) -> Result<(), EngineError> {
@@ -146,20 +175,37 @@ impl VcsEngine {
         Ok(self.root.join(name))
     }
 
-    /// Create a new repository with an internal (bare) git backend. Returns
-    /// the id of the root operation.
+    /// Create a new repository backed by a bare git repo — internal
+    /// (`<repo>/store/git`) by default, or external (`<git_root>/<name>.git`)
+    /// when the engine has a git root. Returns the id of the root operation.
     pub async fn init_repo(&self, name: &str) -> Result<String, EngineError> {
         let path = self.repo_path(name)?;
         if path.exists() {
             return Err(EngineError::RepoExists(name.to_string()));
         }
+        let external_git_dir = match &self.git_root {
+            Some(git_root) => {
+                let git_dir = git_root.join(format!("{name}.git"));
+                if git_dir.exists() {
+                    return Err(EngineError::RepoExists(name.to_string()));
+                }
+                gix::init_bare(&git_dir).map_err(EngineError::other)?;
+                Some(git_dir)
+            }
+            None => None,
+        };
         std::fs::create_dir_all(&path).map_err(EngineError::other)?;
 
         let signer = Signer::from_settings(&self.settings).map_err(EngineError::other)?;
         let repo = ReadonlyRepo::init(
             &self.settings,
             &path,
-            &|settings, store_path| Ok(Box::new(GitBackend::init_internal(settings, store_path)?)),
+            &|settings, store_path| match &external_git_dir {
+                Some(git_dir) => Ok(Box::new(GitBackend::init_external(
+                    settings, store_path, git_dir,
+                )?)),
+                None => Ok(Box::new(GitBackend::init_internal(settings, store_path)?)),
+            },
             signer,
             ReadonlyRepo::default_op_store_initializer(),
             ReadonlyRepo::default_op_heads_store_initializer(),
@@ -169,13 +215,19 @@ impl VcsEngine {
         .await
         .map_err(EngineError::other)?;
 
+        // Plain-git consumers (Forgejo) take the default branch from HEAD.
+        mirror_main_ref(&self.git_backend_path(name)?, None)?;
+
         Ok(repo.operation().id().hex())
     }
 
     /// Absolute path to the real bare git repository backing `name` — every
     /// commit the engine writes is an ordinary git object in here.
     pub fn git_backend_path(&self, name: &str) -> Result<PathBuf, EngineError> {
-        Ok(self.repo_path(name)?.join("store").join("git"))
+        match &self.git_root {
+            Some(git_root) => Ok(git_root.join(format!("{name}.git"))),
+            None => Ok(self.repo_path(name)?.join("store").join("git")),
+        }
     }
 
     async fn load_repo(&self, name: &str) -> Result<Arc<ReadonlyRepo>, EngineError> {
@@ -267,10 +319,18 @@ impl VcsEngine {
             .write()
             .await
             .map_err(EngineError::other)?;
+        // Advance the `main` bookmark to the new commit and mirror it into
+        // the backing git repo as `refs/heads/main`, so plain-git consumers
+        // (Forgejo) see every engine-written commit on an ordinary branch.
+        tx.repo_mut().set_local_bookmark_target(
+            RefName::new(MAIN_BOOKMARK),
+            RefTarget::normal(commit.id().clone()),
+        );
         let repo = tx
             .commit(format!("commit: {}", first_line(&params.message)))
             .await
             .map_err(EngineError::other)?;
+        mirror_main_ref(&self.git_backend_path(name)?, Some(commit.id()))?;
 
         Ok(CommitOutcome {
             commit_id: commit.id().hex(),
@@ -299,10 +359,19 @@ impl VcsEngine {
 
         let mut tx = repo.start_transaction();
         tx.repo_mut().set_view(target_view.store_view().clone());
+        // The restored view carries the `main` bookmark position from that
+        // point in time — mirror it back into the git repo too.
+        let main_target = tx
+            .repo_mut()
+            .view()
+            .get_local_bookmark(RefName::new(MAIN_BOOKMARK))
+            .as_normal()
+            .cloned();
         let repo = tx
             .commit(format!("restore to operation {}", short(operation_id)))
             .await
             .map_err(EngineError::other)?;
+        mirror_main_ref(&self.git_backend_path(name)?, main_target.as_ref())?;
         Ok(repo.operation().id().hex())
     }
 
@@ -353,6 +422,66 @@ impl VcsEngine {
             .map_err(EngineError::other)?;
         Ok(Operation::new(op_store.clone(), id, data))
     }
+}
+
+/// Mirror the engine's `main` bookmark into the backing bare git repo:
+/// `refs/heads/main` tracks `target` (absent when `None`), and HEAD stays a
+/// symref to it so plain-git consumers treat `main` as the default branch.
+/// clotho-vcs is the only writer of these refs (docs/adr/0003), so
+/// unconditional updates are safe.
+fn mirror_main_ref(git_dir: &Path, target: Option<&CommitId>) -> Result<(), EngineError> {
+    use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
+    use gix::refs::{FullName, Target};
+
+    let repo = gix::open(git_dir).map_err(EngineError::other)?;
+    let main_ref: FullName = format!("refs/heads/{MAIN_BOOKMARK}")
+        .try_into()
+        .map_err(EngineError::other)?;
+    let log = |message: &str| LogChange {
+        mode: RefLog::AndReference,
+        force_create_reflog: false,
+        message: message.into(),
+    };
+
+    let mut edits = vec![RefEdit {
+        change: Change::Update {
+            log: log("clotho-vcs: point HEAD at main"),
+            expected: PreviousValue::Any,
+            new: Target::Symbolic(main_ref.clone()),
+        },
+        name: "HEAD".try_into().map_err(EngineError::other)?,
+        deref: false,
+    }];
+    match target {
+        Some(id) => {
+            let oid = gix::ObjectId::try_from(id.as_bytes()).map_err(EngineError::other)?;
+            edits.push(RefEdit {
+                change: Change::Update {
+                    log: log("clotho-vcs: advance main"),
+                    expected: PreviousValue::Any,
+                    new: Target::Object(oid),
+                },
+                name: main_ref,
+                deref: false,
+            });
+        }
+        // Absent bookmark (fresh repo, or restore to before it existed):
+        // remove the branch ref if it exists so git agrees `main` is unborn.
+        None => {
+            if repo.try_find_reference(&main_ref).ok().flatten().is_some() {
+                edits.push(RefEdit {
+                    change: Change::Delete {
+                        expected: PreviousValue::Any,
+                        log: RefLog::AndReference,
+                    },
+                    name: main_ref,
+                    deref: false,
+                });
+            }
+        }
+    }
+    repo.edit_references(edits).map_err(EngineError::other)?;
+    Ok(())
 }
 
 fn first_line(message: &str) -> &str {

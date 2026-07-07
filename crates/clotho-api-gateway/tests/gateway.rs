@@ -1,0 +1,165 @@
+//! Stage 3 exit-condition test (docs/prd.md §5): creating a repo through
+//! Clotho's API produces a real Forgejo project with working issues/PRs,
+//! backed by a jj-managed git repo — and commits written through the
+//! clotho-vcs gRPC API render in Forgejo.
+//!
+//! Requires the dev stack (`just dev`), then run via `just test-collab`, or
+//! set `CLOTHO_COLLAB_TEST_GATEWAY_URL` (e.g. `http://localhost:8080`).
+//! Skipped when unset so plain `cargo test` stays green. Optional overrides:
+//! `CLOTHO_COLLAB_TEST_VCS_GRPC_URL` (default `http://localhost:50051`),
+//! `CLOTHO_COLLAB_TEST_FORGEJO_URL` (default `http://localhost:3000`), and
+//! `CLOTHO_COLLAB_TEST_FORGEJO_{USER,PASSWORD}` (default the dev admin,
+//! `clotho`/`clotho-dev`).
+
+use clotho_common::pb::vcs::v1::{vcs_client::VcsClient, CommitRequest, FileChange};
+use serde_json::{json, Value};
+
+struct TestEnv {
+    gateway_url: String,
+    vcs_grpc_url: String,
+    forgejo_url: String,
+    forgejo_user: String,
+    forgejo_password: String,
+}
+
+fn test_env() -> Option<TestEnv> {
+    let Ok(gateway_url) = std::env::var("CLOTHO_COLLAB_TEST_GATEWAY_URL") else {
+        eprintln!(
+            "skipping: CLOTHO_COLLAB_TEST_GATEWAY_URL not set (start the stack via `just dev`)"
+        );
+        return None;
+    };
+    let env_or = |name: &str, default: &str| std::env::var(name).unwrap_or_else(|_| default.into());
+    Some(TestEnv {
+        gateway_url,
+        vcs_grpc_url: env_or("CLOTHO_COLLAB_TEST_VCS_GRPC_URL", "http://localhost:50051"),
+        forgejo_url: env_or("CLOTHO_COLLAB_TEST_FORGEJO_URL", "http://localhost:3000"),
+        forgejo_user: env_or("CLOTHO_COLLAB_TEST_FORGEJO_USER", "clotho"),
+        forgejo_password: env_or("CLOTHO_COLLAB_TEST_FORGEJO_PASSWORD", "clotho-dev"),
+    })
+}
+
+async fn forgejo_json(env: &TestEnv, request: reqwest::RequestBuilder, context: &str) -> Value {
+    let response = request
+        .basic_auth(&env.forgejo_user, Some(&env.forgejo_password))
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("{context}: {e}"));
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert!(status.is_success(), "{context}: {status}: {body}");
+    serde_json::from_str(&body).unwrap_or_else(|e| panic!("{context}: invalid json: {e}"))
+}
+
+#[tokio::test]
+async fn repo_created_through_clotho_api_is_a_real_forgejo_project() {
+    let Some(env) = test_env() else { return };
+    let http = reqwest::Client::new();
+
+    // Unique per-run name so runs never collide.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let name = format!("stage3-{nanos}");
+
+    // 1. One call to Clotho's API provisions both systems.
+    let response = http
+        .post(format!("{}/api/v1/repos", env.gateway_url))
+        .json(&json!({ "name": name }))
+        .send()
+        .await
+        .expect("gateway reachable");
+    assert_eq!(response.status(), 201, "{}", response.text().await.unwrap());
+    let created: Value = response.json().await.unwrap();
+    let owner = created["owner"].as_str().unwrap().to_string();
+    let initial_commit = created["initial_commit_id"].as_str().unwrap().to_string();
+    assert_eq!(created["forgejo"]["default_branch"], "main");
+    assert_eq!(created["forgejo"]["has_issues"], true);
+    assert_eq!(created["forgejo"]["has_pull_requests"], true);
+    let repo_api = format!("{}/api/v1/repos/{owner}/{name}", env.forgejo_url);
+
+    // 2. Commit through the clotho-vcs gRPC API — no git CLI anywhere.
+    let mut vcs = VcsClient::connect(env.vcs_grpc_url.clone()).await.unwrap();
+    let commit = vcs
+        .commit(CommitRequest {
+            repo: name.clone(),
+            parent_commit_ids: vec![],
+            files: vec![FileChange {
+                path: "README.md".into(),
+                content: b"# stage3\n\nwoven by agents.\n".to_vec(),
+                executable: false,
+            }],
+            deleted_paths: vec![],
+            message: "add readme via clotho-vcs".into(),
+            author_name: "agent-a".into(),
+            author_email: "agent-a@agents.clotho.internal".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+
+    // 3. Forgejo renders both commits on main (it reads the same git repo).
+    let commits = forgejo_json(
+        &env,
+        http.get(format!("{repo_api}/commits?sha=main&limit=10")),
+        "list commits",
+    )
+    .await;
+    let shas: Vec<&str> = commits
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["sha"].as_str().unwrap())
+        .collect();
+    assert!(
+        shas.contains(&commit.commit_id.as_str()),
+        "vcs commit visible"
+    );
+    assert!(
+        shas.contains(&initial_commit.as_str()),
+        "initial commit visible"
+    );
+
+    // 4. Issues work.
+    let issue = forgejo_json(
+        &env,
+        http.post(format!("{repo_api}/issues"))
+            .json(&json!({ "title": "first thread", "body": "filed via API" })),
+        "create issue",
+    )
+    .await;
+    assert_eq!(issue["state"], "open");
+
+    // 5. PRs work: branch at the initial commit, PR for the agent's commit.
+    forgejo_json(
+        &env,
+        http.post(format!("{repo_api}/branches")).json(&json!({
+            "new_branch_name": "checkpoint-1",
+            "old_ref_name": initial_commit,
+        })),
+        "create branch",
+    )
+    .await;
+    let pr = forgejo_json(
+        &env,
+        http.post(format!("{repo_api}/pulls")).json(&json!({
+            "title": "add readme",
+            "head": "main",
+            "base": "checkpoint-1",
+        })),
+        "create pull request",
+    )
+    .await;
+    assert_eq!(pr["state"], "open");
+    assert_eq!(pr["mergeable"], true);
+
+    // 6. Duplicate creation is rejected cleanly at the edge.
+    let dup = http
+        .post(format!("{}/api/v1/repos", env.gateway_url))
+        .json(&json!({ "name": name }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(dup.status(), 409);
+}

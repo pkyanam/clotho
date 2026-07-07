@@ -30,6 +30,12 @@ test-js:
 test-storage:
     CLOTHO_STORAGE_TEST_S3_ENDPOINT=http://localhost:9000 cargo test -p clotho-storage --test storage --release
 
+# Stage 3 collaboration-shell integration test against the running dev stack
+# (`just dev` first): repo creation through the Clotho API → real Forgejo
+# project with working issues/PRs, backed by a jj-managed git repo.
+test-collab:
+    CLOTHO_COLLAB_TEST_GATEWAY_URL=http://localhost:8080 cargo test -p clotho-api-gateway --test gateway
+
 # Build everything
 build: build-rust build-js
 

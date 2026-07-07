@@ -32,6 +32,12 @@ xet-core-structures = "=1.5.2"
 # AWS-specific code paths (no vendor lock-in).
 object_store = { version = "0.14.0", features = ["aws"] }
 async-trait = "0.1"
+axum = "0.8"
+# Plain-HTTP/JSON client for Forgejo's REST API; rustls so the runtime image
+# needs no OpenSSL.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 bytes = "1"
 tempfile = "3"
 prost = "0.14.4"

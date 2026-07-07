@@ -10,6 +10,7 @@ repository.workspace = true
 anyhow.workspace = true
 clotho-common.workspace = true
 futures.workspace = true
+gix.workspace = true
 jj-lib.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -17,6 +18,5 @@ tonic.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-gix.workspace = true
 tempfile.workspace = true
 tokio-stream.workspace = true

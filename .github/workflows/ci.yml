@@ -26,13 +26,66 @@ jobs:
               mc alias set ci http://localhost:9000 clotho clotho-dev && break; sleep 1;
             done
             mc mb --ignore-existing ci/clotho-storage-test'
+      # Same Forgejo version the collab/forgejo submodule is pinned to, backed
+      # by its own Postgres, sharing a git-repos dir with clotho-vcs — mirrors
+      # docker-compose.dev.yml without building the service images in CI.
+      - name: Start Forgejo (collab integration tests)
+        run: |
+          docker network create clotho-ci
+          docker run -d --name forgejo-db --network clotho-ci \
+            -e POSTGRES_USER=forgejo -e POSTGRES_PASSWORD=forgejo-dev -e POSTGRES_DB=forgejo \
+            postgres:17-alpine
+          mkdir -p "$RUNNER_TEMP/git-repos/clotho" "$RUNNER_TEMP/vcs-repos"
+          docker run -d --name forgejo --network clotho-ci -p 3000:3000 \
+            -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" \
+            -e FORGEJO__database__DB_TYPE=postgres \
+            -e FORGEJO__database__HOST=forgejo-db:5432 \
+            -e FORGEJO__database__NAME=forgejo \
+            -e FORGEJO__database__USER=forgejo \
+            -e FORGEJO__database__PASSWD=forgejo-dev \
+            -e FORGEJO__security__INSTALL_LOCK=true \
+            -e FORGEJO__server__ROOT_URL=http://localhost:3000/ \
+            -e FORGEJO__server__DISABLE_SSH=true \
+            -e FORGEJO__repository__ROOT=/data/git/repositories \
+            -e FORGEJO__repository__DEFAULT_BRANCH=main \
+            -e FORGEJO__repository__ALLOW_ADOPTION_OF_UNADOPTED_REPOSITORIES=true \
+            -e FORGEJO__service__DISABLE_REGISTRATION=true \
+            -v "$RUNNER_TEMP/git-repos:/data/git/repositories" \
+            codeberg.org/forgejo/forgejo:15.0.3
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:3000/api/healthz >/dev/null && break; sleep 2;
+          done
+          docker exec forgejo su git -c "forgejo --config /data/gitea/conf/app.ini \
+            admin user create --admin --username clotho --password clotho-dev \
+            --email admin@clotho.internal --must-change-password=false"
+          TOKEN=$(docker exec forgejo su git -c "forgejo --config /data/gitea/conf/app.ini \
+            admin user generate-access-token --username clotho --token-name ci --scopes all --raw")
+          echo "CLOTHO_FORGEJO_TOKEN=$TOKEN" >> "$GITHUB_ENV"
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Start clotho-vcs and clotho-api-gateway (collab integration tests)
+        run: |
+          cargo build --bin clotho-vcs --bin clotho-api-gateway
+          CLOTHO_VCS_DATA_DIR="$RUNNER_TEMP/vcs-repos" \
+            CLOTHO_VCS_GIT_REPOS_DIR="$RUNNER_TEMP/git-repos/clotho" \
+            nohup ./target/debug/clotho-vcs >"$RUNNER_TEMP/clotho-vcs.log" 2>&1 &
+          CLOTHO_GATEWAY_HTTP_ADDR=127.0.0.1:8080 \
+            CLOTHO_VCS_GRPC_URL=http://localhost:50051 \
+            CLOTHO_FORGEJO_URL=http://localhost:3000 \
+            CLOTHO_FORGEJO_OWNER=clotho \
+            nohup ./target/debug/clotho-api-gateway >"$RUNNER_TEMP/clotho-api-gateway.log" 2>&1 &
       - run: cargo test --workspace
         env:
           CLOTHO_STORAGE_TEST_S3_ENDPOINT: http://localhost:9000
           # Keep CI fast; run bigger files locally via CLOTHO_STORAGE_TEST_FILE_MB.
           CLOTHO_STORAGE_TEST_FILE_MB: "64"
+          CLOTHO_COLLAB_TEST_GATEWAY_URL: http://localhost:8080
+      - name: Dump collab service logs
+        if: failure()
+        run: |
+          cat "$RUNNER_TEMP/clotho-vcs.log" || true
+          cat "$RUNNER_TEMP/clotho-api-gateway.log" || true
+          docker logs forgejo || true
 
   js:
     runs-on: ubuntu-latest

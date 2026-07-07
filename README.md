@@ -69,6 +69,12 @@ just test     # run all tests across both workspaces
 just build    # build everything
 ```
 
+The dev stack includes Forgejo at http://localhost:3000 (admin
+`clotho`/`clotho-dev`, dev-only) and the edge REST API at
+http://localhost:8080. The `collab/forgejo` submodule is a license/version
+pin, not a build input — you don't need `--recurse-submodules` to work on
+Clotho.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
