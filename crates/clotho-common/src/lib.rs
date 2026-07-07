@@ -24,4 +24,9 @@ pub mod pb {
             tonic::include_proto!("clotho.storage.v1");
         }
     }
+    pub mod diff {
+        pub mod v1 {
+            tonic::include_proto!("clotho.diff.v1");
+        }
+    }
 }

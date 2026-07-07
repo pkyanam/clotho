@@ -1,14 +1,16 @@
 //! gRPC surface over the engine.
 
 use clotho_common::pb::vcs::v1::{
+    changed_file::ChangeKind,
     vcs_server::{Vcs, VcsServer},
-    CheckpointRequest, CheckpointResponse, CommitRequest, CommitResponse, InitRepoRequest,
-    InitRepoResponse, OpLogEntry, QueryOpLogRequest, QueryOpLogResponse, RestoreToRequest,
-    RestoreToResponse,
+    ChangedFile, CheckpointRequest, CheckpointResponse, CommitRequest, CommitResponse,
+    CommitSummary, DiffCommitsRequest, DiffCommitsResponse, FileEntry, GetHeadsRequest,
+    GetHeadsResponse, InitRepoRequest, InitRepoResponse, ListFilesRequest, ListFilesResponse,
+    OpLogEntry, QueryOpLogRequest, QueryOpLogResponse, RestoreToRequest, RestoreToResponse,
 };
 use tonic::{Request, Response, Status};
 
-use crate::engine::{CommitParams, EngineError, FileChange, VcsEngine};
+use crate::engine::{self, CommitParams, EngineError, FileChange, VcsEngine};
 
 pub struct VcsService {
     engine: VcsEngine,
@@ -140,5 +142,95 @@ impl Vcs for VcsService {
                 })
                 .collect(),
         }))
+    }
+
+    async fn get_heads(
+        &self,
+        request: Request<GetHeadsRequest>,
+    ) -> Result<Response<GetHeadsResponse>, Status> {
+        let repo = request.into_inner().repo;
+        let heads = self
+            .engine
+            .run(move |engine| async move { engine.get_heads(&repo).await })
+            .await?;
+        Ok(Response::new(GetHeadsResponse {
+            heads: heads.heads.into_iter().map(commit_summary).collect(),
+            main_commit_id: heads.main_commit_id.unwrap_or_default(),
+        }))
+    }
+
+    async fn list_files(
+        &self,
+        request: Request<ListFilesRequest>,
+    ) -> Result<Response<ListFilesResponse>, Status> {
+        let req = request.into_inner();
+        let (repo, commit_id) = (req.repo, req.commit_id);
+        let list = self
+            .engine
+            .run(move |engine| async move {
+                let commit_id = (!commit_id.is_empty()).then_some(commit_id.as_str());
+                engine.list_files(&repo, commit_id).await
+            })
+            .await?;
+        Ok(Response::new(ListFilesResponse {
+            commit_id: list.commit_id,
+            files: list
+                .files
+                .into_iter()
+                .map(|f| FileEntry {
+                    path: f.path,
+                    size_bytes: f.size_bytes,
+                    executable: f.executable,
+                })
+                .collect(),
+        }))
+    }
+
+    async fn diff_commits(
+        &self,
+        request: Request<DiffCommitsRequest>,
+    ) -> Result<Response<DiffCommitsResponse>, Status> {
+        let req = request.into_inner();
+        let (repo, from, to) = (req.repo, req.from_commit_id, req.to_commit_id);
+        if to.is_empty() {
+            return Err(Status::invalid_argument("to_commit_id is required"));
+        }
+        let diff = self
+            .engine
+            .run(move |engine| async move {
+                let from = (!from.is_empty()).then_some(from.as_str());
+                engine.diff_commits(&repo, from, &to).await
+            })
+            .await?;
+        Ok(Response::new(DiffCommitsResponse {
+            from_commit_id: diff.from_commit_id,
+            to_commit_id: diff.to_commit_id,
+            files: diff
+                .files
+                .into_iter()
+                .map(|f| ChangedFile {
+                    path: f.path,
+                    kind: match f.kind {
+                        engine::ChangeKind::Added => ChangeKind::Added,
+                        engine::ChangeKind::Modified => ChangeKind::Modified,
+                        engine::ChangeKind::Deleted => ChangeKind::Deleted,
+                    } as i32,
+                    old_content: f.old_content,
+                    new_content: f.new_content,
+                })
+                .collect(),
+        }))
+    }
+}
+
+fn commit_summary(c: engine::CommitSummary) -> CommitSummary {
+    CommitSummary {
+        commit_id: c.commit_id,
+        change_id: c.change_id,
+        description: c.description,
+        author_name: c.author_name,
+        author_email: c.author_email,
+        timestamp_millis: c.timestamp_millis,
+        parent_commit_ids: c.parent_commit_ids,
     }
 }

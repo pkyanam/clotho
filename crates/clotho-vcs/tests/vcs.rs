@@ -4,7 +4,8 @@
 //! ticket 6's proof: a commit lands as a real git object (verified with gix).
 
 use clotho_common::pb::vcs::v1::{
-    vcs_client::VcsClient, CheckpointRequest, CommitRequest, FileChange, InitRepoRequest,
+    changed_file::ChangeKind, vcs_client::VcsClient, CheckpointRequest, CommitRequest,
+    DiffCommitsRequest, FileChange, GetHeadsRequest, InitRepoRequest, ListFilesRequest,
     QueryOpLogRequest, RestoreToRequest,
 };
 use clotho_vcs::{VcsEngine, VcsService};
@@ -316,4 +317,119 @@ async fn checkpoint_and_restore_round_trip() {
         .entries
         .iter()
         .any(|e| e.description == "checkpoint: before risky refactor"));
+}
+
+/// Stage 4 additions (docs/prd.md §5): the orientation RPCs backing the MCP
+/// `orient_repo` tool (heads + tree summary) and the raw-material RPC backing
+/// `diff_symbol` (changed files with full before/after contents).
+#[tokio::test]
+async fn heads_files_and_commit_diffs_are_queryable() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = start_server(dir.path()).await;
+
+    client
+        .init_repo(InitRepoRequest {
+            name: "orient".into(),
+        })
+        .await
+        .unwrap();
+
+    let first = client
+        .commit(commit_req(
+            "orient",
+            "agent-a",
+            "add lib and readme",
+            vec![
+                file("src/lib.rs", "pub fn spin() -> u32 { 1 }\n"),
+                file("README.md", "# orient\n"),
+            ],
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let second = client
+        .commit(CommitRequest {
+            repo: "orient".into(),
+            parent_commit_ids: vec![],
+            files: vec![file(
+                "src/lib.rs",
+                "pub fn spin() -> u32 { 2 }\npub fn weave() {}\n",
+            )],
+            deleted_paths: vec!["README.md".into()],
+            message: "rework lib, drop readme".into(),
+            author_name: "agent-b".into(),
+            author_email: "agent-b@agents.clotho.internal".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+
+    // Heads: one head (linear history), main tracking it, real metadata.
+    let heads = client
+        .get_heads(GetHeadsRequest {
+            repo: "orient".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(heads.main_commit_id, second.commit_id);
+    assert_eq!(heads.heads.len(), 1);
+    let head = &heads.heads[0];
+    assert_eq!(head.commit_id, second.commit_id);
+    assert_eq!(head.description, "rework lib, drop readme");
+    assert_eq!(head.author_name, "agent-b");
+    assert_eq!(head.parent_commit_ids, vec![first.commit_id.clone()]);
+
+    // Tree summary: default commit is main's target; sizes are real.
+    let list = client
+        .list_files(ListFilesRequest {
+            repo: "orient".into(),
+            commit_id: String::new(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(list.commit_id, second.commit_id);
+    assert_eq!(list.files.len(), 1);
+    assert_eq!(list.files[0].path, "src/lib.rs");
+    assert_eq!(
+        list.files[0].size_bytes,
+        "pub fn spin() -> u32 { 2 }\npub fn weave() {}\n".len() as u64
+    );
+
+    // An explicit commit id lists that tree instead.
+    let list_first = client
+        .list_files(ListFilesRequest {
+            repo: "orient".into(),
+            commit_id: first.commit_id.clone(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    let paths: Vec<_> = list_first.files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, vec!["README.md", "src/lib.rs"]);
+
+    // Diff: from defaults to the first parent; contents come back whole.
+    let diff = client
+        .diff_commits(DiffCommitsRequest {
+            repo: "orient".into(),
+            from_commit_id: String::new(),
+            to_commit_id: second.commit_id.clone(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(diff.from_commit_id, first.commit_id);
+    assert_eq!(diff.files.len(), 2);
+    let readme = diff.files.iter().find(|f| f.path == "README.md").unwrap();
+    assert_eq!(readme.kind(), ChangeKind::Deleted);
+    assert_eq!(readme.old_content, b"# orient\n");
+    assert!(readme.new_content.is_empty());
+    let lib = diff.files.iter().find(|f| f.path == "src/lib.rs").unwrap();
+    assert_eq!(lib.kind(), ChangeKind::Modified);
+    assert_eq!(lib.old_content, b"pub fn spin() -> u32 { 1 }\n");
+    assert_eq!(
+        lib.new_content,
+        b"pub fn spin() -> u32 { 2 }\npub fn weave() {}\n"
+    );
 }

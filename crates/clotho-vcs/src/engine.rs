@@ -15,10 +15,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures::StreamExt as _;
-use jj_lib::backend::{CommitId, CopyId, Signature, Timestamp, TreeValue};
+use jj_lib::backend::{CommitId, CopyId, FileId, Signature, Timestamp, TreeValue};
+use jj_lib::commit::Commit;
 use jj_lib::config::{ConfigLayer, ConfigSource, StackedConfig};
 use jj_lib::git_backend::GitBackend;
+use jj_lib::matchers::EverythingMatcher;
 use jj_lib::merge::Merge;
+use jj_lib::merge::MergedTreeValue;
 use jj_lib::merged_tree_builder::MergedTreeBuilder;
 use jj_lib::object_id::ObjectId as _;
 use jj_lib::op_store::{OperationId, RefTarget};
@@ -26,9 +29,10 @@ use jj_lib::op_walk;
 use jj_lib::operation::Operation;
 use jj_lib::ref_name::RefName;
 use jj_lib::repo::{ReadonlyRepo, Repo as _, RepoLoader, StoreFactories};
-use jj_lib::repo_path::RepoPathBuf;
+use jj_lib::repo_path::{RepoPath, RepoPathBuf};
 use jj_lib::settings::UserSettings;
 use jj_lib::signing::Signer;
+use jj_lib::store::Store;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -79,6 +83,52 @@ pub struct OpLogEntry {
     pub start_time_millis: i64,
     pub end_time_millis: i64,
     pub parent_operation_ids: Vec<String>,
+}
+
+pub struct CommitSummary {
+    pub commit_id: String,
+    pub change_id: String,
+    pub description: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub timestamp_millis: i64,
+    pub parent_commit_ids: Vec<String>,
+}
+
+pub struct Heads {
+    pub heads: Vec<CommitSummary>,
+    /// Commit the `main` bookmark points at; `None` while main is unborn.
+    pub main_commit_id: Option<String>,
+}
+
+pub struct FileEntry {
+    pub path: String,
+    pub size_bytes: u64,
+    pub executable: bool,
+}
+
+pub struct FileList {
+    pub commit_id: String,
+    pub files: Vec<FileEntry>,
+}
+
+pub enum ChangeKind {
+    Added,
+    Modified,
+    Deleted,
+}
+
+pub struct ChangedFile {
+    pub path: String,
+    pub kind: ChangeKind,
+    pub old_content: Vec<u8>,
+    pub new_content: Vec<u8>,
+}
+
+pub struct CommitsDiff {
+    pub from_commit_id: String,
+    pub to_commit_id: String,
+    pub files: Vec<ChangedFile>,
 }
 
 /// The bookmark the engine keeps pointing at the latest commit, exported to
@@ -408,6 +458,137 @@ impl VcsEngine {
         Ok(entries)
     }
 
+    /// Current head commits plus the `main` bookmark target — the "where am
+    /// I" half of an agent's situational awareness (`orient_repo`).
+    pub async fn get_heads(&self, name: &str) -> Result<Heads, EngineError> {
+        let repo = self.load_repo(name).await?;
+        let store = repo.store();
+        let mut head_ids: Vec<CommitId> = repo.view().heads().iter().cloned().collect();
+        head_ids.sort();
+        let mut heads = Vec::with_capacity(head_ids.len());
+        for id in &head_ids {
+            let commit = store
+                .get_commit_async(id)
+                .await
+                .map_err(EngineError::other)?;
+            heads.push(summarize(&commit));
+        }
+        let main_commit_id = repo
+            .view()
+            .get_local_bookmark(RefName::new(MAIN_BOOKMARK))
+            .as_normal()
+            .map(|id| id.hex());
+        Ok(Heads {
+            heads,
+            main_commit_id,
+        })
+    }
+
+    /// List the files in `commit_id`'s tree (default: the `main` bookmark
+    /// target). Sizes are real byte counts read from the store.
+    pub async fn list_files(
+        &self,
+        name: &str,
+        commit_id: Option<&str>,
+    ) -> Result<FileList, EngineError> {
+        let repo = self.load_repo(name).await?;
+        let store = repo.store();
+        let commit_id = match commit_id {
+            Some(hex) => CommitId::try_from_hex(hex)
+                .ok_or_else(|| EngineError::InvalidId(hex.to_string()))?,
+            None => repo
+                .view()
+                .get_local_bookmark(RefName::new(MAIN_BOOKMARK))
+                .as_normal()
+                .cloned()
+                .unwrap_or_else(|| store.root_commit_id().clone()),
+        };
+        let commit = store
+            .get_commit_async(&commit_id)
+            .await
+            .map_err(EngineError::other)?;
+        let mut files = Vec::new();
+        for (path, value) in commit.tree().entries() {
+            let value = value.map_err(EngineError::other)?;
+            // Conflicted entries are skipped: file listing describes resolved
+            // state; conflicts surface through the merge-queue (Stage 5).
+            if let Some(TreeValue::File { id, executable, .. }) = value.as_normal() {
+                let content = read_file_bytes(store, &path, id).await?;
+                files.push(FileEntry {
+                    path: path.as_internal_file_string().to_string(),
+                    size_bytes: content.len() as u64,
+                    executable: *executable,
+                });
+            }
+        }
+        Ok(FileList {
+            commit_id: commit_id.hex(),
+            files,
+        })
+    }
+
+    /// Changed files between two commits, with full before/after contents.
+    /// `from` defaults to the first parent of `to`.
+    pub async fn diff_commits(
+        &self,
+        name: &str,
+        from_commit_id: Option<&str>,
+        to_commit_id: &str,
+    ) -> Result<CommitsDiff, EngineError> {
+        let repo = self.load_repo(name).await?;
+        let store = repo.store();
+        let to_id = CommitId::try_from_hex(to_commit_id)
+            .ok_or_else(|| EngineError::InvalidId(to_commit_id.to_string()))?;
+        let to_commit = store
+            .get_commit_async(&to_id)
+            .await
+            .map_err(EngineError::other)?;
+        let from_id = match from_commit_id {
+            Some(hex) => CommitId::try_from_hex(hex)
+                .ok_or_else(|| EngineError::InvalidId(hex.to_string()))?,
+            None => to_commit
+                .parent_ids()
+                .first()
+                .cloned()
+                .unwrap_or_else(|| store.root_commit_id().clone()),
+        };
+        let from_commit = store
+            .get_commit_async(&from_id)
+            .await
+            .map_err(EngineError::other)?;
+
+        let from_tree = from_commit.tree();
+        let to_tree = to_commit.tree();
+        let mut files = Vec::new();
+        let mut stream = from_tree.diff_stream(&to_tree, &EverythingMatcher);
+        while let Some(entry) = stream.next().await {
+            let values = entry.values.map_err(EngineError::other)?;
+            let old_content = read_diff_side(store, &entry.path, &values.before).await?;
+            let new_content = read_diff_side(store, &entry.path, &values.after).await?;
+            if old_content == new_content {
+                continue;
+            }
+            let kind = if old_content.is_empty() {
+                ChangeKind::Added
+            } else if new_content.is_empty() {
+                ChangeKind::Deleted
+            } else {
+                ChangeKind::Modified
+            };
+            files.push(ChangedFile {
+                path: entry.path.as_internal_file_string().to_string(),
+                kind,
+                old_content,
+                new_content,
+            });
+        }
+        Ok(CommitsDiff {
+            from_commit_id: from_id.hex(),
+            to_commit_id: to_id.hex(),
+            files,
+        })
+    }
+
     async fn resolve_operation(
         &self,
         repo: &Arc<ReadonlyRepo>,
@@ -422,6 +603,50 @@ impl VcsEngine {
             .map_err(EngineError::other)?;
         Ok(Operation::new(op_store.clone(), id, data))
     }
+}
+
+fn summarize(commit: &Commit) -> CommitSummary {
+    CommitSummary {
+        commit_id: commit.id().hex(),
+        change_id: commit.change_id().hex(),
+        description: commit.description().to_string(),
+        author_name: commit.author().name.clone(),
+        author_email: commit.author().email.clone(),
+        timestamp_millis: commit.author().timestamp.timestamp.0,
+        parent_commit_ids: commit.parent_ids().iter().map(|id| id.hex()).collect(),
+    }
+}
+
+/// Contents of one side of a tree diff entry. Empty for the absent side of
+/// an add/delete, non-file entries (symlink/submodule), and conflicted
+/// values — nothing to hand the diff engine in those cases.
+async fn read_diff_side(
+    store: &Arc<Store>,
+    path: &RepoPath,
+    value: &MergedTreeValue,
+) -> Result<Vec<u8>, EngineError> {
+    match value.as_normal() {
+        Some(TreeValue::File { id, .. }) => read_file_bytes(store, path, id).await,
+        _ => Ok(Vec::new()),
+    }
+}
+
+async fn read_file_bytes(
+    store: &Arc<Store>,
+    path: &RepoPath,
+    id: &FileId,
+) -> Result<Vec<u8>, EngineError> {
+    use futures::AsyncReadExt as _;
+    let mut reader = store
+        .read_file(path, id)
+        .await
+        .map_err(EngineError::other)?;
+    let mut content = Vec::new();
+    reader
+        .read_to_end(&mut content)
+        .await
+        .map_err(EngineError::other)?;
+    Ok(content)
 }
 
 /// Mirror the engine's `main` bookmark into the backing bare git repo:

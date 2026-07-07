@@ -20,6 +20,14 @@ service Vcs {
   rpc RestoreTo(RestoreToRequest) returns (RestoreToResponse);
   // Query the repository's operation log, newest first.
   rpc QueryOpLog(QueryOpLogRequest) returns (QueryOpLogResponse);
+  // Current head commits of the repository plus the `main` bookmark target —
+  // the "where am I" half of an agent's situational awareness.
+  rpc GetHeads(GetHeadsRequest) returns (GetHeadsResponse);
+  // List the files in a commit's tree (default: the `main` bookmark target).
+  rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
+  // Changed files between two commits, with full before/after contents —
+  // the raw material for clotho-diff's structured symbol diff.
+  rpc DiffCommits(DiffCommitsRequest) returns (DiffCommitsResponse);
 }
 
 message InitRepoRequest {
@@ -99,4 +107,72 @@ message OpLogEntry {
 message QueryOpLogResponse {
   // Newest first.
   repeated OpLogEntry entries = 1;
+}
+
+message CommitSummary {
+  // Git-compatible commit id (hex sha).
+  string commit_id = 1;
+  // jj change id (hex) — stable across rewrites.
+  string change_id = 2;
+  string description = 3;
+  string author_name = 4;
+  string author_email = 5;
+  int64 timestamp_millis = 6;
+  repeated string parent_commit_ids = 7;
+}
+
+message GetHeadsRequest {
+  string repo = 1;
+}
+
+message GetHeadsResponse {
+  // All current head commits (jj keeps anonymous heads first-class).
+  repeated CommitSummary heads = 1;
+  // Commit the `main` bookmark points at; empty while main is unborn.
+  string main_commit_id = 2;
+}
+
+message ListFilesRequest {
+  string repo = 1;
+  // Commit whose tree to list; empty means the `main` bookmark target.
+  string commit_id = 2;
+}
+
+message FileEntry {
+  // Repo-relative path.
+  string path = 1;
+  uint64 size_bytes = 2;
+  bool executable = 3;
+}
+
+message ListFilesResponse {
+  string commit_id = 1;
+  repeated FileEntry files = 2;
+}
+
+message DiffCommitsRequest {
+  string repo = 1;
+  // Base commit; empty means the first parent of `to_commit_id`.
+  string from_commit_id = 2;
+  string to_commit_id = 3;
+}
+
+message ChangedFile {
+  enum ChangeKind {
+    CHANGE_KIND_UNSPECIFIED = 0;
+    ADDED = 1;
+    MODIFIED = 2;
+    DELETED = 3;
+  }
+  string path = 1;
+  ChangeKind kind = 2;
+  // Full contents on each side; empty on the absent side of an add/delete.
+  bytes old_content = 3;
+  bytes new_content = 4;
+}
+
+message DiffCommitsResponse {
+  string from_commit_id = 1;
+  string to_commit_id = 2;
+  repeated ChangedFile files = 3;
 }

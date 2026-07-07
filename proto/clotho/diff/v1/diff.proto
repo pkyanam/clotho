@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package clotho.diff.v1;
+
+// The Clotho structured-diff engine — tree-sitter symbol-level diffs.
+// One structured-diff object feeds both the agent-facing MCP `diff_symbol`
+// tool and the future human PR view (docs/prd.md §2): callers pass full
+// before/after file contents (typically from clotho-vcs `DiffCommits`) and
+// get back what changed at the symbol level, not patch text.
+service Diff {
+  rpc DiffFiles(DiffFilesRequest) returns (DiffFilesResponse);
+}
+
+message FileDiffInput {
+  // Repo-relative path; the language is inferred from its extension.
+  string path = 1;
+  // Full contents on each side; empty on the absent side of an add/delete.
+  bytes old_content = 2;
+  bytes new_content = 3;
+}
+
+message DiffFilesRequest {
+  repeated FileDiffInput files = 1;
+}
+
+enum ChangeStatus {
+  CHANGE_STATUS_UNSPECIFIED = 0;
+  ADDED = 1;
+  MODIFIED = 2;
+  REMOVED = 3;
+}
+
+message SymbolChange {
+  // Qualified symbol name, e.g. "VcsEngine::commit" or "GatewayConfig".
+  string name = 1;
+  // Symbol kind in the source language: "function", "struct", "class",
+  // "method", "impl", "enum", "trait", "interface", "type", "const", ...
+  string kind = 2;
+  ChangeStatus status = 3;
+  // 1-based line ranges of the symbol on each side; 0 when absent.
+  uint32 old_start_line = 4;
+  uint32 old_end_line = 5;
+  uint32 new_start_line = 6;
+  uint32 new_end_line = 7;
+}
+
+message FileDiff {
+  string path = 1;
+  // Detected language ("rust", "typescript"); empty when unsupported.
+  string language = 2;
+  ChangeStatus status = 3;
+  // Symbol-level changes; empty for unsupported languages or files whose
+  // contents are identical.
+  repeated SymbolChange symbols = 4;
+}
+
+message DiffFilesResponse {
+  repeated FileDiff files = 1;
+}

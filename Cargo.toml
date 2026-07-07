@@ -33,6 +33,11 @@ xet-core-structures = "=1.5.2"
 object_store = { version = "0.14.0", features = ["aws"] }
 async-trait = "0.1"
 axum = "0.8"
+# tree-sitter core + grammars for the structured diff engine (docs/prd.md §2):
+# one symbol-level diff object feeds both the agent API and the PR view.
+tree-sitter = "0.26"
+tree-sitter-rust = "0.24"
+tree-sitter-typescript = "0.23"
 # Plain-HTTP/JSON client for Forgejo's REST API; rustls so the runtime image
 # needs no OpenSSL.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
