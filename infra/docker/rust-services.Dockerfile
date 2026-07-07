@@ -17,7 +17,9 @@ FROM debian:trixie-slim AS runtime
 ARG SERVICE
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --system --no-create-home clotho
+    && useradd --system --no-create-home clotho \
+    && mkdir -p /var/lib/clotho && chown clotho /var/lib/clotho
 COPY --from=builder "/build/target/release/${SERVICE}" /usr/local/bin/service
 USER clotho
+WORKDIR /var/lib/clotho
 ENTRYPOINT ["/usr/local/bin/service"]
