@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package clotho.mergequeue.v1;
+
+// The Clotho merge-queue — multi-agent reconciliation (docs/prd.md §5
+// Stage 5, naive-but-real). Agents commit concurrently on their own heads;
+// the queue serializes integration per repository, rebasing each submission
+// onto the shared `main` history. Unresolvable conflicts land as first-class
+// jj conflict objects instead of blocking the queue.
+service MergeQueue {
+  // Submit a commit for integration into `main`. Blocks until this
+  // submission's turn completes and returns where it landed.
+  rpc SubmitChange(SubmitChangeRequest) returns (SubmitChangeResponse);
+}
+
+message SubmitChangeRequest {
+  string repo = 1;
+  string commit_id = 2;
+}
+
+message SubmitChangeResponse {
+  // The commit now at `main`: the submitted commit when fast-forwarded, or
+  // its rebased successor (same change id, new commit id).
+  string commit_id = 1;
+  string change_id = 2;
+  string operation_id = 3;
+  bool fast_forwarded = 4;
+  // True when integration produced a conflicted commit — surfaced, not
+  // blocking; main still advanced.
+  bool conflicted = 5;
+  repeated string conflicted_paths = 6;
+}

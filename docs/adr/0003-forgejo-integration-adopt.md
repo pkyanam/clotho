@@ -73,9 +73,14 @@ list and file views with no sync step).
   prototype: Stage 5's merge-queue owns merges, and agent/human writes go
   through Clotho's APIs. Revisit with `jj git import` if Forgejo-side writes
   ever need to flow back.
+  *(Resolved in Stage 5, ADR-0006: the engine now imports external git ref
+  changes before every operation, so Forgejo-side writes land in the op log
+  as `import git refs` operations.)*
 - Forgejo caches branch lists in its DB (synced on push); new branches
   created behind its back may lag in the branches UI. Commits to `main` (the
   engine's only exported ref) render live, which is what Stage 3 needs.
 - The engine's `main` bookmark always advances to the newest commit — naive
   but sufficient until the merge-queue (Stage 5) defines real branch
   semantics.
+  *(Resolved in Stage 5, ADR-0006: `main` now only fast-forwards; anything
+  else lands through the merge-queue's serialized `IntegrateCommit`.)*

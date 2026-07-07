@@ -5,8 +5,9 @@ use clotho_common::pb::vcs::v1::{
     vcs_server::{Vcs, VcsServer},
     ChangedFile, CheckpointRequest, CheckpointResponse, CommitRequest, CommitResponse,
     CommitSummary, DiffCommitsRequest, DiffCommitsResponse, FileEntry, GetHeadsRequest,
-    GetHeadsResponse, InitRepoRequest, InitRepoResponse, ListFilesRequest, ListFilesResponse,
-    OpLogEntry, QueryOpLogRequest, QueryOpLogResponse, RestoreToRequest, RestoreToResponse,
+    GetHeadsResponse, InitRepoRequest, InitRepoResponse, IntegrateCommitRequest,
+    IntegrateCommitResponse, ListFilesRequest, ListFilesResponse, OpLogEntry, QueryOpLogRequest,
+    QueryOpLogResponse, RestoreToRequest, RestoreToResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -219,6 +220,33 @@ impl Vcs for VcsService {
                     new_content: f.new_content,
                 })
                 .collect(),
+        }))
+    }
+
+    async fn integrate_commit(
+        &self,
+        request: Request<IntegrateCommitRequest>,
+    ) -> Result<Response<IntegrateCommitResponse>, Status> {
+        let req = request.into_inner();
+        let (repo, commit_id) = (req.repo.clone(), req.commit_id);
+        let outcome = self
+            .engine
+            .run(move |engine| async move { engine.integrate_commit(&repo, &commit_id).await })
+            .await?;
+        tracing::info!(
+            repo = %req.repo,
+            commit = %outcome.commit_id,
+            fast_forwarded = outcome.fast_forwarded,
+            conflicted = outcome.conflicted,
+            "commit integrated into main"
+        );
+        Ok(Response::new(IntegrateCommitResponse {
+            commit_id: outcome.commit_id,
+            change_id: outcome.change_id,
+            operation_id: outcome.operation_id,
+            fast_forwarded: outcome.fast_forwarded,
+            conflicted: outcome.conflicted,
+            conflicted_paths: outcome.conflicted_paths,
         }))
     }
 }

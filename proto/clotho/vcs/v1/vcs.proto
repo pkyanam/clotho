@@ -28,6 +28,11 @@ service Vcs {
   // Changed files between two commits, with full before/after contents —
   // the raw material for clotho-diff's structured symbol diff.
   rpc DiffCommits(DiffCommitsRequest) returns (DiffCommitsResponse);
+  // Land a commit on `main`: fast-forward when it already descends from the
+  // current main target, otherwise rebase it on top (jj-style — a rebase
+  // through a conflict does not stop; the commit lands marked conflicted).
+  // The merge-queue serializes calls to this per repo (Stage 5).
+  rpc IntegrateCommit(IntegrateCommitRequest) returns (IntegrateCommitResponse);
 }
 
 message InitRepoRequest {
@@ -175,4 +180,24 @@ message DiffCommitsResponse {
   string from_commit_id = 1;
   string to_commit_id = 2;
   repeated ChangedFile files = 3;
+}
+
+message IntegrateCommitRequest {
+  string repo = 1;
+  string commit_id = 2;
+}
+
+message IntegrateCommitResponse {
+  // The commit now at `main`: the input commit when fast-forwarded, or its
+  // rebased successor (same change id, new commit id).
+  string commit_id = 1;
+  string change_id = 2;
+  // Operation recording the integration.
+  string operation_id = 3;
+  // True when main fast-forwarded; false when the commit was rebased.
+  bool fast_forwarded = 4;
+  // True when the rebase produced a first-class conflicted commit. The
+  // conflict does not block: main advances and resolution happens later.
+  bool conflicted = 5;
+  repeated string conflicted_paths = 6;
 }

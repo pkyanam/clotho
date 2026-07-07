@@ -497,7 +497,12 @@ name = "clotho-merge-queue"
 version = "0.1.0"
 dependencies = [
  "clotho-common",
+ "clotho-vcs",
+ "futures",
+ "tempfile",
  "tokio",
+ "tokio-stream",
+ "tonic",
  "tracing",
 ]
 

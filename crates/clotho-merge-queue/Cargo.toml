@@ -9,4 +9,11 @@ repository.workspace = true
 [dependencies]
 clotho-common.workspace = true
 tokio.workspace = true
+tonic.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+clotho-vcs = { path = "../clotho-vcs" }
+futures.workspace = true
+tempfile.workspace = true
+tokio-stream.workspace = true

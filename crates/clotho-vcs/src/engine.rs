@@ -30,6 +30,7 @@ use jj_lib::operation::Operation;
 use jj_lib::ref_name::RefName;
 use jj_lib::repo::{ReadonlyRepo, Repo as _, RepoLoader, StoreFactories};
 use jj_lib::repo_path::{RepoPath, RepoPathBuf};
+use jj_lib::rewrite::rebase_commit;
 use jj_lib::settings::UserSettings;
 use jj_lib::signing::Signer;
 use jj_lib::store::Store;
@@ -129,6 +130,19 @@ pub struct CommitsDiff {
     pub from_commit_id: String,
     pub to_commit_id: String,
     pub files: Vec<ChangedFile>,
+}
+
+pub struct IntegrationOutcome {
+    /// The commit now at `main`: the input commit when fast-forwarded, or
+    /// its rebased successor (same change id, new commit id).
+    pub commit_id: String,
+    pub change_id: String,
+    pub operation_id: String,
+    pub fast_forwarded: bool,
+    /// A rebase through a conflict does not stop (jj-style): the commit
+    /// lands marked conflicted, main advances, resolution happens later.
+    pub conflicted: bool,
+    pub conflicted_paths: Vec<String>,
 }
 
 /// The bookmark the engine keeps pointing at the latest commit, exported to
@@ -288,7 +302,35 @@ impl VcsEngine {
         let loader =
             RepoLoader::init_from_file_system(&self.settings, &path, &StoreFactories::default())
                 .map_err(EngineError::other)?;
-        loader.load_at_head().await.map_err(EngineError::other)
+        let repo = loader.load_at_head().await.map_err(EngineError::other)?;
+
+        // Absorb git-side ref changes made behind jj's back (a Forgejo UI
+        // merge or push moving refs/heads/main) before any engine operation
+        // reads or moves main. When nothing moved this is a cheap diff and
+        // no operation is recorded; when something did, the import lands in
+        // the op log like any other operation (closes the ADR-0003
+        // "Forgejo writes bypass the op log" gap).
+        let mut tx = repo.start_transaction();
+        let import_options = jj_lib::git::GitImportOptions {
+            // Never garbage-collect on import: a moved ref must not abandon
+            // commits agents may still be building on.
+            abandon_unreachable_commits: false,
+            record_synthetic_predecessors: false,
+            remote_auto_track_bookmarks: std::collections::HashMap::new(),
+        };
+        jj_lib::git::import_refs(tx.repo_mut(), &import_options)
+            .await
+            .map_err(EngineError::other)?;
+        if !tx.repo_mut().has_changes() {
+            return Ok(repo);
+        }
+        tx.repo_mut()
+            .rebase_descendants()
+            .await
+            .map_err(EngineError::other)?;
+        tx.commit("import git refs")
+            .await
+            .map_err(EngineError::other)
     }
 
     /// Write a commit built directly from file contents (no working copy).
@@ -369,18 +411,39 @@ impl VcsEngine {
             .write()
             .await
             .map_err(EngineError::other)?;
-        // Advance the `main` bookmark to the new commit and mirror it into
-        // the backing git repo as `refs/heads/main`, so plain-git consumers
-        // (Forgejo) see every engine-written commit on an ordinary branch.
-        tx.repo_mut().set_local_bookmark_target(
-            RefName::new(MAIN_BOOKMARK),
-            RefTarget::normal(commit.id().clone()),
-        );
+        // Advance the `main` bookmark only when the new commit extends the
+        // current main history (fast-forward), and mirror it into the backing
+        // git repo as `refs/heads/main` for plain-git consumers (Forgejo).
+        // Side commits (an agent branching off an older parent) leave main
+        // alone — landing those is the merge-queue's job (`integrate_commit`).
+        let main_target = tx
+            .repo_mut()
+            .view()
+            .get_local_bookmark(RefName::new(MAIN_BOOKMARK))
+            .as_normal()
+            .cloned();
+        let advance_main = match &main_target {
+            None => true,
+            Some(target) => tx
+                .repo_mut()
+                .index()
+                .is_ancestor(target, commit.id())
+                .map_err(EngineError::other)?,
+        };
+        if advance_main {
+            tx.repo_mut().set_local_bookmark_target(
+                RefName::new(MAIN_BOOKMARK),
+                RefTarget::normal(commit.id().clone()),
+            );
+            record_main_git_ref(tx.repo_mut(), Some(commit.id()));
+        }
         let repo = tx
             .commit(format!("commit: {}", first_line(&params.message)))
             .await
             .map_err(EngineError::other)?;
-        mirror_main_ref(&self.git_backend_path(name)?, Some(commit.id()))?;
+        if advance_main {
+            mirror_main_ref(&self.git_backend_path(name)?, Some(commit.id()))?;
+        }
 
         Ok(CommitOutcome {
             commit_id: commit.id().hex(),
@@ -410,13 +473,16 @@ impl VcsEngine {
         let mut tx = repo.start_transaction();
         tx.repo_mut().set_view(target_view.store_view().clone());
         // The restored view carries the `main` bookmark position from that
-        // point in time — mirror it back into the git repo too.
+        // point in time — mirror it back into the git repo too. Restoring
+        // the view also restored a stale record of what git holds; re-record
+        // it so ref imports/exports keep diffing against reality.
         let main_target = tx
             .repo_mut()
             .view()
             .get_local_bookmark(RefName::new(MAIN_BOOKMARK))
             .as_normal()
             .cloned();
+        record_main_git_ref(tx.repo_mut(), main_target.as_ref());
         let repo = tx
             .commit(format!("restore to operation {}", short(operation_id)))
             .await
@@ -589,6 +655,88 @@ impl VcsEngine {
         })
     }
 
+    /// Land `commit_id` on `main`: fast-forward when it already descends
+    /// from the current main target, otherwise rebase it on top. Conflicts
+    /// are first-class — the rebased commit lands marked conflicted and main
+    /// still advances (the vision spec's non-blocking conflict model). The
+    /// merge-queue serializes calls to this per repo; the engine itself
+    /// stays policy-free.
+    pub async fn integrate_commit(
+        &self,
+        name: &str,
+        commit_id: &str,
+    ) -> Result<IntegrationOutcome, EngineError> {
+        let repo = self.load_repo(name).await?;
+        let store = repo.store();
+        let commit_id = CommitId::try_from_hex(commit_id)
+            .ok_or_else(|| EngineError::InvalidId(commit_id.to_string()))?;
+        let commit = store
+            .get_commit_async(&commit_id)
+            .await
+            .map_err(EngineError::other)?;
+        let main_target = repo
+            .view()
+            .get_local_bookmark(RefName::new(MAIN_BOOKMARK))
+            .as_normal()
+            .cloned();
+
+        let mut tx = repo.start_transaction();
+        let fast_forward = match &main_target {
+            None => true,
+            Some(target) => repo
+                .index()
+                .is_ancestor(target, &commit_id)
+                .map_err(EngineError::other)?,
+        };
+        let landed = if fast_forward {
+            commit
+        } else {
+            let target = main_target.expect("rebase implies main exists");
+            let rebased = rebase_commit(tx.repo_mut(), commit, vec![target])
+                .await
+                .map_err(EngineError::other)?;
+            // Keep any descendants of the submitted commit consistent with
+            // its rewrite (usually a no-op — submissions are heads).
+            tx.repo_mut()
+                .rebase_descendants()
+                .await
+                .map_err(EngineError::other)?;
+            rebased
+        };
+
+        let conflicted = landed.has_conflict();
+        let mut conflicted_paths = Vec::new();
+        if conflicted {
+            for (path, _) in landed.tree().conflicts() {
+                conflicted_paths.push(path.as_internal_file_string().to_string());
+            }
+        }
+
+        tx.repo_mut().set_local_bookmark_target(
+            RefName::new(MAIN_BOOKMARK),
+            RefTarget::normal(landed.id().clone()),
+        );
+        record_main_git_ref(tx.repo_mut(), Some(landed.id()));
+        let repo = tx
+            .commit(format!(
+                "integrate commit {} into main{}",
+                short(&landed.id().hex()),
+                if conflicted { " (conflicted)" } else { "" }
+            ))
+            .await
+            .map_err(EngineError::other)?;
+        mirror_main_ref(&self.git_backend_path(name)?, Some(landed.id()))?;
+
+        Ok(IntegrationOutcome {
+            commit_id: landed.id().hex(),
+            change_id: landed.change_id().hex(),
+            operation_id: repo.operation().id().hex(),
+            fast_forwarded: fast_forward,
+            conflicted,
+            conflicted_paths,
+        })
+    }
+
     async fn resolve_operation(
         &self,
         repo: &Arc<ReadonlyRepo>,
@@ -649,11 +797,39 @@ async fn read_file_bytes(
     Ok(content)
 }
 
+/// Record in the jj view what `refs/heads/main` in the backing git repo is
+/// about to hold (see [`mirror_main_ref`], which performs the actual git
+/// write after the transaction commits): both the raw git-ref record and
+/// the `main@git` remote-tracking ref that `import_refs` diffs against.
+/// Keeping this bookkeeping in sync with our own writes means the import in
+/// `load_repo` only fires — and only merges — for *external* changes, e.g.
+/// Forgejo moving main behind jj's back.
+fn record_main_git_ref(mut_repo: &mut jj_lib::repo::MutableRepo, target: Option<&CommitId>) {
+    use jj_lib::git::REMOTE_NAME_FOR_LOCAL_GIT_REPO;
+    use jj_lib::op_store::{RemoteRef, RemoteRefState};
+    use jj_lib::ref_name::GitRefName;
+
+    let target = match target {
+        Some(id) => RefTarget::normal(id.clone()),
+        None => RefTarget::absent(),
+    };
+    mut_repo.set_git_ref_target(GitRefName::new("refs/heads/main"), target.clone());
+    mut_repo.set_remote_bookmark(
+        RefName::new(MAIN_BOOKMARK).to_remote_symbol(REMOTE_NAME_FOR_LOCAL_GIT_REPO),
+        RemoteRef {
+            target,
+            state: RemoteRefState::Tracked,
+        },
+    );
+}
+
 /// Mirror the engine's `main` bookmark into the backing bare git repo:
 /// `refs/heads/main` tracks `target` (absent when `None`), and HEAD stays a
 /// symref to it so plain-git consumers treat `main` as the default branch.
-/// clotho-vcs is the only writer of these refs (docs/adr/0003), so
-/// unconditional updates are safe.
+/// External writers (Forgejo) are absorbed by the ref import in `load_repo`
+/// before every engine operation, so by the time we write here the engine's
+/// view already accounts for them; a write racing into that small window
+/// would be clobbered — an accepted prototype tradeoff (docs/adr/0003).
 fn mirror_main_ref(git_dir: &Path, target: Option<&CommitId>) -> Result<(), EngineError> {
     use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
     use gix::refs::{FullName, Target};

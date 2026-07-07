@@ -319,6 +319,114 @@ async fn checkpoint_and_restore_round_trip() {
         .any(|e| e.description == "checkpoint: before risky refactor"));
 }
 
+/// Stage 5 (docs/adr/0003 consequence, resolved): git-side ref writes made
+/// behind jj's back — a Forgejo UI merge or push moving `refs/heads/main` —
+/// are imported into the jj view and op log before every engine operation,
+/// instead of staying invisible.
+#[tokio::test]
+async fn external_git_ref_moves_flow_back_into_the_op_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let git_root = dir.path().join("git-repos");
+    let engine = VcsEngine::with_git_root(dir.path().join("jj"), Some(&git_root)).unwrap();
+    let mut client = serve(engine).await;
+
+    client
+        .init_repo(InitRepoRequest {
+            name: "chrome".into(),
+        })
+        .await
+        .unwrap();
+    let base = client
+        .commit(commit_req(
+            "chrome",
+            "agent-a",
+            "base",
+            vec![file("README.md", "# chrome\n")],
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    // A second commit whose git object exists — targets for the external
+    // ref moves below.
+    let side = client
+        .commit(CommitRequest {
+            repo: "chrome".into(),
+            parent_commit_ids: vec![base.commit_id.clone()],
+            files: vec![file("side.txt", "woven elsewhere\n")],
+            deleted_paths: vec![],
+            message: "merged through the collaboration shell".into(),
+            author_name: "human".into(),
+            author_email: "human@clotho.internal".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    // Simulate Forgejo moving refs/heads/main behind jj's back (its UI
+    // merges and pushes write git refs directly, never through the engine).
+    let git_repo = gix::open(git_root.join("chrome.git")).unwrap();
+    let side_oid = gix::ObjectId::from_hex(side.commit_id.as_bytes()).unwrap();
+    let base_oid = gix::ObjectId::from_hex(base.commit_id.as_bytes()).unwrap();
+    // External actor resets main to base (e.g. a force-push through Forgejo).
+    git_repo
+        .reference(
+            "refs/heads/main",
+            base_oid,
+            gix::refs::transaction::PreviousValue::Any,
+            "forgejo: external move",
+        )
+        .unwrap();
+
+    // The next engine operation absorbs the external move: main now reads
+    // as base, and the op log records the import.
+    let heads = client
+        .get_heads(GetHeadsRequest {
+            repo: "chrome".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(
+        heads.main_commit_id, base.commit_id,
+        "external move imported"
+    );
+    let log = client
+        .query_op_log(QueryOpLogRequest {
+            repo: "chrome".into(),
+            limit: 0,
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(
+        log.entries
+            .iter()
+            .any(|e| e.description == "import git refs"),
+        "import recorded in the op log: {:?}",
+        log.entries
+            .iter()
+            .map(|e| e.description.as_str())
+            .collect::<Vec<_>>()
+    );
+
+    // And forward moves work too: external actor advances main to `side`.
+    git_repo
+        .reference(
+            "refs/heads/main",
+            side_oid,
+            gix::refs::transaction::PreviousValue::Any,
+            "forgejo: merge",
+        )
+        .unwrap();
+    let heads = client
+        .get_heads(GetHeadsRequest {
+            repo: "chrome".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(heads.main_commit_id, side.commit_id);
+}
+
 /// Stage 4 additions (docs/prd.md §5): the orientation RPCs backing the MCP
 /// `orient_repo` tool (heads + tree summary) and the raw-material RPC backing
 /// `diff_symbol` (changed files with full before/after contents).

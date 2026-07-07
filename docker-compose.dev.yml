@@ -159,14 +159,22 @@ services:
       minio-init:
         condition: service_completed_successfully
 
+  # Merge-queue (docs/prd.md §5 Stage 5): serializes concurrent agent
+  # submissions per repo and lands them on main via clotho-vcs.
   clotho-merge-queue:
     <<: *clotho-service
     build:
       context: .
       dockerfile: infra/docker/rust-services.Dockerfile
       args: { SERVICE: clotho-merge-queue }
+    environment:
+      RUST_LOG: info
+      CLOTHO_VCS_GRPC_URL: http://clotho-vcs:50051
     ports:
       - "50053:50053"
+    depends_on:
+      clotho-vcs:
+        condition: service_started
 
   # Agent interface layer (docs/prd.md §5 Stage 4): MCP over streamable HTTP
   # on 8090 plus the admin surface (create agents, mint scoped tokens, read
