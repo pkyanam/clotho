@@ -3,5 +3,7 @@ packages:
   - "packages/*"
 
 allowBuilds:
+  # vitest -> esbuild: its install script just links the prebuilt binary.
+  esbuild: true
   sharp: true
   unrs-resolver: true

@@ -222,6 +222,11 @@ services:
       RUST_LOG: info
       CLOTHO_GATEWAY_HTTP_ADDR: 0.0.0.0:8080
       CLOTHO_VCS_GRPC_URL: http://clotho-vcs:50051
+      CLOTHO_DIFF_GRPC_URL: http://clotho-diff:50055
+      # Agent presence (Stage 6): proxied from the agent gateway's admin
+      # sessions endpoint with a service-to-service token (docs/adr/0007).
+      CLOTHO_AGENT_GATEWAY_URL: http://clotho-agent-gateway:8090
+      CLOTHO_AGENT_ADMIN_TOKEN: clotho-agent-admin-dev # dev-only credentials
       CLOTHO_FORGEJO_URL: http://forgejo:3000
       CLOTHO_FORGEJO_OWNER: clotho
       CLOTHO_FORGEJO_TOKEN_FILE: /run/clotho/forgejo-token

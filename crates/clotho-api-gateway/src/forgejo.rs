@@ -32,13 +32,60 @@ pub enum TokenSource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoInfo {
     pub id: i64,
+    pub name: String,
     pub full_name: String,
     pub html_url: String,
     pub default_branch: String,
     #[serde(default)]
+    pub description: String,
+    #[serde(default)]
     pub has_issues: bool,
     #[serde(default)]
     pub has_pull_requests: bool,
+    #[serde(default)]
+    pub open_issues_count: i64,
+    #[serde(default)]
+    pub open_pr_counter: i64,
+    #[serde(default)]
+    pub updated_at: String,
+}
+
+/// One endpoint of a pull request (its head or base).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullRef {
+    #[serde(rename = "ref")]
+    pub ref_name: String,
+    pub sha: String,
+}
+
+/// The subset of Forgejo's pull-request object the gateway returns.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullInfo {
+    pub number: i64,
+    pub title: String,
+    #[serde(default)]
+    pub body: Option<String>,
+    pub state: String,
+    pub user: PullUser,
+    pub head: PullRef,
+    pub base: PullRef,
+    /// Common ancestor of head and base — the diff base for "what this PR
+    /// introduces" (same semantics as a three-dot diff).
+    #[serde(default)]
+    pub merge_base: String,
+    #[serde(default)]
+    pub merged: bool,
+    pub mergeable: bool,
+    pub html_url: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default)]
+    pub comments: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullUser {
+    pub login: String,
 }
 
 #[derive(Clone)]
@@ -90,9 +137,12 @@ impl ForgejoClient {
         } else {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            Err(ApiError::Upstream(format!(
-                "forgejo: {path} returned {status}: {body}"
-            )))
+            let message = format!("forgejo: {path} returned {status}: {body}");
+            if status == reqwest::StatusCode::NOT_FOUND {
+                Err(ApiError::NotFound(message))
+            } else {
+                Err(ApiError::Upstream(message))
+            }
         }
     }
 
@@ -111,13 +161,39 @@ impl ForgejoClient {
 
     pub async fn get_repo(&self, name: &str) -> Result<RepoInfo, ApiError> {
         let owner = &self.config.owner;
-        self.request(
-            reqwest::Method::GET,
-            &format!("/api/v1/repos/{owner}/{name}"),
-        )
-        .await?
-        .json()
+        self.get_json(&format!("/api/v1/repos/{owner}/{name}"))
+            .await
+    }
+
+    /// All repos owned by the Clotho owner user, newest activity first.
+    pub async fn list_repos(&self) -> Result<Vec<RepoInfo>, ApiError> {
+        let owner = &self.config.owner;
+        self.get_json(&format!(
+            "/api/v1/users/{owner}/repos?limit=50&sort=updated&order=desc"
+        ))
         .await
-        .map_err(|e| ApiError::Upstream(format!("forgejo: invalid repo response: {e}")))
+    }
+
+    /// Pull requests on a repo. `state` is `open`, `closed`, or `all`.
+    pub async fn list_pulls(&self, name: &str, state: &str) -> Result<Vec<PullInfo>, ApiError> {
+        let owner = &self.config.owner;
+        self.get_json(&format!(
+            "/api/v1/repos/{owner}/{name}/pulls?state={state}&sort=recentupdate&limit=50"
+        ))
+        .await
+    }
+
+    pub async fn get_pull(&self, name: &str, number: i64) -> Result<PullInfo, ApiError> {
+        let owner = &self.config.owner;
+        self.get_json(&format!("/api/v1/repos/{owner}/{name}/pulls/{number}"))
+            .await
+    }
+
+    async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, ApiError> {
+        self.request(reqwest::Method::GET, path)
+            .await?
+            .json()
+            .await
+            .map_err(|e| ApiError::Upstream(format!("forgejo: invalid response for {path}: {e}")))
     }
 }

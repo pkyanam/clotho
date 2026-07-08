@@ -1,95 +1,77 @@
-"use client";
+import { Badge } from "@cloudflare/kumo";
+import Link from "next/link";
 
-import { Badge, Breadcrumbs, Button, LayerCard } from "@cloudflare/kumo";
-import { PageHeader } from "src/components/kumo/page-header/page-header";
-import {
-  GitBranchIcon,
-  RobotIcon,
-  ArrowRightIcon,
-  HouseIcon,
-} from "@phosphor-icons/react";
+import { api } from "src/lib/api";
 
-const sections = [
-  {
-    label: "vcs",
-    title: "repo browser",
-    body: "jj-native repos, commits, and the operation log — browsable.",
-  },
-  {
-    label: "review",
-    title: "pr view",
-    body: "structured diffs that humans and agents can both review.",
-  },
-  {
-    label: "presence",
-    title: "agent sessions",
-    body: "live agent checkpoints and session presence on the same repo.",
-  },
-];
+export const dynamic = "force-dynamic";
 
-export default function Home() {
+export default async function Home() {
+  const repos = await api()
+    .listRepos()
+    .catch(() => null);
+
   return (
     <div className="mx-auto max-w-6xl px-6 py-16">
-      <PageHeader
-        breadcrumbs={
-          <Breadcrumbs size="sm">
-            <Breadcrumbs.Link icon={<HouseIcon size={16} />} href="#">
-              clotho
-            </Breadcrumbs.Link>
-            <Breadcrumbs.Separator />
-            <Breadcrumbs.Current>app shell</Breadcrumbs.Current>
-          </Breadcrumbs>
-        }
-        tabs={[
-          { label: "overview", value: "overview" },
-          { label: "repos", value: "repos" },
-          { label: "pull requests", value: "prs" },
-          { label: "agents", value: "agents" },
-        ]}
-        defaultTab="overview"
-      >
-        <Badge variant="outline">stage 0 · scaffold</Badge>
-      </PageHeader>
-
-      <div className="mt-10 flex flex-wrap items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         <h1
           className="text-balance leading-[1.2]"
           style={{ fontSize: "clamp(1.5rem, 3vw, 1.875rem)" }}
         >
-          app shell
+          repos
         </h1>
-        <Button variant="primary" icon={GitBranchIcon}>
-          browse repos
-        </Button>
-        <Button variant="ghost" icon={ArrowRightIcon}>
-          read the prd
-        </Button>
+        <Badge variant="outline">
+          {repos ? `${repos.length} woven` : "gateway unreachable"}
+        </Badge>
       </div>
 
       <p className="mt-4 max-w-xl text-sm text-kumo-subtle">
-        repo browser, pr view, and agent-session presence land in stage 6
-        (docs/prd.md §5). this shell exists so the design system and workspace
-        wiring are real from day zero — now built on cloudflare kumo.
+        jj-native repositories, spun by humans and agents at once. every commit
+        is a real git object; the operation log remembers everything.
       </p>
 
-      <div className="rule-hairline mt-16" />
+      <div className="rule-hairline mt-10" />
 
-      <div className="mt-16 grid gap-4 sm:grid-cols-3">
-        {sections.map((s) => (
-          <LayerCard key={s.title} className="edge-hover">
-            <LayerCard.Secondary>
-              <span className="flex items-center gap-2">
-                <RobotIcon size={14} />
-                {s.label}
-              </span>
-            </LayerCard.Secondary>
-            <LayerCard.Primary>
-              <h2 className="text-base">{s.title}</h2>
-              <p className="mt-2 text-sm text-kumo-subtle">{s.body}</p>
-            </LayerCard.Primary>
-          </LayerCard>
-        ))}
-      </div>
+      {repos === null ? (
+        <p className="mt-10 text-sm text-kumo-subtle">
+          could not reach the api gateway — is the dev stack up? (`just dev`)
+        </p>
+      ) : repos.length === 0 ? (
+        <p className="mt-10 text-sm text-kumo-subtle">
+          no repos yet. create one: `curl -X POST localhost:8080/api/v1/repos -d{" "}
+          {"'"}
+          {"{"}&quot;name&quot;:&quot;weave&quot;{"}"}
+          {"'"}`
+        </p>
+      ) : (
+        <ul className="mt-10 divide-y divide-kumo-hairline border border-kumo-hairline">
+          {repos.map((repo) => (
+            <li key={repo.id}>
+              <Link
+                href={`/repos/${repo.name}`}
+                className="flex items-baseline justify-between gap-4 px-4 py-3 transition-colors hover:bg-kumo-elevated"
+              >
+                <span className="flex items-baseline gap-3">
+                  <span className="text-sm">{repo.name}</span>
+                  {repo.description && (
+                    <span className="text-xs text-kumo-inactive">
+                      {repo.description}
+                    </span>
+                  )}
+                </span>
+                <span className="flex items-center gap-3 text-xs text-kumo-inactive">
+                  {repo.open_pr_counter > 0 && (
+                    <span>{repo.open_pr_counter} open prs</span>
+                  )}
+                  {repo.open_issues_count > 0 && (
+                    <span>{repo.open_issues_count} issues</span>
+                  )}
+                  <span>{repo.default_branch}</span>
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

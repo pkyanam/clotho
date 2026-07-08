@@ -4,10 +4,11 @@ use clotho_common::pb::vcs::v1::{
     changed_file::ChangeKind,
     vcs_server::{Vcs, VcsServer},
     ChangedFile, CheckpointRequest, CheckpointResponse, CommitRequest, CommitResponse,
-    CommitSummary, DiffCommitsRequest, DiffCommitsResponse, FileEntry, GetHeadsRequest,
-    GetHeadsResponse, InitRepoRequest, InitRepoResponse, IntegrateCommitRequest,
-    IntegrateCommitResponse, ListFilesRequest, ListFilesResponse, OpLogEntry, QueryOpLogRequest,
-    QueryOpLogResponse, RestoreToRequest, RestoreToResponse,
+    CommitSummary, DiffCommitsRequest, DiffCommitsResponse, FileEntry, GetFileRequest,
+    GetFileResponse, GetHeadsRequest, GetHeadsResponse, InitRepoRequest, InitRepoResponse,
+    IntegrateCommitRequest, IntegrateCommitResponse, ListFilesRequest, ListFilesResponse,
+    LogCommitsRequest, LogCommitsResponse, OpLogEntry, QueryOpLogRequest, QueryOpLogResponse,
+    RestoreToRequest, RestoreToResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -182,8 +183,52 @@ impl Vcs for VcsService {
                     path: f.path,
                     size_bytes: f.size_bytes,
                     executable: f.executable,
+                    conflicted: f.conflicted,
                 })
                 .collect(),
+        }))
+    }
+
+    async fn get_file(
+        &self,
+        request: Request<GetFileRequest>,
+    ) -> Result<Response<GetFileResponse>, Status> {
+        let req = request.into_inner();
+        let (repo, commit_id, path) = (req.repo, req.commit_id, req.path);
+        if path.is_empty() {
+            return Err(Status::invalid_argument("path is required"));
+        }
+        let file = self
+            .engine
+            .run(move |engine| async move {
+                let commit_id = (!commit_id.is_empty()).then_some(commit_id.as_str());
+                engine.get_file(&repo, commit_id, &path).await
+            })
+            .await?;
+        Ok(Response::new(GetFileResponse {
+            commit_id: file.commit_id,
+            path: file.path,
+            content: file.content,
+            executable: file.executable,
+            conflicted: file.conflicted,
+        }))
+    }
+
+    async fn log_commits(
+        &self,
+        request: Request<LogCommitsRequest>,
+    ) -> Result<Response<LogCommitsResponse>, Status> {
+        let req = request.into_inner();
+        let (repo, from, limit) = (req.repo, req.from_commit_id, req.limit);
+        let commits = self
+            .engine
+            .run(move |engine| async move {
+                let from = (!from.is_empty()).then_some(from.as_str());
+                engine.log_commits(&repo, from, limit).await
+            })
+            .await?;
+        Ok(Response::new(LogCommitsResponse {
+            commits: commits.into_iter().map(commit_summary).collect(),
         }))
     }
 
@@ -218,6 +263,7 @@ impl Vcs for VcsService {
                     } as i32,
                     old_content: f.old_content,
                     new_content: f.new_content,
+                    conflicted: f.conflicted,
                 })
                 .collect(),
         }))

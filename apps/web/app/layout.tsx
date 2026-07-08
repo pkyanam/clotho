@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import Link from "next/link";
 import "./globals.css";
 
 // geist pixel — square element shape, the one typeface (see packages/ui)
@@ -31,8 +32,13 @@ export default function RootLayout({
     >
       <body className="flex min-h-full flex-col bg-kumo-canvas text-kumo-default">
         <header className="sticky top-0 z-10 border-b border-kumo-hairline bg-kumo-canvas/70 backdrop-blur-xl">
-          <div className="mx-auto flex h-14 max-w-6xl items-center px-6">
-            <span className="text-sm">clotho</span>
+          <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-6">
+            <Link href="/" className="text-sm">
+              clotho
+            </Link>
+            <Link href="/" className="text-xs text-kumo-subtle">
+              repos
+            </Link>
           </div>
         </header>
         <main className="flex-1">{children}</main>

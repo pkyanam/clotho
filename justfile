@@ -30,11 +30,12 @@ test-js:
 test-storage:
     CLOTHO_STORAGE_TEST_S3_ENDPOINT=http://localhost:9000 cargo test -p clotho-storage --test storage --release
 
-# Stage 3 collaboration-shell integration test against the running dev stack
-# (`just dev` first): repo creation through the Clotho API → real Forgejo
-# project with working issues/PRs, backed by a jj-managed git repo.
+# Stage 3 + 6 integration tests against the running dev stack (`just dev`
+# first): repo creation through the Clotho API → real Forgejo project with
+# working issues/PRs backed by a jj-managed git repo (tests/gateway.rs), and
+# the full browse/PR-diff/presence read surface (tests/stage6.rs).
 test-collab:
-    CLOTHO_COLLAB_TEST_GATEWAY_URL=http://localhost:8080 cargo test -p clotho-api-gateway --test gateway
+    CLOTHO_COLLAB_TEST_GATEWAY_URL=http://localhost:8080 cargo test -p clotho-api-gateway --tests
 
 # Stage 4 agent-interface integration test against the running dev stack
 # (`just dev` first): a real MCP client authenticates as a scoped agent

@@ -302,4 +302,33 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
     assert_eq!(denied_entry["tool"], "checkpoint");
     assert_eq!(denied_entry["status"], "denied");
     assert_eq!(denied_entry["repo"], repo);
+
+    // 11. Repo presence (Stage 6): the sessions view aggregates that audit
+    //     trail per (agent, token) — both agents show up on this repo, the
+    //     denied outsider flagged as such, newest activity first.
+    let sessions = reqwest::Client::new()
+        .get(format!(
+            "{}/admin/v1/repos/{repo}/sessions",
+            env.mcp_base_url
+        ))
+        .bearer_auth(&env.admin_token)
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    let sessions = sessions.as_array().unwrap();
+    let weaver = sessions
+        .iter()
+        .find(|s| s["agent"] == agent_name.as_str())
+        .expect("weaver session present");
+    assert_eq!(weaver["last_status"], "ok");
+    assert!(weaver["tool_calls"].as_i64().unwrap() >= 4);
+    let outsider_session = sessions
+        .iter()
+        .find(|s| s["agent"] == outsider_name.as_str())
+        .expect("outsider session present");
+    assert_eq!(outsider_session["last_status"], "denied");
+    assert_eq!(outsider_session["last_tool"], "checkpoint");
 }

@@ -81,6 +81,9 @@ jobs:
             nohup ./target/debug/clotho-vcs >"$RUNNER_TEMP/clotho-vcs.log" 2>&1 &
           CLOTHO_GATEWAY_HTTP_ADDR=127.0.0.1:8080 \
             CLOTHO_VCS_GRPC_URL=http://localhost:50051 \
+            CLOTHO_DIFF_GRPC_URL=http://localhost:50055 \
+            CLOTHO_AGENT_GATEWAY_URL=http://localhost:8090 \
+            CLOTHO_AGENT_ADMIN_TOKEN=clotho-agent-admin-dev \
             CLOTHO_FORGEJO_URL=http://localhost:3000 \
             CLOTHO_FORGEJO_OWNER=clotho \
             nohup ./target/debug/clotho-api-gateway >"$RUNNER_TEMP/clotho-api-gateway.log" 2>&1 &

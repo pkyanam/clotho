@@ -84,6 +84,21 @@ fn hex_bytes<S: serde::Serializer>(bytes: &[u8], ser: S) -> Result<S::Ok, S::Err
     ser.serialize_str(&bytes.iter().map(|b| format!("{b:02x}")).collect::<String>())
 }
 
+/// One agent session's recent activity on a repo: an (agent, token) pair
+/// aggregated over its audit-log entries.
+#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+pub struct RepoSession {
+    pub agent: String,
+    pub agent_id: Uuid,
+    pub token_id: Uuid,
+    pub last_tool: String,
+    /// 'ok' | 'denied' | 'error'
+    pub last_status: String,
+    pub last_seen: DateTime<Utc>,
+    pub first_seen: DateTime<Utc>,
+    pub tool_calls: i64,
+}
+
 pub fn sha256(data: &[u8]) -> Vec<u8> {
     Sha256::digest(data).to_vec()
 }
@@ -224,6 +239,39 @@ impl IdentityStore {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Recent agent sessions that touched one repo, newest activity first —
+    /// the presence primitive behind the Stage 6 UI panel. A "session" is
+    /// one (agent, token) pair aggregated over its audit entries within the
+    /// window: which agent, under which credential, doing what, and when.
+    pub async fn repo_sessions(
+        &self,
+        repo: &str,
+        within_secs: i64,
+        limit: i64,
+    ) -> Result<Vec<RepoSession>, IdentityError> {
+        Ok(sqlx::query_as::<_, RepoSession>(
+            "select * from (
+                 select distinct on (l.agent_id, l.token_id)
+                     a.name as agent, l.agent_id, l.token_id,
+                     l.tool as last_tool, l.status as last_status,
+                     l.occurred_at as last_seen,
+                     count(*) over w as tool_calls,
+                     min(l.occurred_at) over w as first_seen
+                 from agent_audit_log l join agents a on a.id = l.agent_id
+                 where l.repo = $1
+                   and l.occurred_at > now() - make_interval(secs => $2)
+                 window w as (partition by l.agent_id, l.token_id)
+                 order by l.agent_id, l.token_id, l.occurred_at desc
+             ) sessions
+             order by last_seen desc limit $3",
+        )
+        .bind(repo)
+        .bind(within_secs as f64)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     /// Recent audit entries for one agent, newest first.

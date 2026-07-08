@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures::StreamExt as _;
-use jj_lib::backend::{CommitId, CopyId, FileId, Signature, Timestamp, TreeValue};
+use jj_lib::backend::{CommitId, CopyId, Signature, Timestamp, TreeValue};
 use jj_lib::commit::Commit;
 use jj_lib::config::{ConfigLayer, ConfigSource, StackedConfig};
 use jj_lib::git_backend::GitBackend;
@@ -106,11 +106,20 @@ pub struct FileEntry {
     pub path: String,
     pub size_bytes: u64,
     pub executable: bool,
+    pub conflicted: bool,
 }
 
 pub struct FileList {
     pub commit_id: String,
     pub files: Vec<FileEntry>,
+}
+
+pub struct FileContent {
+    pub commit_id: String,
+    pub path: String,
+    pub content: Vec<u8>,
+    pub executable: bool,
+    pub conflicted: bool,
 }
 
 pub enum ChangeKind {
@@ -124,6 +133,9 @@ pub struct ChangedFile {
     pub kind: ChangeKind,
     pub old_content: Vec<u8>,
     pub new_content: Vec<u8>,
+    /// The new side is an unresolved jj conflict; `new_content` holds its
+    /// materialization (conflict-marker text).
+    pub conflicted: bool,
 }
 
 pub struct CommitsDiff {
@@ -576,14 +588,15 @@ impl VcsEngine {
         let mut files = Vec::new();
         for (path, value) in commit.tree().entries() {
             let value = value.map_err(EngineError::other)?;
-            // Conflicted entries are skipped: file listing describes resolved
-            // state; conflicts surface through the merge-queue (Stage 5).
-            if let Some(TreeValue::File { id, executable, .. }) = value.as_normal() {
-                let content = read_file_bytes(store, &path, id).await?;
+            // Conflicted entries are included, flagged, with the size of
+            // their materialized conflict text — the browser must never hide
+            // first-class conflicts (Stage 5/6).
+            if let Some(read) = self.read_tree_value(store, &path, value).await? {
                 files.push(FileEntry {
                     path: path.as_internal_file_string().to_string(),
-                    size_bytes: content.len() as u64,
-                    executable: *executable,
+                    size_bytes: read.content.len() as u64,
+                    executable: read.executable,
+                    conflicted: read.conflicted,
                 });
             }
         }
@@ -591,6 +604,114 @@ impl VcsEngine {
             commit_id: commit_id.hex(),
             files,
         })
+    }
+
+    /// Read one file from `commit_id`'s tree (default: the `main` bookmark
+    /// target). Unresolved conflicts come back materialized and flagged.
+    pub async fn get_file(
+        &self,
+        name: &str,
+        commit_id: Option<&str>,
+        path: &str,
+    ) -> Result<FileContent, EngineError> {
+        let repo = self.load_repo(name).await?;
+        let store = repo.store();
+        let commit_id = match commit_id {
+            Some(hex) => CommitId::try_from_hex(hex)
+                .ok_or_else(|| EngineError::InvalidId(hex.to_string()))?,
+            None => repo
+                .view()
+                .get_local_bookmark(RefName::new(MAIN_BOOKMARK))
+                .as_normal()
+                .cloned()
+                .unwrap_or_else(|| store.root_commit_id().clone()),
+        };
+        let commit = store
+            .get_commit_async(&commit_id)
+            .await
+            .map_err(EngineError::other)?;
+        let repo_path = RepoPathBuf::from_internal_string(path.to_string())
+            .map_err(|e| EngineError::InvalidPath(path.to_string(), e.to_string()))?;
+        let value = commit
+            .tree()
+            .path_value(&repo_path)
+            .await
+            .map_err(EngineError::other)?;
+        let read = self
+            .read_tree_value(store, &repo_path, value)
+            .await?
+            .ok_or_else(|| {
+                EngineError::InvalidPath(path.to_string(), "no such file at this commit".into())
+            })?;
+        Ok(FileContent {
+            commit_id: commit_id.hex(),
+            path: path.to_string(),
+            content: read.content,
+            executable: read.executable,
+            conflicted: read.conflicted,
+        })
+    }
+
+    /// Commit history walking ancestors of `from` (default: the `main`
+    /// bookmark target), newest first. `limit == 0` means unbounded.
+    pub async fn log_commits(
+        &self,
+        name: &str,
+        from_commit_id: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<CommitSummary>, EngineError> {
+        let repo = self.load_repo(name).await?;
+        let store = repo.store();
+        let start = match from_commit_id {
+            Some(hex) => Some(
+                CommitId::try_from_hex(hex)
+                    .ok_or_else(|| EngineError::InvalidId(hex.to_string()))?,
+            ),
+            None => repo
+                .view()
+                .get_local_bookmark(RefName::new(MAIN_BOOKMARK))
+                .as_normal()
+                .cloned(),
+        };
+        let Some(start) = start else {
+            return Ok(Vec::new()); // main is unborn: no history yet
+        };
+
+        // Walk ancestors newest-committer-time-first (a plain priority-queue
+        // walk over parent edges — good enough for a prototype log view; the
+        // root commit itself is elided as jj's synthetic empty root).
+        let root_id = store.root_commit_id().clone();
+        let mut seen = std::collections::HashSet::from([start.clone()]);
+        let mut queue = std::collections::BinaryHeap::new();
+        let mut commits = Vec::new();
+        let start_commit = store
+            .get_commit_async(&start)
+            .await
+            .map_err(EngineError::other)?;
+        queue.push((start_commit.committer().timestamp.timestamp.0, start));
+        while let Some((_, id)) = queue.pop() {
+            if id == root_id {
+                continue;
+            }
+            let commit = store
+                .get_commit_async(&id)
+                .await
+                .map_err(EngineError::other)?;
+            commits.push(summarize(&commit));
+            if limit != 0 && commits.len() as u32 >= limit {
+                break;
+            }
+            for parent_id in commit.parent_ids() {
+                if seen.insert(parent_id.clone()) {
+                    let parent = store
+                        .get_commit_async(parent_id)
+                        .await
+                        .map_err(EngineError::other)?;
+                    queue.push((parent.committer().timestamp.timestamp.0, parent_id.clone()));
+                }
+            }
+        }
+        Ok(commits)
     }
 
     /// Changed files between two commits, with full before/after contents.
@@ -629,8 +750,15 @@ impl VcsEngine {
         let mut stream = from_tree.diff_stream(&to_tree, &EverythingMatcher);
         while let Some(entry) = stream.next().await {
             let values = entry.values.map_err(EngineError::other)?;
-            let old_content = read_diff_side(store, &entry.path, &values.before).await?;
-            let new_content = read_diff_side(store, &entry.path, &values.after).await?;
+            let old = self
+                .read_tree_value(store, &entry.path, values.before)
+                .await?;
+            let new = self
+                .read_tree_value(store, &entry.path, values.after)
+                .await?;
+            let old_content = old.map(|r| r.content).unwrap_or_default();
+            let (new_content, conflicted) =
+                new.map(|r| (r.content, r.conflicted)).unwrap_or_default();
             if old_content == new_content {
                 continue;
             }
@@ -646,6 +774,7 @@ impl VcsEngine {
                 kind,
                 old_content,
                 new_content,
+                conflicted,
             });
         }
         Ok(CommitsDiff {
@@ -737,6 +866,57 @@ impl VcsEngine {
         })
     }
 
+    /// One tree entry in readable form. Unresolved file conflicts come back
+    /// as jj's materialized conflict-marker text — the same rendering the
+    /// backing git tree holds (ADR-0006) — flagged `conflicted`. `None` for
+    /// entries with no file contents to expose (absent, symlinks,
+    /// submodules, exotic non-file conflicts).
+    async fn read_tree_value(
+        &self,
+        store: &Arc<Store>,
+        path: &RepoPath,
+        value: MergedTreeValue,
+    ) -> Result<Option<ReadFile>, EngineError> {
+        use jj_lib::conflict_labels::ConflictLabels;
+        use jj_lib::conflicts::{
+            materialize_merge_result_to_bytes, materialize_tree_value, ConflictMarkerStyle,
+            ConflictMaterializeOptions, MaterializedTreeValue,
+        };
+        use jj_lib::tree_merge::MergeOptions;
+
+        match materialize_tree_value(store, path, value, &ConflictLabels::unlabeled())
+            .await
+            .map_err(EngineError::other)?
+        {
+            MaterializedTreeValue::File(mut file) => Ok(Some(ReadFile {
+                content: file.read_all(path).await.map_err(EngineError::other)?,
+                executable: file.executable,
+                conflicted: false,
+            })),
+            MaterializedTreeValue::FileConflict(conflict) => {
+                let options = ConflictMaterializeOptions {
+                    // jj's default marker style, matching what the working
+                    // copy (and therefore human muscle memory) shows.
+                    marker_style: ConflictMarkerStyle::Diff,
+                    marker_len: None,
+                    merge: MergeOptions::from_settings(&self.settings)
+                        .map_err(EngineError::other)?,
+                };
+                let content = materialize_merge_result_to_bytes(
+                    &conflict.contents,
+                    &conflict.labels,
+                    &options,
+                );
+                Ok(Some(ReadFile {
+                    content: content.into(),
+                    executable: conflict.executable.unwrap_or(false),
+                    conflicted: true,
+                }))
+            }
+            _ => Ok(None),
+        }
+    }
+
     async fn resolve_operation(
         &self,
         repo: &Arc<ReadonlyRepo>,
@@ -765,36 +945,11 @@ fn summarize(commit: &Commit) -> CommitSummary {
     }
 }
 
-/// Contents of one side of a tree diff entry. Empty for the absent side of
-/// an add/delete, non-file entries (symlink/submodule), and conflicted
-/// values — nothing to hand the diff engine in those cases.
-async fn read_diff_side(
-    store: &Arc<Store>,
-    path: &RepoPath,
-    value: &MergedTreeValue,
-) -> Result<Vec<u8>, EngineError> {
-    match value.as_normal() {
-        Some(TreeValue::File { id, .. }) => read_file_bytes(store, path, id).await,
-        _ => Ok(Vec::new()),
-    }
-}
-
-async fn read_file_bytes(
-    store: &Arc<Store>,
-    path: &RepoPath,
-    id: &FileId,
-) -> Result<Vec<u8>, EngineError> {
-    use futures::AsyncReadExt as _;
-    let mut reader = store
-        .read_file(path, id)
-        .await
-        .map_err(EngineError::other)?;
-    let mut content = Vec::new();
-    reader
-        .read_to_end(&mut content)
-        .await
-        .map_err(EngineError::other)?;
-    Ok(content)
+/// A tree entry read through [`VcsEngine::read_tree_value`].
+struct ReadFile {
+    content: Vec<u8>,
+    executable: bool,
+    conflicted: bool,
 }
 
 /// Record in the jj view what `refs/heads/main` in the backing git repo is

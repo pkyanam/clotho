@@ -25,6 +25,13 @@ service Vcs {
   rpc GetHeads(GetHeadsRequest) returns (GetHeadsResponse);
   // List the files in a commit's tree (default: the `main` bookmark target).
   rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
+  // Read one file's contents from a commit's tree (default: the `main`
+  // bookmark target). Conflicted entries come back materialized (jj's
+  // conflict-marker text) and flagged, never hidden.
+  rpc GetFile(GetFileRequest) returns (GetFileResponse);
+  // Commit history walking ancestors, newest first (default start: the
+  // `main` bookmark target).
+  rpc LogCommits(LogCommitsRequest) returns (LogCommitsResponse);
   // Changed files between two commits, with full before/after contents —
   // the raw material for clotho-diff's structured symbol diff.
   rpc DiffCommits(DiffCommitsRequest) returns (DiffCommitsResponse);
@@ -148,11 +155,47 @@ message FileEntry {
   string path = 1;
   uint64 size_bytes = 2;
   bool executable = 3;
+  // True when the entry is an unresolved jj conflict; its size reflects the
+  // materialized conflict text.
+  bool conflicted = 4;
 }
 
 message ListFilesResponse {
   string commit_id = 1;
   repeated FileEntry files = 2;
+}
+
+message GetFileRequest {
+  string repo = 1;
+  // Commit whose tree to read; empty means the `main` bookmark target.
+  string commit_id = 2;
+  // Repo-relative path.
+  string path = 3;
+}
+
+message GetFileResponse {
+  string commit_id = 1;
+  string path = 2;
+  bytes content = 3;
+  bool executable = 4;
+  // True when the entry is an unresolved jj conflict; content then holds
+  // jj's conflict materialization (marker text), same as the backing git
+  // tree Forgejo renders.
+  bool conflicted = 5;
+}
+
+message LogCommitsRequest {
+  string repo = 1;
+  // Commit to start walking ancestors from; empty means the `main`
+  // bookmark target.
+  string from_commit_id = 2;
+  // 0 means no limit.
+  uint32 limit = 3;
+}
+
+message LogCommitsResponse {
+  // Ancestors of the starting commit (inclusive), newest first.
+  repeated CommitSummary commits = 1;
 }
 
 message DiffCommitsRequest {
@@ -172,8 +215,12 @@ message ChangedFile {
   string path = 1;
   ChangeKind kind = 2;
   // Full contents on each side; empty on the absent side of an add/delete.
+  // Unresolved jj conflicts arrive materialized (marker text), flagged below.
   bytes old_content = 3;
   bytes new_content = 4;
+  // True when the new side is an unresolved jj conflict (Stage 5 lands
+  // conflicted commits as first-class objects; the PR view flags them).
+  bool conflicted = 5;
 }
 
 message DiffCommitsResponse {

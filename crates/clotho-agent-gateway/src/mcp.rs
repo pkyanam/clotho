@@ -255,6 +255,14 @@ impl AgentGateway {
                 })
                 .await?
                 .into_inner();
+            // Paths whose new side is an unresolved jj conflict (ADR-0006):
+            // agents get the same first-class conflict signal as the PR view.
+            let conflicted: std::collections::HashSet<String> = changes
+                .files
+                .iter()
+                .filter(|f| f.conflicted)
+                .map(|f| f.path.clone())
+                .collect();
             let structured = diff
                 .diff_files(DiffFilesRequest {
                     files: changes
@@ -277,6 +285,7 @@ impl AgentGateway {
                     "path": f.path,
                     "language": f.language,
                     "status": status_name(f.status()),
+                    "conflicted": conflicted.contains(&f.path),
                     "symbols": f.symbols.iter().map(|s| json!({
                         "name": s.name,
                         "kind": s.kind,

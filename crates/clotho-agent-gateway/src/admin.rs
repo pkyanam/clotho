@@ -27,6 +27,7 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .route("/admin/v1/agents", post(create_agent))
         .route("/admin/v1/agents/{name}/tokens", post(mint_token))
         .route("/admin/v1/agents/{name}/audit", get(audit_log))
+        .route("/admin/v1/repos/{repo}/sessions", get(repo_sessions))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_admin,
@@ -145,6 +146,44 @@ async fn audit_log(
         .await
     {
         Ok(entries) => Json(entries).into_response(),
+        Err(err) => identity_error(err),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct SessionsQuery {
+    #[serde(default = "default_sessions_limit")]
+    limit: i64,
+    /// Look-back window in seconds (default: 7 days).
+    #[serde(default = "default_sessions_within_secs")]
+    within_secs: i64,
+}
+
+fn default_sessions_limit() -> i64 {
+    20
+}
+
+fn default_sessions_within_secs() -> i64 {
+    7 * 24 * 3600
+}
+
+/// Recent agent sessions on one repo, aggregated from the audit log — the
+/// presence data the Stage 6 UI polls (via the api-gateway proxy, ADR-0007).
+async fn repo_sessions(
+    State(state): State<Arc<AdminState>>,
+    Path(repo): Path<String>,
+    Query(query): Query<SessionsQuery>,
+) -> Response {
+    match state
+        .identity
+        .repo_sessions(
+            &repo,
+            query.within_secs.clamp(1, 365 * 24 * 3600),
+            query.limit.clamp(1, 1000),
+        )
+        .await
+    {
+        Ok(sessions) => Json(sessions).into_response(),
         Err(err) => identity_error(err),
     }
 }
