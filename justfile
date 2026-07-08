@@ -43,6 +43,20 @@ test-collab:
 test-agent:
     CLOTHO_AGENT_TEST_MCP_URL=http://localhost:8090 cargo test -p clotho-agent-gateway --test agent
 
+# Stage 7 compute integration test: runs a real job on the external provider
+# (Daytona) via the CCI. Self-skips unless DAYTONA_API_KEY is set — loaded
+# from .env if present so `just test-compute` works after filling in .env.
+test-compute:
+    set -a; [ -f .env ] && . ./.env; set +a; cargo test -p clotho-compute --test compute -- --nocapture
+
+# Stage 7 end-to-end definition-of-done demo (`just dev` first). One command:
+# two agent sessions push concurrent commits reconciled by the merge-queue, a
+# large binary uploaded twice shows measured chunk dedup, a PR to review at
+# :3100, and a push-triggered CI job on the real sandbox provider reporting
+# status back. Reads .env for DAYTONA_API_KEY (CI leg self-skips without it).
+demo:
+    ./scripts/demo/run.sh
+
 # Build everything
 build: build-rust build-js
 

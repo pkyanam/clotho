@@ -47,6 +47,7 @@ pub struct JobSpec {
 }
 
 /// The result of a finished job (the sandbox is already torn down).
+#[derive(Debug)]
 pub struct JobResult {
     /// Exit code of the last command run (the first failing one, if any).
     pub exit_code: i32,

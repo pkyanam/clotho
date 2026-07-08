@@ -90,6 +90,9 @@ services:
       # Lets the API gateway adopt the bare git repos clotho-vcs writes.
       FORGEJO__repository__ALLOW_ADOPTION_OF_UNADOPTED_REPOSITORIES: "true"
       FORGEJO__service__DISABLE_REGISTRATION: "true"
+      # Allow push webhooks to reach the gateway by service name (Forgejo
+      # blocks private/loopback webhook targets by default) — Stage 7 CI.
+      FORGEJO__webhook__ALLOWED_HOST_LIST: "*"
     ports:
       - "3000:3000"
     volumes:
@@ -212,6 +215,28 @@ services:
     ports:
       - "50055:50055"
 
+  # Pluggable compute (docs/prd.md §5 Stage 7, docs/adr/0008): the CCI over
+  # gRPC. Daytona is the first provider; with no DAYTONA_API_KEY it starts in
+  # disabled mode (the stack stays healthy, CI jobs fail cleanly). Credentials
+  # come from a gitignored .env (see .env.example).
+  clotho-compute:
+    <<: *clotho-service
+    build:
+      context: .
+      dockerfile: infra/docker/rust-services.Dockerfile
+      args: { SERVICE: clotho-compute }
+    environment:
+      RUST_LOG: info
+      CLOTHO_COMPUTE_PROVIDER: ${CLOTHO_COMPUTE_PROVIDER:-daytona}
+      DAYTONA_API_KEY: ${DAYTONA_API_KEY:-}
+      DAYTONA_API_URL: ${DAYTONA_API_URL:-}
+      DAYTONA_PROXY_URL: ${DAYTONA_PROXY_URL:-}
+      DAYTONA_TARGET: ${DAYTONA_TARGET:-}
+      DAYTONA_ORGANIZATION_ID: ${DAYTONA_ORGANIZATION_ID:-}
+      CLOTHO_COMPUTE_SNAPSHOT: ${CLOTHO_COMPUTE_SNAPSHOT:-}
+    ports:
+      - "50057:50057"
+
   clotho-api-gateway:
     <<: *clotho-service
     build:
@@ -230,6 +255,13 @@ services:
       CLOTHO_FORGEJO_URL: http://forgejo:3000
       CLOTHO_FORGEJO_OWNER: clotho
       CLOTHO_FORGEJO_TOKEN_FILE: /run/clotho/forgejo-token
+      # Stage 7 CI (docs/adr/0008): the compute service (CCI), the URL Forgejo
+      # calls for pushes (reachable by service name on this network), the
+      # shared HMAC secret, and the web app base for status target links.
+      CLOTHO_COMPUTE_GRPC_URL: http://clotho-compute:50057
+      CLOTHO_WEBHOOK_URL: http://clotho-api-gateway:8080/api/v1/webhooks/forgejo
+      CLOTHO_WEBHOOK_SECRET: ${CLOTHO_WEBHOOK_SECRET:-clotho-webhook-dev}
+      CLOTHO_WEB_URL: ${CLOTHO_WEB_URL:-http://localhost:3100}
     ports:
       - "50056:50056"
       - "8080:8080"
@@ -245,6 +277,8 @@ services:
       clotho-agent-gateway:
         condition: service_started
       clotho-diff:
+        condition: service_started
+      clotho-compute:
         condition: service_started
       forgejo-init:
         condition: service_completed_successfully

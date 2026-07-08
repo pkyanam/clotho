@@ -50,6 +50,7 @@ jobs:
             -e FORGEJO__repository__DEFAULT_BRANCH=main \
             -e FORGEJO__repository__ALLOW_ADOPTION_OF_UNADOPTED_REPOSITORIES=true \
             -e FORGEJO__service__DISABLE_REGISTRATION=true \
+            -e FORGEJO__webhook__ALLOWED_HOST_LIST='*' \
             -v "$RUNNER_TEMP/git-repos:/data/git/repositories" \
             codeberg.org/forgejo/forgejo:15.0.3
           for i in $(seq 1 60); do
@@ -75,17 +76,24 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Start Clotho services (collab + agent integration tests)
         run: |
-          cargo build --bin clotho-vcs --bin clotho-api-gateway --bin clotho-diff --bin clotho-agent-gateway
+          cargo build --bin clotho-vcs --bin clotho-api-gateway --bin clotho-diff --bin clotho-agent-gateway --bin clotho-compute
           CLOTHO_VCS_DATA_DIR="$RUNNER_TEMP/vcs-repos" \
             CLOTHO_VCS_GIT_REPOS_DIR="$RUNNER_TEMP/git-repos/clotho" \
             nohup ./target/debug/clotho-vcs >"$RUNNER_TEMP/clotho-vcs.log" 2>&1 &
+          # Compute in disabled mode (no DAYTONA_API_KEY in CI): keeps the
+          # gateway's compute channel connectable; CI jobs aren't exercised here.
+          CLOTHO_COMPUTE_PROVIDER=disabled \
+            nohup ./target/debug/clotho-compute >"$RUNNER_TEMP/clotho-compute.log" 2>&1 &
           CLOTHO_GATEWAY_HTTP_ADDR=127.0.0.1:8080 \
             CLOTHO_VCS_GRPC_URL=http://localhost:50051 \
             CLOTHO_DIFF_GRPC_URL=http://localhost:50055 \
+            CLOTHO_COMPUTE_GRPC_URL=http://localhost:50057 \
             CLOTHO_AGENT_GATEWAY_URL=http://localhost:8090 \
             CLOTHO_AGENT_ADMIN_TOKEN=clotho-agent-admin-dev \
             CLOTHO_FORGEJO_URL=http://localhost:3000 \
             CLOTHO_FORGEJO_OWNER=clotho \
+            CLOTHO_WEBHOOK_URL=http://localhost:8080/api/v1/webhooks/forgejo \
+            CLOTHO_WEBHOOK_SECRET=clotho-webhook-dev \
             nohup ./target/debug/clotho-api-gateway >"$RUNNER_TEMP/clotho-api-gateway.log" 2>&1 &
           nohup ./target/debug/clotho-diff >"$RUNNER_TEMP/clotho-diff.log" 2>&1 &
           CLOTHO_AGENT_HTTP_ADDR=127.0.0.1:8090 \
@@ -108,6 +116,7 @@ jobs:
           cat "$RUNNER_TEMP/clotho-api-gateway.log" || true
           cat "$RUNNER_TEMP/clotho-diff.log" || true
           cat "$RUNNER_TEMP/clotho-agent-gateway.log" || true
+          cat "$RUNNER_TEMP/clotho-compute.log" || true
           docker logs forgejo || true
 
   js:
