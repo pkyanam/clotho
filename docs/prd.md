@@ -178,16 +178,18 @@ Each stage lists a goal, key tasks, and an exit condition. Stages 1–2 can star
 - Wire a push webhook → CCI → sandbox run → status reported back to the PR.
 - Run the full definition-of-done scenario from §1 end to end.
 - **Exit condition:** the Stage 7 demo scenario runs live, recorded, and reproducible from a clean `docker compose up`.
+- *Implementation note (2026-07-07):* the provider decision (§8 #3) was made by a human — **Daytona**, kept modular behind the CCI (docs/adr/0008). The CCI is a **Rust-native `ComputeProvider` trait** in a new `clotho-compute` crate (gRPC on :50057), not a TS worker wrapping ComputeSDK: no-lock-in means we own the swappable interface anyway, so a `DaytonaProvider` calling Daytona's REST API directly (control plane at `app.daytona.io/api` + toolbox proxy at `proxy.app.daytona.io`, both Bearer `DAYTONA_API_KEY`) keeps the backend all-Rust/gRPC — a second provider (E2B, …) is another impl of the same trait. With no key set the service runs a **disabled** provider (jobs fail `FAILED_PRECONDITION`) so plain `cargo test`/CI stay green; the round-trip test self-skips like the other env-gated ones (`just test-compute`). **Wiring:** Forgejo push webhook → api-gateway `/api/v1/webhooks/forgejo` (HMAC-verified, registered per repo at creation) → the CI job exports the repo's real git objects from clotho-vcs (new `ExportRepoArchive` RPC — a filesystem tar of the backing bare git repo, never a git shell-out) → clotho-compute ships them into a fresh sandbox, clones, checks out the pushed commit, and runs `.clotho/ci.sh` (else a default probe) → the exit code is reported back to the PR via Forgejo's commit-status API. Compute stays vendor- *and* collaboration-agnostic (it only runs commands); orchestration lives at the edge next to the Forgejo coupling. **Key deviation, ADR'd:** Daytona sandboxes run in Daytona's cloud with no route back to the local stack, so git objects are *shipped in* rather than fetched over git-http — the honest reproducible-from-a-clean-`up` choice (only a `.env` key needed), and it keeps the demo provider-agnostic. The definition-of-done demo is one command (`just demo`, driver `crates/clotho-demo`, `scripts/demo/run.sh`): two agents commit concurrently over vcs gRPC + merge-queue (reconciled unattended), a large binary uploads twice through the storage engine with measured chunk dedup, a PR opens for review at :3100, and the push-triggered CI job runs on the real Daytona sandbox and reports status. **Recorded follow-ups (not built — deliberately out of Stage 7 scope):** MCP `commit`/`submit_change` write tools routed through the merge-queue (the MCP surface is still read/checkpoint-only, so the demo's agents commit over raw vcs gRPC), and the post-prototype Rust `clotho` CLI (vision spec §5).
 
 ---
 
 ## 6. Success criteria for the prototype (overall)
 
 - All Stage 0–7 exit conditions met.
-- No component depends on shelling out to the `jj` or `git` CLI binaries at runtime — everything goes through `jj-lib`/`gitoxide` embedded APIs.
-- Storage dedup is *measured*, not assumed — the demo must show a real before/after byte count.
+- No component depends on shelling out to the `jj` or `git` CLI binaries at runtime — everything goes through `jj-lib`/`gitoxide` embedded APIs. (The external CI *sandbox* runs `git clone` on the objects Clotho ships it — that's the CI job, not a Clotho service.)
+- Storage dedup is *measured*, not assumed — the demo shows a real before/after byte count (`just demo`, Stage 2/7 notes).
 - At least one agent identity is fully distinct from a human identity in the data model, not a flag on a user row.
-- The whole stack runs from a single `docker compose up` on a laptop.
+- Compute is provider-agnostic: the one integrated provider (Daytona) sits behind the CCI trait, with no vendor baked into any caller (docs/adr/0008).
+- The whole stack runs from a single `docker compose up` on a laptop; the end-to-end demo needs only a `DAYTONA_API_KEY` in `.env` for the CI leg.
 
 ---
 
@@ -207,7 +209,7 @@ Each stage lists a goal, key tasks, and an exit condition. Stages 1–2 can star
 
 1. **Clotho's own license** — MIT/Apache-2.0 (max adoption, permissive) vs. AGPLv3 (closes the SaaS loophole competitors could exploit, consistent with Forgejo's own GPLv3 stance) vs. a source-available/BSL model. This affects how tightly we can integrate Forgejo's GPLv3 code and what "open-source" means in the marketing page's promises.
 2. **Fork Forgejo vs. stay API-level** — the prototype plan assumes we don't modify Forgejo source at all in Stage 3. Decide before Stage 3 whether deeper integration (e.g., surfacing jj's operation log inside Forgejo's own UI) is worth taking on GPLv3 obligations for that specific code.
-3. **First external compute provider** — Daytona is recommended for Stage 7 (persistent workspace, fast cold start, self-hosting story), but E2B (microVM isolation) is the safer pick if untrusted agent-generated code execution is a concern even in prototype form.
+3. **First external compute provider** — ~~Daytona is recommended for Stage 7 (persistent workspace, fast cold start, self-hosting story), but E2B (microVM isolation) is the safer pick if untrusted agent-generated code execution is a concern even in prototype form.~~ **Resolved (2026-07-07):** Daytona, integrated behind the Rust-native CCI so it stays swappable (docs/adr/0008, Stage 7 note). E2B remains a drop-in second `ComputeProvider` impl if microVM isolation is later wanted.
 
 ---
 

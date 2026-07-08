@@ -118,7 +118,9 @@ async fn main() -> Result<()> {
     ));
 
     merge_queue_demo(&cfg, &repo, &initial).await?;
-    storage_demo(&cfg).await?;
+    // Seed the synthetic file per run: the dev storage bucket persists across
+    // demos, so fixed bytes would look fully deduped on a re-run.
+    storage_demo(&cfg, nanos as u64 | 1).await?;
     ci_and_pr_demo(&cfg, &http, &owner, &repo).await?;
 
     banner("[✓]", "demo complete");
@@ -210,14 +212,14 @@ async fn merge_queue_demo(cfg: &Config, repo: &str, base: &str) -> Result<()> {
 
 /// Upload a large incompressible file, then a near-duplicate; report the
 /// engine's *measured* chunk-level dedup and verify byte-identical download.
-async fn storage_demo(cfg: &Config) -> Result<()> {
+async fn storage_demo(cfg: &Config, seed: u64) -> Result<()> {
     banner("[2/4]", "measured chunk-level storage dedup");
     let mut storage = StorageClient::connect(cfg.storage.clone())
         .await?
         .max_decoding_message_size(64 * 1024 * 1024);
 
     let size = cfg.dedup_mib * 1024 * 1024;
-    let original = pseudo_random(size, 0xC10704);
+    let original = pseudo_random(size, seed);
     note(&format!(
         "uploading a {} MiB incompressible file…",
         cfg.dedup_mib
