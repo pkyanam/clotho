@@ -23,5 +23,8 @@ next-env.d.ts
 .idea/
 .vscode/
 
+# Devin CLI local config (personal MCP servers / tokens — never commit)
+.devin/config.local.json
+
 # Logs
 *.log
