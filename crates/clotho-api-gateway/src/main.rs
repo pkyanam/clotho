@@ -38,6 +38,13 @@ async fn main() -> Result<(), Error> {
         diff_grpc_url: env_or("CLOTHO_DIFF_GRPC_URL", "http://localhost:50055"),
         agent_gateway_url: env_or("CLOTHO_AGENT_GATEWAY_URL", "http://localhost:8090"),
         agent_admin_token: env_or("CLOTHO_AGENT_ADMIN_TOKEN", ""),
+        compute_grpc_url: env_or("CLOTHO_COMPUTE_GRPC_URL", "http://localhost:50057"),
+        webhook_secret: env_or("CLOTHO_WEBHOOK_SECRET", ""),
+        webhook_url: env_or(
+            "CLOTHO_WEBHOOK_URL",
+            "http://clotho-api-gateway:8080/api/v1/webhooks/forgejo",
+        ),
+        web_url: env_or("CLOTHO_WEB_URL", "http://localhost:3100"),
         forgejo: ForgejoConfig {
             base_url: env_or("CLOTHO_FORGEJO_URL", "http://localhost:3000"),
             owner: env_or("CLOTHO_FORGEJO_OWNER", "clotho"),

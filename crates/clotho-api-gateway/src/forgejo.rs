@@ -123,12 +123,25 @@ impl ForgejoClient {
         method: reqwest::Method,
         path: &str,
     ) -> Result<reqwest::Response, ApiError> {
+        self.request_with_body(method, path, None).await
+    }
+
+    async fn request_with_body(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> Result<reqwest::Response, ApiError> {
         let url = format!("{}{path}", self.config.base_url.trim_end_matches('/'));
         let token = self.token().await?;
-        let response = self
+        let mut builder = self
             .http
             .request(method, &url)
-            .header("Authorization", format!("token {token}"))
+            .header("Authorization", format!("token {token}"));
+        if let Some(body) = body {
+            builder = builder.json(&body);
+        }
+        let response = builder
             .send()
             .await
             .map_err(|e| ApiError::Upstream(format!("forgejo: {e}")))?;
@@ -187,6 +200,62 @@ impl ForgejoClient {
         let owner = &self.config.owner;
         self.get_json(&format!("/api/v1/repos/{owner}/{name}/pulls/{number}"))
             .await
+    }
+
+    /// Attach a commit status to `sha` — how Stage 7 CI reports back to the PR
+    /// (`state` is one of `pending`, `success`, `failure`, `error`).
+    pub async fn set_commit_status(
+        &self,
+        name: &str,
+        sha: &str,
+        state: &str,
+        context: &str,
+        description: &str,
+        target_url: &str,
+    ) -> Result<(), ApiError> {
+        let owner = &self.config.owner;
+        let body = serde_json::json!({
+            "state": state,
+            "context": context,
+            "description": description,
+            "target_url": target_url,
+        });
+        self.request_with_body(
+            reqwest::Method::POST,
+            &format!("/api/v1/repos/{owner}/{name}/statuses/{sha}"),
+            Some(body),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Register a push webhook on the repo pointing back at the gateway, so
+    /// pushes trigger CI (docs/adr/0008). Idempotency is best-effort: a
+    /// duplicate hook just means CI fires twice, harmless for the prototype.
+    pub async fn create_push_webhook(
+        &self,
+        name: &str,
+        webhook_url: &str,
+        secret: &str,
+    ) -> Result<(), ApiError> {
+        let owner = &self.config.owner;
+        let body = serde_json::json!({
+            "type": "gitea",
+            "active": true,
+            "events": ["push"],
+            "config": {
+                "url": webhook_url,
+                "content_type": "json",
+                "secret": secret,
+            },
+        });
+        self.request_with_body(
+            reqwest::Method::POST,
+            &format!("/api/v1/repos/{owner}/{name}/hooks"),
+            Some(body),
+        )
+        .await?;
+        Ok(())
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, ApiError> {

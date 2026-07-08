@@ -10,10 +10,12 @@
 //! presence proxied from the agent gateway's audit log.
 
 mod agents;
+mod ci;
 pub mod error;
 pub mod forgejo;
 mod pulls;
 mod repos;
+mod webhooks;
 
 use std::sync::Arc;
 
@@ -21,6 +23,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use clotho_common::pb::compute::v1::compute_client::ComputeClient;
 use clotho_common::pb::diff::v1::diff_client::DiffClient;
 use clotho_common::pb::vcs::v1::vcs_client::VcsClient;
 use clotho_common::pb::vcs::v1::{CommitRequest, InitRepoRequest};
@@ -41,6 +44,16 @@ pub struct GatewayConfig {
     pub agent_gateway_url: String,
     /// Admin bearer token for the agent gateway (service-to-service).
     pub agent_admin_token: String,
+    /// clotho-compute gRPC endpoint, e.g. `http://clotho-compute:50057`.
+    pub compute_grpc_url: String,
+    /// Shared secret Forgejo signs push webhooks with (HMAC-SHA256). Empty
+    /// disables signature verification (dev only).
+    pub webhook_secret: String,
+    /// URL Forgejo should call for push events; registered per repo at
+    /// creation. Empty skips webhook registration.
+    pub webhook_url: String,
+    /// Public base URL of the web app, used for commit-status target links.
+    pub web_url: String,
     pub forgejo: ForgejoConfig,
 }
 
@@ -49,10 +62,14 @@ pub(crate) struct AppState {
     /// gateway starts cleanly regardless of service start order.
     pub(crate) vcs: VcsClient<Channel>,
     pub(crate) diff: DiffClient<Channel>,
+    pub(crate) compute: ComputeClient<Channel>,
     pub(crate) forgejo: ForgejoClient,
     pub(crate) http: reqwest::Client,
     pub(crate) agent_gateway_url: String,
     pub(crate) agent_admin_token: String,
+    pub(crate) webhook_secret: String,
+    pub(crate) webhook_url: String,
+    pub(crate) web_url: String,
 }
 
 fn lazy_channel(url: &str, what: &str) -> Result<Channel, clotho_common::Error> {
@@ -63,12 +80,21 @@ fn lazy_channel(url: &str, what: &str) -> Result<Channel, clotho_common::Error> 
 
 pub fn router(config: GatewayConfig) -> Result<Router, clotho_common::Error> {
     let state = Arc::new(AppState {
-        vcs: VcsClient::new(lazy_channel(&config.vcs_grpc_url, "vcs")?),
+        vcs: VcsClient::new(lazy_channel(&config.vcs_grpc_url, "vcs")?)
+            // ExportRepoArchive returns the git object DB; lift the 4 MiB cap.
+            .max_decoding_message_size(256 * 1024 * 1024),
         diff: DiffClient::new(lazy_channel(&config.diff_grpc_url, "diff")?),
+        compute: ComputeClient::new(lazy_channel(&config.compute_grpc_url, "compute")?)
+            // CI archives can be large; lift the default 4 MiB decode cap.
+            .max_decoding_message_size(256 * 1024 * 1024)
+            .max_encoding_message_size(256 * 1024 * 1024),
         forgejo: ForgejoClient::new(config.forgejo),
         http: reqwest::Client::new(),
         agent_gateway_url: config.agent_gateway_url.trim_end_matches('/').to_string(),
         agent_admin_token: config.agent_admin_token,
+        webhook_secret: config.webhook_secret,
+        webhook_url: config.webhook_url,
+        web_url: config.web_url.trim_end_matches('/').to_string(),
     });
     Ok(Router::new()
         .route("/healthz", get(healthz))
@@ -89,6 +115,9 @@ pub fn router(config: GatewayConfig) -> Result<Router, clotho_common::Error> {
             "/api/v1/repos/{name}/agent-sessions",
             get(agents::repo_sessions),
         )
+        // Forgejo push webhook → Stage 7 CI (docs/adr/0008). Registered per
+        // repo at creation; verified by shared-secret HMAC.
+        .route("/api/v1/webhooks/forgejo", post(webhooks::forgejo))
         // The read API is public in the prototype; the web app runs on a
         // different origin in dev (Next on :3100, gateway on :8080).
         .layer(CorsLayer::permissive())
@@ -157,6 +186,18 @@ async fn create_repo(
         forgejo = %forgejo_repo.full_name,
         "repo provisioned in clotho-vcs and Forgejo"
     );
+
+    // Register the push webhook so future pushes trigger CI (docs/adr/0008).
+    // Best-effort: a repo without CI is still a usable repo.
+    if !state.webhook_url.is_empty() {
+        if let Err(e) = state
+            .forgejo
+            .create_push_webhook(&req.name, &state.webhook_url, &state.webhook_secret)
+            .await
+        {
+            tracing::warn!(repo = %req.name, error = %e, "failed to register CI push webhook");
+        }
+    }
 
     Ok((
         StatusCode::CREATED,
