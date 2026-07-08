@@ -193,6 +193,7 @@ services:
       CLOTHO_AGENT_DATABASE_URL: postgres://clotho:clotho-dev@postgres:5432/clotho
       CLOTHO_VCS_GRPC_URL: http://clotho-vcs:50051
       CLOTHO_DIFF_GRPC_URL: http://clotho-diff:50055
+      CLOTHO_MERGE_QUEUE_GRPC_URL: http://clotho-merge-queue:50053
       CLOTHO_AGENT_HTTP_ADDR: 0.0.0.0:8090
       CLOTHO_AGENT_ADMIN_TOKEN: clotho-agent-admin-dev # dev-only credentials
     ports:
@@ -248,6 +249,7 @@ services:
       CLOTHO_GATEWAY_HTTP_ADDR: 0.0.0.0:8080
       CLOTHO_VCS_GRPC_URL: http://clotho-vcs:50051
       CLOTHO_DIFF_GRPC_URL: http://clotho-diff:50055
+      CLOTHO_MERGE_QUEUE_GRPC_URL: http://clotho-merge-queue:50053
       # Agent presence (Stage 6): proxied from the agent gateway's admin
       # sessions endpoint with a service-to-service token (docs/adr/0007).
       CLOTHO_AGENT_GATEWAY_URL: http://clotho-agent-gateway:8090

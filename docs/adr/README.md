@@ -13,3 +13,5 @@ Context → Decision → Consequences. Supersede rather than edit.
 | [0006](0006-merge-queue-integration.md) | Merge-queue serialized rebase + git ref import | Accepted |
 | [0007](0007-edge-read-api-and-presence.md) | Edge read API; presence proxies the audit log | Accepted |
 | [0008](0008-compute-cci-daytona.md) | Rust-native CCI; Daytona provider; git objects shipped to the sandbox | Accepted |
+| [0009](0009-agent-write-tools-through-merge-queue.md) | Agent write tools route through VCS and merge-queue over MCP | Accepted |
+| [0010](0010-clotho-cli-uses-rest-edge.md) | The clotho CLI uses the api-gateway REST edge | Accepted |

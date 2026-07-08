@@ -1,6 +1,6 @@
 //! Agent interface layer (docs/prd.md §5 Stage 4): a native MCP server over
-//! streamable HTTP exposing `checkpoint`, `restore_to`, `diff_symbol`, and
-//! `orient_repo`, backed by clotho-vcs and clotho-diff over gRPC.
+//! streamable HTTP exposing read/checkpoint tools plus write tools
+//! (`commit`, `submit_change`), backed by Clotho services over gRPC.
 //!
 //! Agents authenticate with scoped bearer tokens (Postgres-backed, a model
 //! fully distinct from human identities — see the `identity` module and
@@ -40,6 +40,8 @@ pub struct GatewayConfig {
     pub vcs_grpc_url: String,
     /// clotho-diff gRPC endpoint, e.g. `http://clotho-diff:50055`.
     pub diff_grpc_url: String,
+    /// clotho-merge-queue gRPC endpoint, e.g. `http://clotho-merge-queue:50053`.
+    pub merge_queue_grpc_url: String,
     /// Bearer token guarding the admin surface (create agents, mint tokens).
     pub admin_token: String,
 }
@@ -72,6 +74,7 @@ pub fn router(config: &GatewayConfig, pool: sqlx::PgPool) -> Result<Router, clot
     let gateway = AgentGateway::new(
         lazy_channel(&config.vcs_grpc_url)?,
         lazy_channel(&config.diff_grpc_url)?,
+        lazy_channel(&config.merge_queue_grpc_url)?,
         identity.clone(),
     );
 

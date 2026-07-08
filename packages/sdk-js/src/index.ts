@@ -57,6 +57,27 @@ export interface CreatedRepo {
   forgejo: RepoInfo;
 }
 
+export interface CommitFileInput {
+  path: string;
+  content: string;
+  executable?: boolean;
+}
+
+export interface CreatedCommit {
+  commit_id: string;
+  change_id: string;
+  operation_id: string;
+}
+
+export interface SubmitChangeResult {
+  commit_id: string;
+  change_id: string;
+  operation_id: string;
+  fast_forwarded: boolean;
+  conflicted: boolean;
+  conflicted_paths: string[];
+}
+
 export interface TreeEntry {
   path: string;
   size_bytes: number;
@@ -254,6 +275,39 @@ export class ClothoClient {
 
   getRepo(name: string): Promise<RepoDetail> {
     return this.request(`/api/v1/repos/${encodeURIComponent(name)}`);
+  }
+
+  createCommit(
+    name: string,
+    options: {
+      message: string;
+      files: CommitFileInput[];
+      deletedPaths?: string[];
+      parentCommitIds?: string[];
+      authorName?: string;
+      authorEmail?: string;
+    },
+  ): Promise<CreatedCommit> {
+    return this.request(`/api/v1/repos/${encodeURIComponent(name)}/commits`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: options.message,
+        files: options.files,
+        deleted_paths: options.deletedPaths ?? [],
+        parent_commit_ids: options.parentCommitIds ?? [],
+        author_name: options.authorName,
+        author_email: options.authorEmail,
+      }),
+    });
+  }
+
+  submitChange(name: string, commitId: string): Promise<SubmitChangeResult> {
+    return this.request(`/api/v1/repos/${encodeURIComponent(name)}/submit`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ commit_id: commitId }),
+    });
   }
 
   tree(name: string, commitId?: string): Promise<Tree> {

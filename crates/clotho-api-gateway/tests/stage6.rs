@@ -97,19 +97,26 @@ async fn human_browses_repo_and_reviews_structured_pr_diff() {
     let initial_commit = created["initial_commit_id"].as_str().unwrap().to_string();
     let owner = created["owner"].as_str().unwrap().to_string();
 
-    // 2. An agent commits real code through clotho-vcs.
+    // 2. A CLI/human write creates real code through the REST edge.
     let mut vcs = VcsClient::connect(env.vcs_grpc_url.clone()).await.unwrap();
-    let code = vcs
-        .commit(commit_request(
-            &name,
-            vec![],
-            "src/lib.rs",
-            b"pub fn spin() -> u32 {\n    1\n}\n",
-            "add spin",
-        ))
+    let code: Value = http
+        .post(format!("{}/api/v1/repos/{name}/commits", env.gateway_url))
+        .json(&json!({
+            "message": "add spin",
+            "author_name": "stage6-cli",
+            "author_email": "stage6-cli@clotho.internal",
+            "files": [{
+                "path": "src/lib.rs",
+                "content": "pub fn spin() -> u32 {\n    1\n}\n"
+            }]
+        }))
+        .send()
         .await
-        .unwrap()
-        .into_inner();
+        .expect("gateway commit reachable")
+        .json()
+        .await
+        .unwrap();
+    let code_commit_id = code["commit_id"].as_str().unwrap().to_string();
 
     // 3. Repo browsing through the gateway: list, detail, tree, file,
     //    commits, op log.
@@ -124,7 +131,7 @@ async fn human_browses_repo_and_reviews_structured_pr_diff() {
     );
 
     let detail = get_json(&env, &format!("/api/v1/repos/{name}"), "repo detail").await;
-    assert_eq!(detail["main_commit_id"], code.commit_id);
+    assert_eq!(detail["main_commit_id"], code_commit_id);
     assert_eq!(detail["forgejo"]["default_branch"], "main");
 
     let tree = get_json(&env, &format!("/api/v1/repos/{name}/tree"), "tree").await;
@@ -148,7 +155,7 @@ async fn human_browses_repo_and_reviews_structured_pr_diff() {
         .iter()
         .map(|c| c["commit_id"].as_str().unwrap())
         .collect();
-    assert_eq!(commit_ids[0], code.commit_id, "newest first");
+    assert_eq!(commit_ids[0], code_commit_id, "newest first");
     assert!(commit_ids.contains(&initial_commit.as_str()));
 
     let op_log = get_json(&env, &format!("/api/v1/repos/{name}/oplog"), "op log").await;
@@ -195,7 +202,7 @@ async fn human_browses_repo_and_reviews_structured_pr_diff() {
         "structured pr diff",
     )
     .await;
-    assert_eq!(diff["to_commit_id"], code.commit_id);
+    assert_eq!(diff["to_commit_id"], code_commit_id);
     assert_eq!(diff["conflicted"], false);
     let file_diff = &diff["files"][0];
     assert_eq!(file_diff["path"], "src/lib.rs");
@@ -225,7 +232,7 @@ async fn human_browses_repo_and_reviews_structured_pr_diff() {
     let side_a = vcs
         .commit(commit_request(
             &name,
-            vec![code.commit_id.clone()],
+            vec![code_commit_id.clone()],
             "src/lib.rs",
             b"pub fn spin() -> u32 {\n    2\n}\n",
             "agent a: spin -> 2",
@@ -236,7 +243,7 @@ async fn human_browses_repo_and_reviews_structured_pr_diff() {
     let side_b = vcs
         .commit(commit_request(
             &name,
-            vec![code.commit_id.clone()],
+            vec![code_commit_id.clone()],
             "src/lib.rs",
             b"pub fn spin() -> u32 {\n    3\n}\n",
             "agent b: spin -> 3",

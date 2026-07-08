@@ -76,10 +76,12 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Start Clotho services (collab + agent integration tests)
         run: |
-          cargo build --bin clotho-vcs --bin clotho-api-gateway --bin clotho-diff --bin clotho-agent-gateway --bin clotho-compute
+          cargo build --bin clotho-vcs --bin clotho-merge-queue --bin clotho-api-gateway --bin clotho-diff --bin clotho-agent-gateway --bin clotho-compute
           CLOTHO_VCS_DATA_DIR="$RUNNER_TEMP/vcs-repos" \
             CLOTHO_VCS_GIT_REPOS_DIR="$RUNNER_TEMP/git-repos/clotho" \
             nohup ./target/debug/clotho-vcs >"$RUNNER_TEMP/clotho-vcs.log" 2>&1 &
+          CLOTHO_VCS_GRPC_URL=http://localhost:50051 \
+            nohup ./target/debug/clotho-merge-queue >"$RUNNER_TEMP/clotho-merge-queue.log" 2>&1 &
           # Compute in disabled mode (no DAYTONA_API_KEY in CI): keeps the
           # gateway's compute channel connectable; CI jobs aren't exercised here.
           CLOTHO_COMPUTE_PROVIDER=disabled \
@@ -87,6 +89,7 @@ jobs:
           CLOTHO_GATEWAY_HTTP_ADDR=127.0.0.1:8080 \
             CLOTHO_VCS_GRPC_URL=http://localhost:50051 \
             CLOTHO_DIFF_GRPC_URL=http://localhost:50055 \
+            CLOTHO_MERGE_QUEUE_GRPC_URL=http://localhost:50053 \
             CLOTHO_COMPUTE_GRPC_URL=http://localhost:50057 \
             CLOTHO_AGENT_GATEWAY_URL=http://localhost:8090 \
             CLOTHO_AGENT_ADMIN_TOKEN=clotho-agent-admin-dev \
@@ -100,6 +103,7 @@ jobs:
             CLOTHO_AGENT_DATABASE_URL=postgres://clotho:clotho-dev@localhost:5432/clotho \
             CLOTHO_VCS_GRPC_URL=http://localhost:50051 \
             CLOTHO_DIFF_GRPC_URL=http://localhost:50055 \
+            CLOTHO_MERGE_QUEUE_GRPC_URL=http://localhost:50053 \
             CLOTHO_AGENT_ADMIN_TOKEN=clotho-agent-admin-dev \
             nohup ./target/debug/clotho-agent-gateway >"$RUNNER_TEMP/clotho-agent-gateway.log" 2>&1 &
       - run: cargo test --workspace
@@ -113,6 +117,7 @@ jobs:
         if: failure()
         run: |
           cat "$RUNNER_TEMP/clotho-vcs.log" || true
+          cat "$RUNNER_TEMP/clotho-merge-queue.log" || true
           cat "$RUNNER_TEMP/clotho-api-gateway.log" || true
           cat "$RUNNER_TEMP/clotho-diff.log" || true
           cat "$RUNNER_TEMP/clotho-agent-gateway.log" || true

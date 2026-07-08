@@ -19,14 +19,16 @@ mod webhooks;
 
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clotho_common::pb::compute::v1::compute_client::ComputeClient;
 use clotho_common::pb::diff::v1::diff_client::DiffClient;
+use clotho_common::pb::mergequeue::v1::merge_queue_client::MergeQueueClient;
+use clotho_common::pb::mergequeue::v1::SubmitChangeRequest;
 use clotho_common::pb::vcs::v1::vcs_client::VcsClient;
-use clotho_common::pb::vcs::v1::{CommitRequest, InitRepoRequest};
+use clotho_common::pb::vcs::v1::{CommitRequest, FileChange, InitRepoRequest};
 use serde::{Deserialize, Serialize};
 use tonic::transport::Channel;
 use tower_http::cors::CorsLayer;
@@ -40,6 +42,8 @@ pub struct GatewayConfig {
     pub vcs_grpc_url: String,
     /// clotho-diff gRPC endpoint, e.g. `http://clotho-diff:50055`.
     pub diff_grpc_url: String,
+    /// clotho-merge-queue gRPC endpoint, e.g. `http://clotho-merge-queue:50053`.
+    pub merge_queue_grpc_url: String,
     /// clotho-agent-gateway admin HTTP base, e.g. `http://clotho-agent-gateway:8090`.
     pub agent_gateway_url: String,
     /// Admin bearer token for the agent gateway (service-to-service).
@@ -62,6 +66,7 @@ pub(crate) struct AppState {
     /// gateway starts cleanly regardless of service start order.
     pub(crate) vcs: VcsClient<Channel>,
     pub(crate) diff: DiffClient<Channel>,
+    pub(crate) queue: MergeQueueClient<Channel>,
     pub(crate) compute: ComputeClient<Channel>,
     pub(crate) forgejo: ForgejoClient,
     pub(crate) http: reqwest::Client,
@@ -84,6 +89,7 @@ pub fn router(config: GatewayConfig) -> Result<Router, clotho_common::Error> {
             // ExportRepoArchive returns the git object DB; lift the 4 MiB cap.
             .max_decoding_message_size(256 * 1024 * 1024),
         diff: DiffClient::new(lazy_channel(&config.diff_grpc_url, "diff")?),
+        queue: MergeQueueClient::new(lazy_channel(&config.merge_queue_grpc_url, "merge queue")?),
         compute: ComputeClient::new(lazy_channel(&config.compute_grpc_url, "compute")?)
             // CI archives can be large; lift the default 4 MiB decode cap.
             .max_decoding_message_size(256 * 1024 * 1024)
@@ -103,8 +109,12 @@ pub fn router(config: GatewayConfig) -> Result<Router, clotho_common::Error> {
         .route("/api/v1/repos/{name}", get(repos::get_repo))
         .route("/api/v1/repos/{name}/tree", get(repos::tree))
         .route("/api/v1/repos/{name}/file", get(repos::file))
-        .route("/api/v1/repos/{name}/commits", get(repos::commits))
+        .route(
+            "/api/v1/repos/{name}/commits",
+            get(repos::commits).post(commit_repo),
+        )
         .route("/api/v1/repos/{name}/oplog", get(repos::op_log))
+        .route("/api/v1/repos/{name}/submit", post(submit_change))
         .route("/api/v1/repos/{name}/pulls", get(pulls::list_pulls))
         .route("/api/v1/repos/{name}/pulls/{number}", get(pulls::get_pull))
         .route(
@@ -146,6 +156,58 @@ struct CreateRepoResponse {
     /// The empty initial commit that seeds `refs/heads/main`.
     initial_commit_id: String,
     forgejo: RepoInfo,
+}
+
+#[derive(Deserialize)]
+struct CommitFileRequest {
+    path: String,
+    content: String,
+    #[serde(default)]
+    executable: bool,
+}
+
+#[derive(Deserialize)]
+struct CommitRepoRequest {
+    message: String,
+    files: Vec<CommitFileRequest>,
+    #[serde(default)]
+    deleted_paths: Vec<String>,
+    #[serde(default)]
+    parent_commit_ids: Vec<String>,
+    #[serde(default = "default_cli_author_name")]
+    author_name: String,
+    #[serde(default = "default_cli_author_email")]
+    author_email: String,
+}
+
+fn default_cli_author_name() -> String {
+    "clotho-cli".into()
+}
+
+fn default_cli_author_email() -> String {
+    "cli@clotho.internal".into()
+}
+
+#[derive(Serialize)]
+struct CommitRepoResponse {
+    commit_id: String,
+    change_id: String,
+    operation_id: String,
+}
+
+#[derive(Deserialize)]
+struct SubmitChangeBody {
+    commit_id: String,
+}
+
+#[derive(Serialize)]
+struct SubmitChangeJson {
+    commit_id: String,
+    change_id: String,
+    operation_id: String,
+    fast_forwarded: bool,
+    conflicted: bool,
+    conflicted_paths: Vec<String>,
 }
 
 /// One call, two systems: initialize the jj-managed repository in clotho-vcs
@@ -209,4 +271,74 @@ async fn create_repo(
             forgejo: forgejo_repo,
         }),
     ))
+}
+
+/// Human/CLI write path: create a commit through the REST edge, while the
+/// engine still owns tree construction and git object writes.
+async fn commit_repo(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Json(req): Json<CommitRepoRequest>,
+) -> Result<(StatusCode, Json<CommitRepoResponse>), ApiError> {
+    if req.message.trim().is_empty() {
+        return Err(ApiError::InvalidRequest("message is required".into()));
+    }
+    if req.files.is_empty() && req.deleted_paths.is_empty() {
+        return Err(ApiError::InvalidRequest(
+            "at least one file or deleted path is required".into(),
+        ));
+    }
+    let mut vcs = state.vcs.clone();
+    let response = vcs
+        .commit(CommitRequest {
+            repo: name,
+            parent_commit_ids: req.parent_commit_ids,
+            files: req
+                .files
+                .into_iter()
+                .map(|f| FileChange {
+                    path: f.path,
+                    content: f.content.into_bytes(),
+                    executable: f.executable,
+                })
+                .collect(),
+            deleted_paths: req.deleted_paths,
+            message: req.message,
+            author_name: req.author_name,
+            author_email: req.author_email,
+        })
+        .await?
+        .into_inner();
+    Ok((
+        StatusCode::CREATED,
+        Json(CommitRepoResponse {
+            commit_id: response.commit_id,
+            change_id: response.change_id,
+            operation_id: response.operation_id,
+        }),
+    ))
+}
+
+/// Submit a commit to the merge queue through the REST edge.
+async fn submit_change(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Json(req): Json<SubmitChangeBody>,
+) -> Result<Json<SubmitChangeJson>, ApiError> {
+    let mut queue = state.queue.clone();
+    let response = queue
+        .submit_change(SubmitChangeRequest {
+            repo: name,
+            commit_id: req.commit_id,
+        })
+        .await?
+        .into_inner();
+    Ok(Json(SubmitChangeJson {
+        commit_id: response.commit_id,
+        change_id: response.change_id,
+        operation_id: response.operation_id,
+        fast_forwarded: response.fast_forwarded,
+        conflicted: response.conflicted,
+        conflicted_paths: response.conflicted_paths,
+    }))
 }

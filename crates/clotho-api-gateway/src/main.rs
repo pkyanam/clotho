@@ -36,6 +36,7 @@ async fn main() -> Result<(), Error> {
     let config = GatewayConfig {
         vcs_grpc_url: env_or("CLOTHO_VCS_GRPC_URL", "http://localhost:50051"),
         diff_grpc_url: env_or("CLOTHO_DIFF_GRPC_URL", "http://localhost:50055"),
+        merge_queue_grpc_url: env_or("CLOTHO_MERGE_QUEUE_GRPC_URL", "http://localhost:50053"),
         agent_gateway_url: env_or("CLOTHO_AGENT_GATEWAY_URL", "http://localhost:8090"),
         agent_admin_token: env_or("CLOTHO_AGENT_ADMIN_TOKEN", ""),
         compute_grpc_url: env_or("CLOTHO_COMPUTE_GRPC_URL", "http://localhost:50057"),

@@ -1,6 +1,6 @@
 //! Stage 4 exit-condition test (docs/prd.md §5): a real MCP client
-//! authenticates as a scoped agent identity, checkpoints work, breaks
-//! something, and restores — entirely through MCP tool calls. Plus the
+//! authenticates as a scoped agent identity, checkpoints work, commits and
+//! submits a change, then restores — entirely through MCP tool calls. Plus the
 //! guard rails: scope enforcement, rejected credentials, and the per-call
 //! audit log.
 //!
@@ -122,7 +122,7 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         .unwrap()
         .into_inner();
 
-    // 1. Provision a scoped agent identity: this repo, these four tools.
+    // 1. Provision a scoped agent identity: this repo, these six tools.
     let agent_name = format!("weaver-{nanos}");
     admin_post(
         &env,
@@ -136,7 +136,14 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         &format!("/admin/v1/agents/{agent_name}/tokens"),
         json!({
             "allowed_repos": [repo],
-            "allowed_tools": ["checkpoint", "restore_to", "orient_repo", "diff_symbol"],
+            "allowed_tools": [
+                "checkpoint",
+                "restore_to",
+                "orient_repo",
+                "diff_symbol",
+                "commit",
+                "submit_change"
+            ],
         }),
         "mint token",
     )
@@ -151,7 +158,14 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
     names.sort();
     assert_eq!(
         names,
-        vec!["checkpoint", "diff_symbol", "orient_repo", "restore_to"]
+        vec![
+            "checkpoint",
+            "commit",
+            "diff_symbol",
+            "orient_repo",
+            "restore_to",
+            "submit_change"
+        ]
     );
 
     // 3. Orientation: heads, main target, op log, and file tree.
@@ -171,37 +185,50 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
     assert!(!err, "checkpoint failed: {checkpoint}");
     let checkpoint_op = checkpoint["operation_id"].as_str().unwrap().to_string();
 
-    // 5. Intentionally break something (an agent's ordinary commit path).
-    let broken = vcs
-        .commit(CommitRequest {
-            repo: repo.clone(),
-            parent_commit_ids: vec![],
-            files: vec![FileChange {
-                path: "src/lib.rs".into(),
-                content: b"pub fn spin() -> u32 { compile_error!() }\n".to_vec(),
-                executable: false,
-            }],
-            deleted_paths: vec![],
-            message: "risky refactor (broken)".into(),
-            author_name: "agent-a".into(),
-            author_email: "agent-a@agents.clotho.internal".into(),
-        })
-        .await
-        .unwrap()
-        .into_inner();
+    // 5. Intentionally break something, now through the agent-native write
+    //    path instead of raw vcs gRPC.
+    let (err, broken) = call_tool(
+        &client,
+        "commit",
+        json!({
+            "repo": repo.clone(),
+            "message": "risky refactor (broken)",
+            "files": [{
+                "path": "src/lib.rs",
+                "content": "pub fn spin() -> u32 { compile_error!() }\n"
+            }]
+        }),
+    )
+    .await;
+    assert!(!err, "commit failed: {broken}");
+    let broken_commit_id = broken["commit_id"].as_str().unwrap().to_string();
 
-    // 6. The structured diff names the damaged symbol — no patch text.
+    // 6. Land it through the merge queue over MCP. In this simple case the
+    //    commit already fast-forwarded main at write time, so integration is
+    //    idempotent; the important property is that agents no longer need a
+    //    raw gRPC escape hatch to submit.
+    let (err, submitted) = call_tool(
+        &client,
+        "submit_change",
+        json!({ "repo": repo.clone(), "commit_id": broken_commit_id }),
+    )
+    .await;
+    assert!(!err, "submit_change failed: {submitted}");
+    assert_eq!(submitted["commit_id"], broken_commit_id);
+    assert_eq!(submitted["conflicted"], false);
+
+    // 7. The structured diff names the damaged symbol — no patch text.
     let (err, diff) = call_tool(&client, "diff_symbol", json!({ "repo": repo })).await;
     assert!(!err, "diff_symbol failed: {diff}");
     assert_eq!(diff["from_commit_id"], good.commit_id);
-    assert_eq!(diff["to_commit_id"], broken.commit_id);
+    assert_eq!(diff["to_commit_id"], broken_commit_id);
     assert_eq!(diff["files"][0]["language"], "rust");
     let symbol = &diff["files"][0]["symbols"][0];
     assert_eq!(symbol["name"], "spin");
     assert_eq!(symbol["kind"], "function");
     assert_eq!(symbol["status"], "modified");
 
-    // 7. Restore to the checkpoint — entirely through MCP.
+    // 8. Restore to the checkpoint — entirely through MCP.
     let (err, restored) = call_tool(
         &client,
         "restore_to",
@@ -216,7 +243,7 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         .into_inner();
     assert_eq!(heads.main_commit_id, good.commit_id, "main is good again");
 
-    // 8. Scope enforcement: a token for a different repo is denied (and the
+    // 9. Scope enforcement: a token for a different repo is denied (and the
     //    denial is audited), without leaking whether the repo exists.
     let outsider_name = format!("outsider-{nanos}");
     admin_post(
@@ -247,7 +274,7 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
     assert_eq!(denied, Value::Null); // denial message is plain text, not JSON
     outsider.cancel().await.unwrap();
 
-    // 9. Garbage credentials never reach the tools.
+    // 10. Garbage credentials never reach the tools.
     let transport = StreamableHttpClientTransport::from_config(
         StreamableHttpClientTransportConfig::with_uri(format!("{}/mcp", env.mcp_base_url))
             .auth_header("clotho_agt_not_a_real_token"),
@@ -262,7 +289,7 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
 
     client.cancel().await.unwrap();
 
-    // 10. Every call above is in the audit log with the agent's identity.
+    // 11. Every call above is in the audit log with the agent's identity.
     let audit = reqwest::Client::new()
         .get(format!(
             "{}/admin/v1/agents/{agent_name}/audit",
@@ -280,7 +307,14 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         .iter()
         .map(|e| (e["tool"].as_str().unwrap(), e["status"].as_str().unwrap()))
         .collect();
-    for tool in ["orient_repo", "checkpoint", "diff_symbol", "restore_to"] {
+    for tool in [
+        "orient_repo",
+        "checkpoint",
+        "commit",
+        "submit_change",
+        "diff_symbol",
+        "restore_to",
+    ] {
         assert!(
             calls.contains(&(tool, "ok")),
             "audit log missing ok entry for {tool}: {calls:?}"
@@ -303,7 +337,7 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
     assert_eq!(denied_entry["status"], "denied");
     assert_eq!(denied_entry["repo"], repo);
 
-    // 11. Repo presence (Stage 6): the sessions view aggregates that audit
+    // 12. Repo presence (Stage 6): the sessions view aggregates that audit
     //     trail per (agent, token) — both agents show up on this repo, the
     //     denied outsider flagged as such, newest activity first.
     let sessions = reqwest::Client::new()
@@ -324,7 +358,7 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         .find(|s| s["agent"] == agent_name.as_str())
         .expect("weaver session present");
     assert_eq!(weaver["last_status"], "ok");
-    assert!(weaver["tool_calls"].as_i64().unwrap() >= 4);
+    assert!(weaver["tool_calls"].as_i64().unwrap() >= 6);
     let outsider_session = sessions
         .iter()
         .find(|s| s["agent"] == outsider_name.as_str())

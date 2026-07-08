@@ -9,6 +9,7 @@ members = [
     "crates/clotho-diff",
     "crates/clotho-api-gateway",
     "crates/clotho-compute",
+    "crates/clotho-cli",
     "crates/clotho-demo",
 ]
 

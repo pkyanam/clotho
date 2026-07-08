@@ -1,14 +1,15 @@
 //! The MCP tool surface: `checkpoint`, `restore_to`, `diff_symbol`,
-//! `orient_repo` — backed by clotho-vcs and clotho-diff over gRPC, guarded
-//! by scoped agent tokens, with every invocation audited (docs/prd.md §5
-//! Stage 4).
+//! `orient_repo`, `commit`, and `submit_change` — backed by Clotho services
+//! over gRPC, guarded by scoped agent tokens, with every invocation audited.
 
 use clotho_common::pb::diff::v1::diff_client::DiffClient;
 use clotho_common::pb::diff::v1::{ChangeStatus, DiffFilesRequest, FileDiffInput};
+use clotho_common::pb::mergequeue::v1::merge_queue_client::MergeQueueClient;
+use clotho_common::pb::mergequeue::v1::SubmitChangeRequest;
 use clotho_common::pb::vcs::v1::vcs_client::VcsClient;
 use clotho_common::pb::vcs::v1::{
-    CheckpointRequest, DiffCommitsRequest, GetHeadsRequest, ListFilesRequest, QueryOpLogRequest,
-    RestoreToRequest,
+    CheckpointRequest, CommitRequest, DiffCommitsRequest, FileChange, GetHeadsRequest,
+    ListFilesRequest, QueryOpLogRequest, RestoreToRequest,
 };
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
@@ -90,21 +91,138 @@ pub struct DiffSymbolParams {
     pub to_commit_id: Option<String>,
 }
 
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct CommitFileParam {
+    /// Repo-relative path, e.g. "src/lib.rs".
+    pub path: String,
+    /// UTF-8/text file contents. Binary payloads are deferred to a later
+    /// artifact-aware tool surface.
+    pub content: String,
+    /// Whether the file should be executable.
+    pub executable: Option<bool>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct CommitParams {
+    /// Repository name.
+    pub repo: String,
+    /// Commit message.
+    pub message: String,
+    /// Files to add or replace.
+    pub files: Vec<CommitFileParam>,
+    /// Repo-relative paths to delete.
+    pub deleted_paths: Option<Vec<String>>,
+    /// Explicit parent commit ids. Omit to commit on the current head(s).
+    pub parent_commit_ids: Option<Vec<String>>,
+    /// Display author name. Defaults to the authenticated agent name.
+    pub author_name: Option<String>,
+    /// Author email. Defaults to `<agent>@agents.clotho.internal`.
+    pub author_email: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct SubmitChangeParams {
+    /// Repository name.
+    pub repo: String,
+    /// Commit id returned by `commit`.
+    pub commit_id: String,
+}
+
 #[derive(Clone)]
 pub struct AgentGateway {
     vcs: VcsClient<Channel>,
     diff: DiffClient<Channel>,
+    queue: MergeQueueClient<Channel>,
     identity: IdentityStore,
 }
 
 #[tool_router]
 impl AgentGateway {
-    pub fn new(vcs: Channel, diff: Channel, identity: IdentityStore) -> Self {
+    pub fn new(vcs: Channel, diff: Channel, queue: Channel, identity: IdentityStore) -> Self {
         Self {
             vcs: VcsClient::new(vcs),
             diff: DiffClient::new(diff),
+            queue: MergeQueueClient::new(queue),
             identity,
         }
+    }
+
+    #[tool(
+        description = "Create a commit from explicit file contents. The commit is authored under the authenticated agent identity and is not landed on main until submit_change runs."
+    )]
+    async fn commit(
+        &self,
+        Parameters(params): Parameters<CommitParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let agent = authed_agent(&ctx)?;
+        let default_author_name = agent.name.clone();
+        let default_author_email =
+            format!("{}@agents.clotho.internal", agent.name.replace(' ', "-"));
+        let mut vcs = self.vcs.clone();
+        self.run_tool(&ctx, "commit", &repo, args, async move {
+            let author_name = params.author_name.unwrap_or(default_author_name);
+            let author_email = params.author_email.unwrap_or(default_author_email);
+            let response = vcs
+                .commit(CommitRequest {
+                    repo: params.repo,
+                    parent_commit_ids: params.parent_commit_ids.unwrap_or_default(),
+                    files: params
+                        .files
+                        .into_iter()
+                        .map(|f| FileChange {
+                            path: f.path,
+                            content: f.content.into_bytes(),
+                            executable: f.executable.unwrap_or(false),
+                        })
+                        .collect(),
+                    deleted_paths: params.deleted_paths.unwrap_or_default(),
+                    message: params.message,
+                    author_name,
+                    author_email,
+                })
+                .await?
+                .into_inner();
+            Ok(json!({
+                "commit_id": response.commit_id,
+                "change_id": response.change_id,
+                "operation_id": response.operation_id,
+            }))
+        })
+        .await
+    }
+
+    #[tool(
+        description = "Submit an agent-authored commit to the merge queue so it lands on main through serialized integration. Conflicts are surfaced in the response instead of blocking."
+    )]
+    async fn submit_change(
+        &self,
+        Parameters(params): Parameters<SubmitChangeParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let mut queue = self.queue.clone();
+        self.run_tool(&ctx, "submit_change", &repo, args, async move {
+            let response = queue
+                .submit_change(SubmitChangeRequest {
+                    repo: params.repo,
+                    commit_id: params.commit_id,
+                })
+                .await?
+                .into_inner();
+            Ok(json!({
+                "commit_id": response.commit_id,
+                "change_id": response.change_id,
+                "operation_id": response.operation_id,
+                "fast_forwarded": response.fast_forwarded,
+                "conflicted": response.conflicted,
+                "conflicted_paths": response.conflicted_paths,
+            }))
+        })
+        .await
     }
 
     #[tool(
@@ -315,17 +433,7 @@ impl AgentGateway {
         args: Value,
         work: impl std::future::Future<Output = Result<Value, ToolError>>,
     ) -> Result<CallToolResult, McpError> {
-        let agent = ctx
-            .extensions
-            .get::<http::request::Parts>()
-            .and_then(|parts| parts.extensions.get::<AuthedAgent>())
-            .cloned()
-            .ok_or_else(|| {
-                McpError::internal_error(
-                    "request reached a tool without an authenticated agent",
-                    None,
-                )
-            })?;
+        let agent = authed_agent(ctx)?;
         let digest = sha256(args.to_string().as_bytes());
 
         if !agent.may_use_tool(tool) || !agent.may_touch_repo(repo) {
@@ -372,6 +480,19 @@ impl AgentGateway {
     }
 }
 
+fn authed_agent(ctx: &RequestContext<RoleServer>) -> Result<AuthedAgent, McpError> {
+    ctx.extensions
+        .get::<http::request::Parts>()
+        .and_then(|parts| parts.extensions.get::<AuthedAgent>())
+        .cloned()
+        .ok_or_else(|| {
+            McpError::internal_error(
+                "request reached a tool without an authenticated agent",
+                None,
+            )
+        })
+}
+
 fn status_name(status: ChangeStatus) -> &'static str {
     match status {
         ChangeStatus::Added => "added",
@@ -387,7 +508,8 @@ impl ServerHandler for AgentGateway {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "Clotho agent gateway: version control tools for AI agents. Use orient_repo \
              for situational awareness, checkpoint before risky work, restore_to to roll \
-             back, and diff_symbol to see what changed at the symbol level.",
+             back, diff_symbol to see what changed at the symbol level, and commit then \
+             submit_change to land authored work through the merge queue.",
         )
     }
 }
