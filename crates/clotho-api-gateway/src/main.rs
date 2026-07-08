@@ -47,7 +47,7 @@ async fn main() -> Result<(), Error> {
         ),
         web_url: env_or("CLOTHO_WEB_URL", "http://localhost:3100"),
         forgejo: ForgejoConfig {
-            base_url: env_or("CLOTHO_FORGEJO_URL", "http://localhost:3000"),
+            base_url: env_or("CLOTHO_FORGEJO_URL", "http://localhost:13000"),
             owner: env_or("CLOTHO_FORGEJO_OWNER", "clotho"),
             token,
         },

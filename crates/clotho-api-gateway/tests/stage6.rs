@@ -33,7 +33,7 @@ fn test_env() -> Option<TestEnv> {
     Some(TestEnv {
         gateway_url,
         vcs_grpc_url: env_or("CLOTHO_COLLAB_TEST_VCS_GRPC_URL", "http://localhost:50051"),
-        forgejo_url: env_or("CLOTHO_COLLAB_TEST_FORGEJO_URL", "http://localhost:3000"),
+        forgejo_url: env_or("CLOTHO_COLLAB_TEST_FORGEJO_URL", "http://localhost:13000"),
         forgejo_user: env_or("CLOTHO_COLLAB_TEST_FORGEJO_USER", "clotho"),
         forgejo_password: env_or("CLOTHO_COLLAB_TEST_FORGEJO_PASSWORD", "clotho-dev"),
     })

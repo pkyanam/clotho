@@ -12,7 +12,7 @@
 // types mirrored from the gateway's JSON responses
 // ---------------------------------------------------------------------------
 
-/** Forgejo project entry, as proxied by the gateway. */
+/** Clotho repository summary from the collaboration facade. */
 export interface RepoInfo {
   id: number;
   name: string;
@@ -117,7 +117,39 @@ export interface PullRef {
   sha: string;
 }
 
-/** Forgejo pull request, as proxied by the gateway. */
+export interface IssueLabel {
+  name: string;
+  color: string;
+}
+
+export interface Issue {
+  number: number;
+  title: string;
+  body: string | null;
+  state: string;
+  user: { login: string };
+  labels: IssueLabel[];
+  comments: number;
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Comment {
+  id: number;
+  body: string;
+  user: { login: string };
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IssueDetail {
+  issue: Issue;
+  comments: Comment[];
+}
+
+/** Clotho pull request summary from the collaboration facade. */
 export interface Pull {
   number: number;
   title: string;
@@ -133,6 +165,26 @@ export interface Pull {
   created_at: string;
   updated_at: string;
   comments: number;
+}
+
+export interface Branch {
+  name: string;
+  commit: {
+    id: string;
+    message: string;
+    url: string;
+  };
+  protected: boolean;
+}
+
+export interface CommitStatus {
+  id: number;
+  state: "pending" | "success" | "failure" | "error" | string;
+  context: string;
+  description: string;
+  target_url: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export type DiffLineKind = "context" | "add" | "del";
@@ -352,6 +404,22 @@ export class ClothoClient {
     return pulls;
   }
 
+  createPull(
+    name: string,
+    options: { title: string; body?: string; head: string; base?: string },
+  ): Promise<Pull> {
+    return this.request(`/api/v1/repos/${encodeURIComponent(name)}/pulls`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: options.title,
+        body: options.body ?? "",
+        head: options.head,
+        base: options.base ?? "main",
+      }),
+    });
+  }
+
   pull(name: string, number: number): Promise<Pull> {
     return this.request(
       `/api/v1/repos/${encodeURIComponent(name)}/pulls/${number}`,
@@ -362,6 +430,112 @@ export class ClothoClient {
     return this.request(
       `/api/v1/repos/${encodeURIComponent(name)}/pulls/${number}/diff`,
     );
+  }
+
+  commentOnPull(name: string, number: number, body: string): Promise<Comment> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/pulls/${number}/comments`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ body }),
+      },
+    );
+  }
+
+  reviewPull(
+    name: string,
+    number: number,
+    options: { body?: string; event?: "COMMENT" | "APPROVE" | "REQUEST_CHANGES" },
+  ): Promise<Comment> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/pulls/${number}/reviews`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          body: options.body ?? "",
+          event: options.event ?? "COMMENT",
+        }),
+      },
+    );
+  }
+
+  mergePull(
+    name: string,
+    number: number,
+    options?: { method?: "merge" | "rebase" | "rebase-merge" | "squash"; title?: string; message?: string },
+  ): Promise<Pull> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/pulls/${number}/merge`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          method: options?.method ?? "merge",
+          title: options?.title,
+          message: options?.message,
+        }),
+      },
+    );
+  }
+
+  async issues(
+    name: string,
+    state: "open" | "closed" | "all" = "open",
+  ): Promise<Issue[]> {
+    const { issues } = await this.request<{ issues: Issue[] }>(
+      `/api/v1/repos/${encodeURIComponent(name)}/issues${qs({ state })}`,
+    );
+    return issues;
+  }
+
+  createIssue(
+    name: string,
+    options: { title: string; body?: string },
+  ): Promise<Issue> {
+    return this.request(`/api/v1/repos/${encodeURIComponent(name)}/issues`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: options.title, body: options.body ?? "" }),
+    });
+  }
+
+  issue(name: string, number: number): Promise<IssueDetail> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/issues/${number}`,
+    );
+  }
+
+  commentOnIssue(
+    name: string,
+    number: number,
+    body: string,
+  ): Promise<Comment> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/issues/${number}/comments`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ body }),
+      },
+    );
+  }
+
+  async branches(name: string): Promise<Branch[]> {
+    const { branches } = await this.request<{ branches: Branch[] }>(
+      `/api/v1/repos/${encodeURIComponent(name)}/branches`,
+    );
+    return branches;
+  }
+
+  async commitStatuses(name: string, sha: string): Promise<CommitStatus[]> {
+    const { statuses } = await this.request<{ statuses: CommitStatus[] }>(
+      `/api/v1/repos/${encodeURIComponent(name)}/commits/${encodeURIComponent(
+        sha,
+      )}/statuses`,
+    );
+    return statuses;
   }
 
   /** Recent agent sessions on a repo (poll this for the presence panel). */

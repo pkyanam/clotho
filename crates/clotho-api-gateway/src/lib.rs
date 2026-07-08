@@ -13,8 +13,10 @@ mod agents;
 mod ci;
 pub mod error;
 pub mod forgejo;
+mod issues;
 mod pulls;
 mod repos;
+mod status;
 mod webhooks;
 
 use std::sync::Arc;
@@ -115,11 +117,43 @@ pub fn router(config: GatewayConfig) -> Result<Router, clotho_common::Error> {
         )
         .route("/api/v1/repos/{name}/oplog", get(repos::op_log))
         .route("/api/v1/repos/{name}/submit", post(submit_change))
-        .route("/api/v1/repos/{name}/pulls", get(pulls::list_pulls))
+        .route(
+            "/api/v1/repos/{name}/issues",
+            get(issues::list_issues).post(issues::create_issue),
+        )
+        .route(
+            "/api/v1/repos/{name}/issues/{number}",
+            get(issues::get_issue),
+        )
+        .route(
+            "/api/v1/repos/{name}/issues/{number}/comments",
+            post(issues::create_comment),
+        )
+        .route(
+            "/api/v1/repos/{name}/pulls",
+            get(pulls::list_pulls).post(pulls::create_pull),
+        )
         .route("/api/v1/repos/{name}/pulls/{number}", get(pulls::get_pull))
+        .route(
+            "/api/v1/repos/{name}/pulls/{number}/comments",
+            post(pulls::comment_on_pull),
+        )
+        .route(
+            "/api/v1/repos/{name}/pulls/{number}/reviews",
+            post(pulls::review_pull),
+        )
+        .route(
+            "/api/v1/repos/{name}/pulls/{number}/merge",
+            post(pulls::merge_pull),
+        )
         .route(
             "/api/v1/repos/{name}/pulls/{number}/diff",
             get(pulls::pull_diff),
+        )
+        .route("/api/v1/repos/{name}/branches", get(status::branches))
+        .route(
+            "/api/v1/repos/{name}/commits/{sha}/statuses",
+            get(status::commit_statuses),
         )
         .route(
             "/api/v1/repos/{name}/agent-sessions",

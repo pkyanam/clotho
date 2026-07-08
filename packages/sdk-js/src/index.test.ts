@@ -96,4 +96,91 @@ describe("ClothoClient", () => {
       undefined,
     );
   });
+
+  it("wraps native issue list and creation", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ issues: [{ number: 1 }] }))
+      .mockResolvedValueOnce(jsonResponse({ number: 2 }));
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    await expect(client.issues("weave", "all")).resolves.toEqual([
+      { number: 1 },
+    ]);
+    await client.createIssue("weave", { title: "race", body: "found" });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://gateway.test/api/v1/repos/weave/issues?state=all",
+      undefined,
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://gateway.test/api/v1/repos/weave/issues",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ title: "race", body: "found" }),
+      }),
+    );
+  });
+
+  it("posts PR collaboration actions through Clotho routes", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({})));
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    await client.commentOnPull("weave", 7, "looks good");
+    await client.reviewPull("weave", 7, { event: "APPROVE" });
+    await client.mergePull("weave", 7, { method: "squash" });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://gateway.test/api/v1/repos/weave/pulls/7/comments",
+      expect.objectContaining({ body: JSON.stringify({ body: "looks good" }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://gateway.test/api/v1/repos/weave/pulls/7/reviews",
+      expect.objectContaining({
+        body: JSON.stringify({ body: "", event: "APPROVE" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "http://gateway.test/api/v1/repos/weave/pulls/7/merge",
+      expect.objectContaining({
+        body: JSON.stringify({
+          method: "squash",
+          title: undefined,
+          message: undefined,
+        }),
+      }),
+    );
+  });
+
+  it("reads branches and statuses from the facade", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ branches: [{ name: "main" }] }))
+      .mockResolvedValueOnce(jsonResponse({ statuses: [{ state: "success" }] }));
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    await expect(client.branches("weave")).resolves.toEqual([{ name: "main" }]);
+    await expect(client.commitStatuses("weave", "abc/def")).resolves.toEqual([
+      { state: "success" },
+    ]);
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://gateway.test/api/v1/repos/weave/commits/abc%2Fdef/statuses",
+      undefined,
+    );
+  });
 });

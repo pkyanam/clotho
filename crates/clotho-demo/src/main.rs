@@ -52,7 +52,7 @@ impl Config {
             vcs: env_or("CLOTHO_DEMO_VCS_GRPC_URL", "http://localhost:50051"),
             merge_queue: env_or("CLOTHO_DEMO_MERGE_QUEUE_GRPC_URL", "http://localhost:50053"),
             storage: env_or("CLOTHO_DEMO_STORAGE_GRPC_URL", "http://localhost:50052"),
-            forgejo: env_or("CLOTHO_DEMO_FORGEJO_URL", "http://localhost:3000"),
+            forgejo: env_or("CLOTHO_DEMO_FORGEJO_URL", "http://localhost:13000"),
             forgejo_user: env_or("CLOTHO_DEMO_FORGEJO_USER", "clotho"),
             forgejo_password: env_or("CLOTHO_DEMO_FORGEJO_PASSWORD", "clotho-dev"),
             web: env_or("CLOTHO_DEMO_WEB_URL", "http://localhost:3100"),

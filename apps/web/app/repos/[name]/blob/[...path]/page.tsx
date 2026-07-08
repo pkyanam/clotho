@@ -30,8 +30,8 @@ export default async function BlobPage({
   const lines = file.content?.split("\n") ?? [];
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-16">
-      <RepoNav name={name} active="files" />
+    <div className="mx-auto max-w-7xl px-6 py-8">
+      <RepoNav name={name} active="code" />
 
       <div className="mt-8 flex flex-wrap items-center gap-3">
         <h1 className="text-lg">{file.path}</h1>

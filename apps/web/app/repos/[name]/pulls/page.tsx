@@ -1,4 +1,4 @@
-import { Badge } from "@cloudflare/kumo";
+import { Badge, Button } from "@cloudflare/kumo";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ClothoApiError } from "@clotho/sdk-js";
@@ -22,17 +22,26 @@ export default async function PullsPage({
     });
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-16">
+    <div className="mx-auto max-w-7xl px-6 py-8">
       <RepoNav name={name} active="pulls" />
 
-      <div className="mt-8 flex flex-wrap items-center gap-4">
-        <h1
-          className="leading-[1.2]"
-          style={{ fontSize: "clamp(1.5rem, 3vw, 1.875rem)" }}
-        >
-          pull requests
-        </h1>
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl leading-tight">pull requests</h1>
+          <p className="mt-2 text-sm text-kumo-subtle">
+            review human and agent-authored branches through the clotho facade.
+          </p>
+        </div>
+        <Button variant="secondary" disabled>
+          open pr
+        </Button>
+      </div>
+
+      <div className="mt-6 flex flex-wrap gap-2">
         <Badge variant="outline">{pulls.length} total</Badge>
+        <Badge variant="outline">
+          {pulls.filter((pull) => pull.state === "open").length} open
+        </Badge>
       </div>
 
       {pulls.length === 0 ? (
@@ -40,12 +49,12 @@ export default async function PullsPage({
           no pull requests yet.
         </p>
       ) : (
-        <ul className="mt-10 divide-y divide-kumo-hairline border border-kumo-hairline">
+        <ul className="mt-8 divide-y divide-kumo-hairline border border-kumo-hairline">
           {pulls.map((pull) => (
             <li key={pull.number}>
               <Link
                 href={`/repos/${name}/pulls/${pull.number}`}
-                className="flex items-baseline justify-between gap-4 px-4 py-3 transition-colors hover:bg-kumo-elevated"
+                className="flex flex-col gap-2 px-4 py-3 transition-colors hover:bg-kumo-elevated sm:flex-row sm:items-baseline sm:justify-between"
               >
                 <span className="min-w-0">
                   <span className="flex items-baseline gap-3">

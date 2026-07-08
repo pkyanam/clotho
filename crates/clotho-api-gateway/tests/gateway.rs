@@ -7,7 +7,7 @@
 //! set `CLOTHO_COLLAB_TEST_GATEWAY_URL` (e.g. `http://localhost:8080`).
 //! Skipped when unset so plain `cargo test` stays green. Optional overrides:
 //! `CLOTHO_COLLAB_TEST_VCS_GRPC_URL` (default `http://localhost:50051`),
-//! `CLOTHO_COLLAB_TEST_FORGEJO_URL` (default `http://localhost:3000`), and
+//! `CLOTHO_COLLAB_TEST_FORGEJO_URL` (default `http://localhost:13000`), and
 //! `CLOTHO_COLLAB_TEST_FORGEJO_{USER,PASSWORD}` (default the dev admin,
 //! `clotho`/`clotho-dev`).
 
@@ -33,7 +33,7 @@ fn test_env() -> Option<TestEnv> {
     Some(TestEnv {
         gateway_url,
         vcs_grpc_url: env_or("CLOTHO_COLLAB_TEST_VCS_GRPC_URL", "http://localhost:50051"),
-        forgejo_url: env_or("CLOTHO_COLLAB_TEST_FORGEJO_URL", "http://localhost:3000"),
+        forgejo_url: env_or("CLOTHO_COLLAB_TEST_FORGEJO_URL", "http://localhost:13000"),
         forgejo_user: env_or("CLOTHO_COLLAB_TEST_FORGEJO_USER", "clotho"),
         forgejo_password: env_or("CLOTHO_COLLAB_TEST_FORGEJO_PASSWORD", "clotho-dev"),
     })
@@ -43,6 +43,16 @@ async fn forgejo_json(env: &TestEnv, request: reqwest::RequestBuilder, context: 
     let response = request
         .basic_auth(&env.forgejo_user, Some(&env.forgejo_password))
         .send()
+        .await
+        .unwrap_or_else(|e| panic!("{context}: {e}"));
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert!(status.is_success(), "{context}: {status}: {body}");
+    serde_json::from_str(&body).unwrap_or_else(|e| panic!("{context}: invalid json: {e}"))
+}
+
+async fn gateway_json(env: &TestEnv, path: &str, context: &str) -> Value {
+    let response = reqwest::get(format!("{}{}", env.gateway_url, path))
         .await
         .unwrap_or_else(|e| panic!("{context}: {e}"));
     let status = response.status();
@@ -130,6 +140,43 @@ async fn repo_created_through_clotho_api_is_a_real_forgejo_project() {
     )
     .await;
     assert_eq!(issue["state"], "open");
+    let facade_issue = http
+        .post(format!("{}/api/v1/repos/{name}/issues", env.gateway_url))
+        .json(&json!({ "title": "facade thread", "body": "filed through Clotho" }))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(
+        facade_issue["number"],
+        issue["number"].as_i64().unwrap() + 1
+    );
+    let facade_comment = http
+        .post(format!(
+            "{}/api/v1/repos/{name}/issues/{}/comments",
+            env.gateway_url, facade_issue["number"]
+        ))
+        .json(&json!({ "body": "comment through Clotho" }))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(facade_comment["body"], "comment through Clotho");
+    let facade_list = gateway_json(
+        &env,
+        &format!("/api/v1/repos/{name}/issues?state=all"),
+        "list issues through facade",
+    )
+    .await;
+    assert!(facade_list["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| i["number"] == facade_issue["number"]));
 
     // 5. PRs work: branch at the initial commit, PR for the agent's commit.
     forgejo_json(

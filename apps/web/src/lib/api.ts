@@ -39,3 +39,8 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kib`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} mib`;
 }
+
+export function cloneUrl(owner: string, name: string): string {
+  const base = process.env.NEXT_PUBLIC_CLOTHO_GIT_URL ?? "http://localhost:13000";
+  return `${base.replace(/\/$/, "")}/${owner}/${name}.git`;
+}

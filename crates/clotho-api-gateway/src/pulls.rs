@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use axum::Json;
 use clotho_common::pb::diff::v1::{ChangeStatus, DiffFilesRequest, FileDiffInput, SymbolChange};
 use clotho_common::pb::vcs::v1::changed_file::ChangeKind;
@@ -16,7 +17,7 @@ use clotho_common::pb::vcs::v1::DiffCommitsRequest;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ApiError;
-use crate::forgejo::PullInfo;
+use crate::forgejo::{CommentInfo, PullInfo};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -34,6 +35,51 @@ pub struct PullListResponse {
     pub pulls: Vec<PullInfo>,
 }
 
+#[derive(Deserialize)]
+pub struct CreatePullRequest {
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+    pub head: String,
+    #[serde(default = "default_base_branch")]
+    pub base: String,
+}
+
+fn default_base_branch() -> String {
+    "main".into()
+}
+
+#[derive(Deserialize)]
+pub struct PullCommentRequest {
+    pub body: String,
+}
+
+#[derive(Deserialize)]
+pub struct PullReviewRequest {
+    #[serde(default)]
+    pub body: String,
+    #[serde(default = "default_review_event")]
+    pub event: String,
+}
+
+fn default_review_event() -> String {
+    "COMMENT".into()
+}
+
+#[derive(Deserialize)]
+pub struct PullMergeRequest {
+    #[serde(default = "default_merge_method")]
+    pub method: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+fn default_merge_method() -> String {
+    "merge".into()
+}
+
 pub async fn list_pulls(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
@@ -49,11 +95,92 @@ pub async fn list_pulls(
     Ok(Json(PullListResponse { pulls }))
 }
 
+pub async fn create_pull(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Json(req): Json<CreatePullRequest>,
+) -> Result<(StatusCode, Json<PullInfo>), ApiError> {
+    if req.title.trim().is_empty() {
+        return Err(ApiError::InvalidRequest("title is required".into()));
+    }
+    if req.head.trim().is_empty() {
+        return Err(ApiError::InvalidRequest("head is required".into()));
+    }
+    let pull = state
+        .forgejo
+        .create_pull(
+            &name,
+            req.title.trim(),
+            req.body.trim(),
+            req.head.trim(),
+            req.base.trim(),
+        )
+        .await?;
+    Ok((StatusCode::CREATED, Json(pull)))
+}
+
 pub async fn get_pull(
     State(state): State<Arc<AppState>>,
     Path((name, number)): Path<(String, i64)>,
 ) -> Result<Json<PullInfo>, ApiError> {
     Ok(Json(state.forgejo.get_pull(&name, number).await?))
+}
+
+pub async fn comment_on_pull(
+    State(state): State<Arc<AppState>>,
+    Path((name, number)): Path<(String, i64)>,
+    Json(req): Json<PullCommentRequest>,
+) -> Result<(StatusCode, Json<CommentInfo>), ApiError> {
+    if req.body.trim().is_empty() {
+        return Err(ApiError::InvalidRequest("body is required".into()));
+    }
+    let comment = state
+        .forgejo
+        .comment_on_pull(&name, number, req.body.trim())
+        .await?;
+    Ok((StatusCode::CREATED, Json(comment)))
+}
+
+pub async fn review_pull(
+    State(state): State<Arc<AppState>>,
+    Path((name, number)): Path<(String, i64)>,
+    Json(req): Json<PullReviewRequest>,
+) -> Result<(StatusCode, Json<CommentInfo>), ApiError> {
+    let event = req.event.trim().to_ascii_uppercase();
+    if !matches!(event.as_str(), "COMMENT" | "APPROVE" | "REQUEST_CHANGES") {
+        return Err(ApiError::InvalidRequest(
+            "event must be COMMENT, APPROVE, or REQUEST_CHANGES".into(),
+        ));
+    }
+    let comment = state
+        .forgejo
+        .review_pull(&name, number, req.body.trim(), &event)
+        .await?;
+    Ok((StatusCode::CREATED, Json(comment)))
+}
+
+pub async fn merge_pull(
+    State(state): State<Arc<AppState>>,
+    Path((name, number)): Path<(String, i64)>,
+    Json(req): Json<PullMergeRequest>,
+) -> Result<Json<PullInfo>, ApiError> {
+    let method = req.method.trim();
+    if !matches!(method, "merge" | "rebase" | "rebase-merge" | "squash") {
+        return Err(ApiError::InvalidRequest(
+            "method must be merge, rebase, rebase-merge, or squash".into(),
+        ));
+    }
+    let pull = state
+        .forgejo
+        .merge_pull(
+            &name,
+            number,
+            method,
+            req.title.as_deref(),
+            req.message.as_deref(),
+        )
+        .await?;
+    Ok(Json(pull))
 }
 
 /// One line of a diff hunk. Line numbers are 1-based; absent on the side a

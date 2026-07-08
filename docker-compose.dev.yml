@@ -83,7 +83,7 @@ services:
       # Skip the interactive install wizard; provisioning is scripted
       # (scripts/forgejo/provision.sh) so a clean `up` is reproducible.
       FORGEJO__security__INSTALL_LOCK: "true"
-      FORGEJO__server__ROOT_URL: http://localhost:3000/
+      FORGEJO__server__ROOT_URL: http://localhost:13000/
       FORGEJO__server__DISABLE_SSH: "true"
       FORGEJO__repository__ROOT: /data/git/repositories
       FORGEJO__repository__DEFAULT_BRANCH: main
@@ -94,7 +94,7 @@ services:
       # blocks private/loopback webhook targets by default) — Stage 7 CI.
       FORGEJO__webhook__ALLOWED_HOST_LIST: "*"
     ports:
-      - "3000:3000"
+      - "13000:3000"
     volumes:
       - forgejo-data:/data
       - git-data:/data/git/repositories

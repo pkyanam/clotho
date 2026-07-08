@@ -28,7 +28,8 @@ pub enum TokenSource {
     File(PathBuf),
 }
 
-/// The subset of Forgejo's repository object the gateway returns to callers.
+/// Clotho-owned repository summary, backed by Forgejo for collaboration
+/// metadata in Stage 9.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoInfo {
     pub id: i64,
@@ -58,7 +59,7 @@ pub struct PullRef {
     pub sha: String,
 }
 
-/// The subset of Forgejo's pull-request object the gateway returns.
+/// Clotho-owned pull-request summary, backed by Forgejo in Stage 9.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PullInfo {
     pub number: i64,
@@ -86,6 +87,72 @@ pub struct PullInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PullUser {
     pub login: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IssueInfo {
+    pub number: i64,
+    pub title: String,
+    #[serde(default)]
+    pub body: Option<String>,
+    pub state: String,
+    pub user: PullUser,
+    #[serde(default)]
+    pub labels: Vec<IssueLabel>,
+    #[serde(default)]
+    pub comments: i64,
+    pub html_url: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IssueLabel {
+    pub name: String,
+    #[serde(default)]
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommentInfo {
+    pub id: i64,
+    #[serde(default)]
+    pub body: String,
+    pub user: PullUser,
+    pub html_url: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchInfo {
+    pub name: String,
+    pub commit: BranchCommit,
+    #[serde(default)]
+    pub protected: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchCommit {
+    pub id: String,
+    #[serde(default)]
+    pub message: String,
+    #[serde(default)]
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitStatusInfo {
+    pub id: i64,
+    pub state: String,
+    #[serde(default)]
+    pub context: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub target_url: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Clone)]
@@ -202,6 +269,148 @@ impl ForgejoClient {
             .await
     }
 
+    pub async fn create_pull(
+        &self,
+        name: &str,
+        title: &str,
+        body: &str,
+        head: &str,
+        base: &str,
+    ) -> Result<PullInfo, ApiError> {
+        let owner = &self.config.owner;
+        let body = serde_json::json!({
+            "title": title,
+            "body": body,
+            "head": head,
+            "base": base,
+        });
+        self.post_json(&format!("/api/v1/repos/{owner}/{name}/pulls"), body)
+            .await
+    }
+
+    pub async fn comment_on_pull(
+        &self,
+        name: &str,
+        number: i64,
+        body: &str,
+    ) -> Result<CommentInfo, ApiError> {
+        self.comment_on_issue(name, number, body).await
+    }
+
+    pub async fn review_pull(
+        &self,
+        name: &str,
+        number: i64,
+        body: &str,
+        event: &str,
+    ) -> Result<CommentInfo, ApiError> {
+        let owner = &self.config.owner;
+        let payload = serde_json::json!({
+            "body": body,
+            "event": event,
+        });
+        self.post_json(
+            &format!("/api/v1/repos/{owner}/{name}/pulls/{number}/reviews"),
+            payload,
+        )
+        .await
+    }
+
+    pub async fn merge_pull(
+        &self,
+        name: &str,
+        number: i64,
+        merge_method: &str,
+        title: Option<&str>,
+        message: Option<&str>,
+    ) -> Result<PullInfo, ApiError> {
+        let owner = &self.config.owner;
+        let payload = serde_json::json!({
+            "Do": merge_method,
+            "MergeTitleField": title.unwrap_or(""),
+            "MergeMessageField": message.unwrap_or(""),
+        });
+        self.request_with_body(
+            reqwest::Method::POST,
+            &format!("/api/v1/repos/{owner}/{name}/pulls/{number}/merge"),
+            Some(payload),
+        )
+        .await?;
+        self.get_pull(name, number).await
+    }
+
+    pub async fn list_issues(&self, name: &str, state: &str) -> Result<Vec<IssueInfo>, ApiError> {
+        let owner = &self.config.owner;
+        self.get_json(&format!(
+            "/api/v1/repos/{owner}/{name}/issues?state={state}&type=issues&sort=recentupdate&limit=50"
+        ))
+        .await
+    }
+
+    pub async fn create_issue(
+        &self,
+        name: &str,
+        title: &str,
+        body: &str,
+    ) -> Result<IssueInfo, ApiError> {
+        let owner = &self.config.owner;
+        let payload = serde_json::json!({
+            "title": title,
+            "body": body,
+        });
+        self.post_json(&format!("/api/v1/repos/{owner}/{name}/issues"), payload)
+            .await
+    }
+
+    pub async fn get_issue(&self, name: &str, number: i64) -> Result<IssueInfo, ApiError> {
+        let owner = &self.config.owner;
+        self.get_json(&format!("/api/v1/repos/{owner}/{name}/issues/{number}"))
+            .await
+    }
+
+    pub async fn list_issue_comments(
+        &self,
+        name: &str,
+        number: i64,
+    ) -> Result<Vec<CommentInfo>, ApiError> {
+        let owner = &self.config.owner;
+        self.get_json(&format!(
+            "/api/v1/repos/{owner}/{name}/issues/{number}/comments?limit=100"
+        ))
+        .await
+    }
+
+    pub async fn comment_on_issue(
+        &self,
+        name: &str,
+        number: i64,
+        body: &str,
+    ) -> Result<CommentInfo, ApiError> {
+        let owner = &self.config.owner;
+        let payload = serde_json::json!({ "body": body });
+        self.post_json(
+            &format!("/api/v1/repos/{owner}/{name}/issues/{number}/comments"),
+            payload,
+        )
+        .await
+    }
+
+    pub async fn list_branches(&self, name: &str) -> Result<Vec<BranchInfo>, ApiError> {
+        let owner = &self.config.owner;
+        self.get_json(&format!("/api/v1/repos/{owner}/{name}/branches?limit=100"))
+            .await
+    }
+
+    pub async fn commit_statuses(
+        &self,
+        name: &str,
+        sha: &str,
+    ) -> Result<Vec<CommitStatusInfo>, ApiError> {
+        let owner = &self.config.owner;
+        self.get_json(&format!("/api/v1/repos/{owner}/{name}/statuses/{sha}"))
+            .await
+    }
+
     /// Attach a commit status to `sha` — how Stage 7 CI reports back to the PR
     /// (`state` is one of `pending`, `success`, `failure`, `error`).
     pub async fn set_commit_status(
@@ -260,6 +469,18 @@ impl ForgejoClient {
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, ApiError> {
         self.request(reqwest::Method::GET, path)
+            .await?
+            .json()
+            .await
+            .map_err(|e| ApiError::Upstream(format!("forgejo: invalid response for {path}: {e}")))
+    }
+
+    async fn post_json<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+    ) -> Result<T, ApiError> {
+        self.request_with_body(reqwest::Method::POST, path, Some(body))
             .await?
             .json()
             .await

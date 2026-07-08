@@ -1,18 +1,32 @@
 import Link from "next/link";
 
-/**
- * Repo-level navigation: breadcrumb back to the repo list plus the repo's
- * sections. Issues stay in Forgejo for the prototype — the link is honest
- * about leaving Clotho's shell.
- */
+type RepoSection =
+  | "code"
+  | "pulls"
+  | "issues"
+  | "checks"
+  | "agents"
+  | "storage"
+  | "insights"
+  | "settings";
+
+const sections: Array<{ key: RepoSection; label: string; href: string }> = [
+  { key: "code", label: "code", href: "" },
+  { key: "pulls", label: "pull requests", href: "/pulls" },
+  { key: "issues", label: "issues", href: "/issues" },
+  { key: "checks", label: "checks", href: "/checks" },
+  { key: "agents", label: "agents", href: "/agents" },
+  { key: "storage", label: "storage", href: "/storage" },
+  { key: "insights", label: "insights", href: "/insights" },
+  { key: "settings", label: "settings", href: "/settings" },
+];
+
 export function RepoNav({
   name,
   active,
-  forgejoUrl,
 }: {
   name: string;
-  active: "files" | "pulls";
-  forgejoUrl?: string;
+  active: RepoSection;
 }) {
   const tab = (href: string, label: string, current: boolean) => (
     <Link
@@ -36,17 +50,16 @@ export function RepoNav({
         <span>/</span>
         <span className="text-kumo-default">{name}</span>
       </div>
-      <nav className="flex items-center gap-5">
-        {tab(`/repos/${name}`, "files", active === "files")}
-        {tab(`/repos/${name}/pulls`, "pull requests", active === "pulls")}
-        {forgejoUrl && (
-          <a
-            href={forgejoUrl}
-            className="ml-auto border-b border-transparent pb-2 text-xs text-kumo-inactive hover:text-kumo-default"
-          >
-            issues in forgejo ↗
-          </a>
-        )}
+      <nav className="flex items-center gap-5 overflow-x-auto">
+        {sections.map((section) => (
+          <span key={section.key}>
+            {tab(
+              `/repos/${name}${section.href}`,
+              section.label,
+              active === section.key,
+            )}
+          </span>
+        ))}
       </nav>
     </div>
   );

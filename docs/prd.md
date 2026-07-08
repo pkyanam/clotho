@@ -188,6 +188,27 @@ Each stage lists a goal, key tasks, and an exit condition. Stages 1–2 can star
 - **Implementation note (2026-07-08):** the new `crates/clotho-cli` binary (`clotho`) talks to the api-gateway REST edge, not internal gRPC or MCP (docs/adr/0010): `init`, `status`, `log`, `pr`, `commit`, and `submit` are implemented, with `commit --submit` as the simple author-and-land path. The edge grew `POST /api/v1/repos/{name}/commits` and `POST /api/v1/repos/{name}/submit` for this human-facing write path. The first CLI commit workflow is intentionally explicit/text-first (`--file <path>` repeated, optional `--delete`); recursive working-tree discovery, ignore semantics, binary/artifact commits, and CLI config files are later product work. No component shells out to `jj` or `git`.
 - **Implementation note (2026-07-08):** PRD §8 decisions #1 (Clotho's license) and #2 (fork Forgejo vs stay API-level) remain open human decisions. Stage 8 does not change the repository's existing Apache-2.0 metadata and does not modify `collab/forgejo`.
 
+### Stage 9 — Product shell + collaboration facade
+- Make Clotho's web/API the primary collaboration surface while keeping Forgejo
+  as the internal provider.
+- Preserve the GPLv3/API boundary: no Forgejo source edits, no license
+  decision, and no fork decision.
+- **Implementation note (2026-07-08):** ADR-0011 records the Stage 9 facade
+  decision. `clotho-api-gateway` now exposes Clotho-owned issue, issue
+  comment, pull comment/review/merge, branch, and commit-status routes backed
+  by Forgejo. `@clotho/sdk-js` mirrors those routes with typed methods and
+  tests. `apps/web` now has a denser repo shell with Code, Pull Requests,
+  Issues, Checks, Agents, Storage, Insights, and Settings sections; native
+  issue list/create/detail/comment pages; PR checks, changed-file navigation,
+  review/comment forms, merge action, and agent provenance surfaces. Normal web
+  flows no longer link users to Forgejo.
+- **Implementation note (2026-07-08):** the normal dev Compose port for Forgejo
+  moved from host `3000` to `13000`; internal container traffic remains
+  `http://forgejo:3000`. A currently running dev stack must be recreated
+  non-destructively (for example `docker compose -f docker-compose.dev.yml up
+  -d forgejo`) before local tests use the new host port. Do not run
+  `just dev-down` just to apply this change.
+
 ---
 
 ## 6. Success criteria for the prototype (overall)
