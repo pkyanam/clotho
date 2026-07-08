@@ -1,4 +1,5 @@
 import { Badge, Button } from "@cloudflare/kumo";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ClothoApiError } from "@clotho/sdk-js";
 
@@ -108,7 +109,7 @@ export default async function PullPage({
           </section>
 
           <section className="border border-kumo-hairline p-4">
-            <h2 className="text-sm">checks</h2>
+            <h2 className="text-sm">actions</h2>
             {statuses.length === 0 ? (
               <p className="mt-3 text-xs text-kumo-inactive">no statuses yet.</p>
             ) : (
@@ -123,6 +124,14 @@ export default async function PullPage({
                       <p className="mt-1 text-kumo-inactive">
                         {status.description}
                       </p>
+                    )}
+                    {status.target_url && (
+                      <Link
+                        href={status.target_url}
+                        className="mt-2 inline-block text-kumo-subtle underline underline-offset-4"
+                      >
+                        open action run
+                      </Link>
                     )}
                   </li>
                 ))}

@@ -28,17 +28,25 @@ pub enum TokenSource {
     File(PathBuf),
 }
 
-/// Clotho-owned repository summary, backed by Forgejo for collaboration
-/// metadata in Stage 9.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Clotho-owned repository summary. In Stage 11 this is the control-plane
+/// record surfaced to clients, with Forgejo collaboration metadata overlaid.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct RepoInfo {
     pub id: i64,
+    #[serde(default)]
+    pub clotho_id: String,
     pub name: String,
     pub full_name: String,
+    #[serde(default, skip_deserializing)]
+    pub owner: String,
     pub html_url: String,
+    #[serde(default)]
+    pub clone_url: String,
     pub default_branch: String,
     #[serde(default)]
     pub description: String,
+    #[serde(default)]
+    pub visibility: String,
     #[serde(default)]
     pub has_issues: bool,
     #[serde(default)]
@@ -49,6 +57,10 @@ pub struct RepoInfo {
     pub open_pr_counter: i64,
     #[serde(default)]
     pub updated_at: String,
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub configured: bool,
 }
 
 /// One endpoint of a pull request (its head or base).
@@ -171,6 +183,10 @@ impl ForgejoClient {
 
     pub fn owner(&self) -> &str {
         &self.config.owner
+    }
+
+    pub fn config(&self) -> &ForgejoConfig {
+        &self.config
     }
 
     async fn token(&self) -> Result<String, ApiError> {

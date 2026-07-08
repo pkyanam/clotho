@@ -5,6 +5,7 @@
 
 use std::net::SocketAddr;
 
+use clotho_api_gateway::control::{self, Bootstrap};
 use clotho_api_gateway::forgejo::{ForgejoConfig, TokenSource};
 use clotho_api_gateway::GatewayConfig;
 use clotho_common::{health, telemetry, Error};
@@ -15,6 +16,19 @@ const DEFAULT_PORT: u16 = 50056;
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_string())
+}
+
+fn env_u32_or(name: &str, default: u32) -> u32 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+fn env_truthy(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false)
 }
 
 #[tokio::main]
@@ -46,6 +60,17 @@ async fn main() -> Result<(), Error> {
             "http://clotho-api-gateway:8080/api/v1/webhooks/forgejo",
         ),
         web_url: env_or("CLOTHO_WEB_URL", "http://localhost:3100"),
+        compute_provider: env_or("CLOTHO_COMPUTE_PROVIDER", "daytona"),
+        compute_default_image: env_or("CLOTHO_COMPUTE_SNAPSHOT", "ubuntu:22.04"),
+        actions_timeout_seconds: env_u32_or("CLOTHO_ACTIONS_TIMEOUT_SECONDS", 900),
+        daytona_configured: env_truthy("CLOTHO_DAYTONA_CONFIGURED")
+            || std::env::var("DAYTONA_API_KEY")
+                .map(|key| !key.trim().is_empty())
+                .unwrap_or(false),
+        bootstrap_user_name: env_or("CLOTHO_BOOTSTRAP_USER_NAME", "clotho"),
+        bootstrap_user_email: env_or("CLOTHO_BOOTSTRAP_USER_EMAIL", "admin@clotho.internal"),
+        bootstrap_org_name: env_or("CLOTHO_BOOTSTRAP_ORG_NAME", "clotho"),
+        bootstrap_org_display_name: env_or("CLOTHO_BOOTSTRAP_ORG_DISPLAY_NAME", "Clotho"),
         forgejo: ForgejoConfig {
             base_url: env_or("CLOTHO_FORGEJO_URL", "http://localhost:13000"),
             owner: env_or("CLOTHO_FORGEJO_OWNER", "clotho"),
@@ -53,7 +78,19 @@ async fn main() -> Result<(), Error> {
         },
     };
 
-    let router = clotho_api_gateway::router(config)?;
+    let pool = match std::env::var("CLOTHO_GATEWAY_DATABASE_URL") {
+        Ok(url) if !url.trim().is_empty() => Some(clotho_api_gateway::init_db(&url).await?),
+        _ => None,
+    };
+
+    let bootstrap = Bootstrap::from_config(&config);
+    if let Some(ref p) = pool {
+        control::ensure_bootstrap(p, &bootstrap)
+            .await
+            .map_err(|e| Error::Config(format!("{e}")))?;
+    }
+
+    let router = clotho_api_gateway::router_with_pool(config, pool, bootstrap)?;
     let listener = tokio::net::TcpListener::bind(http_addr).await?;
     tracing::info!(service = SERVICE, %http_addr, %grpc_addr, "listening");
 

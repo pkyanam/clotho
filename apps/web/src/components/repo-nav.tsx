@@ -4,7 +4,7 @@ type RepoSection =
   | "code"
   | "pulls"
   | "issues"
-  | "checks"
+  | "actions"
   | "agents"
   | "storage"
   | "insights"
@@ -14,7 +14,7 @@ const sections: Array<{ key: RepoSection; label: string; href: string }> = [
   { key: "code", label: "code", href: "" },
   { key: "pulls", label: "pull requests", href: "/pulls" },
   { key: "issues", label: "issues", href: "/issues" },
-  { key: "checks", label: "checks", href: "/checks" },
+  { key: "actions", label: "actions", href: "/actions" },
   { key: "agents", label: "agents", href: "/agents" },
   { key: "storage", label: "storage", href: "/storage" },
   { key: "insights", label: "insights", href: "/insights" },

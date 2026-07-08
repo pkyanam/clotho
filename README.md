@@ -11,7 +11,7 @@
 <p align="center">
   <a href="./docs/vision-spec.md">Vision</a>
   ·
-  <a href="./docs/prd.md">Prototype PRD</a>
+  <a href="./docs/prd.md">Product PRD</a>
   ·
   <a href="./docs/adr">ADRs</a>
   ·
@@ -58,7 +58,7 @@ Completed foundations include:
 - REST API gateway used by both the web app and CLI.
 - Rust `clotho` CLI for repo creation, status, log, PR lookup, commit, and
   submit flows.
-- Next.js product shell with native Clotho repo, PR, issue, check, agent,
+- Next.js product shell with native Clotho repo, PR, issue, Actions, agent,
   storage, insight, and settings views.
 
 See [docs/prd.md](./docs/prd.md) for stage-by-stage implementation notes.
@@ -102,7 +102,7 @@ humans / agents
 
 | Layer | Responsibility |
 |---|---|
-| `apps/web` | Product UI for repositories, PRs, issues, checks, agents, storage, insights, and settings |
+| `apps/web` | Product UI for repositories, PRs, issues, Actions, agents, storage, insights, and settings |
 | `clotho-api-gateway` | Public REST edge, collaboration facade, webhook handling, and composition over internal services |
 | `clotho-agent-gateway` | MCP server, scoped agent tokens, authorization, audit log, and agent-facing tools |
 | `clotho-vcs` | jj-lib-backed VCS engine with real git-compatible object storage |
@@ -197,6 +197,8 @@ of required backing services:
 - Persistent git repository storage.
 - Forgejo as an internal provider, until Clotho replaces or abstracts more of
   that surface.
+- A CCI-compatible compute provider for Actions runs; Daytona is the first
+  configured provider.
 
 Expected future deployment targets:
 
@@ -237,9 +239,10 @@ See [collab/README.md](./collab/README.md) and
 ## Project Docs
 
 - [Vision Spec](./docs/vision-spec.md)
-- [Prototype PRD](./docs/prd.md)
+- [Product PRD](./docs/prd.md)
 - [Architecture Decision Records](./docs/adr)
 - [Stage 9 Proposal](./docs/proposals/stage-9-product-shell-collaboration-facade.md)
+- [Stage 10 Proposal](./docs/proposals/stage-10-actions-compute-control-plane.md)
 
 ---
 

@@ -17,18 +17,44 @@ use std::sync::Arc;
 use clotho_common::pb::compute::v1::{JobFile, RunJobRequest};
 use clotho_common::pb::vcs::v1::ExportRepoArchiveRequest;
 
+use crate::actions::FinishedRun;
 use crate::AppState;
 
 const STATUS_CONTEXT: &str = "clotho-ci";
 /// Where in the sandbox the repo archive is staged and unpacked.
 const SANDBOX_WORKDIR: &str = "/tmp/clotho-ci";
 
+struct CiOutput {
+    exit_code: i32,
+    logs: String,
+    provider: String,
+    sandbox_id: String,
+}
+
 /// Run CI for a pushed commit end to end, reporting status back to Forgejo.
 /// Errors are logged and turned into a failed/errored commit status rather
 /// than propagated — this runs detached from the webhook response.
 pub async fn run(state: Arc<AppState>, repo: String, sha: String) {
+    let run = state
+        .actions
+        .create_run(
+            repo.clone(),
+            sha.clone(),
+            "main".into(),
+            "push".into(),
+            "forgejo".into(),
+        )
+        .await;
+    run_existing(state, run.id, repo, sha).await;
+}
+
+/// Run CI for an already-created Clotho action run. Used by both push
+/// webhooks and manual Actions starts.
+pub async fn run_existing(state: Arc<AppState>, run_id: String, repo: String, sha: String) {
     let short = sha.get(..12).unwrap_or(&sha);
-    let target_url = format!("{}/repos/{repo}", state.web_url);
+    let target_url = format!("{}/repos/{repo}/actions/{run_id}", state.web_url);
+
+    state.actions.mark_running(&run_id).await;
 
     // Mark pending immediately so reviewers see CI is running.
     if let Err(e) = state
@@ -46,20 +72,60 @@ pub async fn run(state: Arc<AppState>, repo: String, sha: String) {
         tracing::warn!(%repo, %sha, error = %e, "failed to set pending status");
     }
 
-    let (state_str, description) = match execute(&state, &repo, &sha).await {
-        Ok((0, _logs)) => ("success", "check passed".to_string()),
-        Ok((code, logs)) => {
-            tracing::info!(%repo, %sha, exit_code = code, "ci check failed");
-            (
-                "failure",
-                format!("check failed (exit {code}): {}", tail(&logs)),
-            )
-        }
-        Err(e) => {
-            tracing::warn!(%repo, %sha, error = %e, "ci run errored");
-            ("error", format!("ci error: {}", truncate(&e, 120)))
-        }
-    };
+    let (state_str, conclusion, description, exit_code, logs, provider, sandbox_id) =
+        match execute(&state, &repo, &sha).await {
+            Ok(output) if output.exit_code == 0 => (
+                "success",
+                "success",
+                "check passed".to_string(),
+                Some(output.exit_code),
+                output.logs,
+                output.provider,
+                output.sandbox_id,
+            ),
+            Ok(output) => {
+                tracing::info!(%repo, %sha, exit_code = output.exit_code, "ci check failed");
+                (
+                    "failure",
+                    "failure",
+                    format!(
+                        "check failed (exit {}): {}",
+                        output.exit_code,
+                        tail(&output.logs)
+                    ),
+                    Some(output.exit_code),
+                    output.logs,
+                    output.provider,
+                    output.sandbox_id,
+                )
+            }
+            Err(e) => {
+                tracing::warn!(%repo, %sha, error = %e, "ci run errored");
+                (
+                    "error",
+                    "error",
+                    format!("ci error: {}", truncate(&e, 120)),
+                    None,
+                    e,
+                    String::new(),
+                    String::new(),
+                )
+            }
+        };
+    state
+        .actions
+        .finish_run(
+            &run_id,
+            FinishedRun {
+                status: state_str.into(),
+                conclusion: conclusion.into(),
+                exit_code,
+                logs,
+                provider,
+                sandbox_id,
+            },
+        )
+        .await;
     tracing::info!(%repo, sha = %short, status = state_str, "ci finished");
 
     if let Err(e) = state
@@ -78,8 +144,8 @@ pub async fn run(state: Arc<AppState>, repo: String, sha: String) {
     }
 }
 
-/// Export the git objects, run the check in a sandbox, return (exit_code, logs).
-async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<(i32, String), String> {
+/// Export the git objects, run the check in a sandbox, return result metadata.
+async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<CiOutput, String> {
     let archive = state
         .vcs
         .clone()
@@ -116,7 +182,12 @@ async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<(i32, String
         .await
         .map_err(|e| format!("compute: {}", e.message()))?
         .into_inner();
-    Ok((result.exit_code, result.logs))
+    Ok(CiOutput {
+        exit_code: result.exit_code,
+        logs: result.logs,
+        provider: result.provider,
+        sandbox_id: result.sandbox_id,
+    })
 }
 
 /// The check script run inside the sandbox: unpack the git objects, clone,

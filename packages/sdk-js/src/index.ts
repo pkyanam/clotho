@@ -15,16 +15,25 @@
 /** Clotho repository summary from the collaboration facade. */
 export interface RepoInfo {
   id: number;
+  /** Clotho control-plane id for the repo. */
+  clotho_id: string;
   name: string;
+  /** Forgejo full name, e.g. `clotho/weave`. */
   full_name: string;
+  /** Clotho org name that owns this repo. */
+  owner: string;
   html_url: string;
+  clone_url: string;
   default_branch: string;
   description: string;
+  visibility: string;
   has_issues: boolean;
   has_pull_requests: boolean;
   open_issues_count: number;
   open_pr_counter: number;
   updated_at: string;
+  provider: string;
+  configured: boolean;
 }
 
 /** One jj commit (a real git commit) from clotho-vcs. */
@@ -41,7 +50,15 @@ export interface Commit {
 
 export interface RepoDetail {
   name: string;
+  /** Forgejo/clone-path owner. */
   owner: string;
+  /** Clotho org that owns this repo. */
+  owner_org: string;
+  visibility: string;
+  default_branch: string;
+  clone_url: string;
+  provider: string;
+  configured: boolean;
   forgejo: RepoInfo;
   /** Commit the `main` bookmark points at; empty while main is unborn. */
   main_commit_id: string;
@@ -51,7 +68,15 @@ export interface RepoDetail {
 
 export interface CreatedRepo {
   name: string;
+  /** Forgejo/clone-path owner. */
   owner: string;
+  /** Clotho org that owns this repo. */
+  owner_org: string;
+  visibility: string;
+  default_branch: string;
+  clone_url: string;
+  provider: string;
+  configured: boolean;
   operation_id: string;
   initial_commit_id: string;
   forgejo: RepoInfo;
@@ -187,6 +212,57 @@ export interface CommitStatus {
   updated_at: string;
 }
 
+export interface ActionJob {
+  id: string;
+  run_id: string;
+  name: string;
+  status: string;
+  exit_code: number | null;
+}
+
+export interface ActionRun {
+  id: string;
+  repo: string;
+  commit_id: string;
+  branch: string;
+  status: "queued" | "running" | "success" | "failure" | "error" | "canceled" | string;
+  conclusion: string;
+  trigger: "push" | "manual" | "agent" | "pull_request" | string;
+  actor: string;
+  provider: string;
+  sandbox_id: string;
+  created_at_millis: number;
+  started_at_millis: number;
+  finished_at_millis: number;
+  duration_ms: number;
+  jobs: ActionJob[];
+}
+
+export interface ActionRunList {
+  runs: ActionRun[];
+  next_cursor: number | null;
+}
+
+export interface ActionLog {
+  run_id: string;
+  text: string;
+}
+
+export interface ActionsConfig {
+  enabled: boolean;
+  provider: string;
+  default_image: string;
+  timeout_seconds: number;
+}
+
+export interface ComputeProvider {
+  id: string;
+  name: string;
+  enabled: boolean;
+  configured: boolean;
+  capabilities: string[];
+}
+
 export type DiffLineKind = "context" | "add" | "del";
 
 export interface DiffLine {
@@ -255,6 +331,46 @@ export interface AgentSession {
   tool_calls: number;
 }
 
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  display_name: string;
+  created_at: string;
+}
+
+export interface Org {
+  id: string;
+  name: string;
+  display_name: string;
+  forgejo_owner: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface OrgMembership {
+  org_id: string;
+  user_id: string;
+  role: "admin" | "member" | string;
+  user_name: string;
+  user_display_name: string;
+}
+
+export interface OrgDetail {
+  org: Org;
+  members: OrgMembership[];
+}
+
+export interface ActivityEvent {
+  id: number;
+  actor_id: string;
+  org_id: string | null;
+  repo_id: string | null;
+  event_type: string;
+  payload: unknown;
+  created_at: string;
+}
+
 export interface HealthStatus {
   service: string;
   version: string;
@@ -310,11 +426,25 @@ export class ClothoClient {
   }
 
   /** Provision a repo in clotho-vcs and Forgejo in one call (ADR-0003). */
-  createRepo(name: string): Promise<CreatedRepo> {
+  createRepo(
+    name: string,
+    options?: {
+      description?: string;
+      visibility?: "public" | "private" | "internal" | string;
+      defaultBranch?: string;
+      ownerOrg?: string;
+    },
+  ): Promise<CreatedRepo> {
     return this.request("/api/v1/repos", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({
+        name,
+        description: options?.description,
+        visibility: options?.visibility ?? "public",
+        default_branch: options?.defaultBranch ?? "main",
+        owner_org: options?.ownerOrg,
+      }),
     });
   }
 
@@ -536,6 +666,137 @@ export class ClothoClient {
       )}/statuses`,
     );
     return statuses;
+  }
+
+  actionRunsPage(
+    name: string,
+    options?: { limit?: number; before?: number },
+  ): Promise<ActionRunList> {
+    return this.request<ActionRunList>(
+      `/api/v1/repos/${encodeURIComponent(name)}/actions/runs${qs({
+        limit: options?.limit,
+        before: options?.before,
+      })}`,
+    );
+  }
+
+  async actionRuns(
+    name: string,
+    options?: { limit?: number; before?: number },
+  ): Promise<ActionRun[]> {
+    const { runs } = await this.actionRunsPage(name, options);
+    return runs;
+  }
+
+  createActionRun(
+    name: string,
+    options?: { commitId?: string; branch?: string; actor?: string },
+  ): Promise<ActionRun> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/actions/runs`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          commit_id: options?.commitId ?? "",
+          branch: options?.branch ?? "main",
+          actor: options?.actor ?? "manual",
+        }),
+      },
+    );
+  }
+
+  actionRun(name: string, runId: string): Promise<ActionRun> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/actions/runs/${encodeURIComponent(
+        runId,
+      )}`,
+    );
+  }
+
+  actionLogs(name: string, runId: string): Promise<ActionLog> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/actions/runs/${encodeURIComponent(
+        runId,
+      )}/logs`,
+    );
+  }
+
+  actionsConfig(name: string): Promise<ActionsConfig> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/actions/config`,
+    );
+  }
+
+  updateActionsConfig(
+    name: string,
+    config: Partial<ActionsConfig>,
+  ): Promise<ActionsConfig> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/actions/config`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(config),
+      },
+    );
+  }
+
+  async computeProviders(): Promise<ComputeProvider[]> {
+    const { providers } = await this.request<{ providers: ComputeProvider[] }>(
+      "/api/v1/compute/providers",
+    );
+    return providers;
+  }
+
+  computeProvider(provider: string): Promise<ComputeProvider> {
+    return this.request(
+      `/api/v1/compute/providers/${encodeURIComponent(provider)}`,
+    );
+  }
+
+  // Stage 11: users, orgs, activity, and org-scoped repos.
+  async users(): Promise<User[]> {
+    const { users } = await this.request<{ users: User[] }>("/api/v1/users");
+    return users;
+  }
+
+  async orgs(): Promise<Org[]> {
+    const { orgs } = await this.request<{ orgs: Org[] }>("/api/v1/orgs");
+    return orgs;
+  }
+
+  createOrg(
+    name: string,
+    options?: { displayName?: string; forgejoOwner?: string },
+  ): Promise<Org> {
+    return this.request("/api/v1/orgs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name,
+        display_name: options?.displayName,
+        forgejo_owner: options?.forgejoOwner,
+      }),
+    });
+  }
+
+  getOrg(org: string): Promise<OrgDetail> {
+    return this.request(`/api/v1/orgs/${encodeURIComponent(org)}`);
+  }
+
+  async getOrgRepos(org: string): Promise<RepoInfo[]> {
+    const { repos } = await this.request<{ repos: RepoInfo[] }>(
+      `/api/v1/orgs/${encodeURIComponent(org)}/repos`,
+    );
+    return repos;
+  }
+
+  async activity(options?: { limit?: number }): Promise<ActivityEvent[]> {
+    const { events } = await this.request<{ events: ActivityEvent[] }>(
+      `/api/v1/activity${qs({ limit: options?.limit })}`,
+    );
+    return events;
   }
 
   /** Recent agent sessions on a repo (poll this for the presence panel). */

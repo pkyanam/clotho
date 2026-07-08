@@ -38,10 +38,10 @@ export default async function RepoPage({
 
   const conflictedCount = tree.files.filter((f) => f.conflicted).length;
   const latestCommit = commits[0];
-  const failedChecks = statuses.filter((s) =>
+  const failedActions = statuses.filter((s) =>
     ["failure", "error"].includes(s.state),
   ).length;
-  const passingChecks = statuses.filter((s) => s.state === "success").length;
+  const passingActions = statuses.filter((s) => s.state === "success").length;
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-8">
@@ -50,16 +50,18 @@ export default async function RepoPage({
       <div className="mt-6 grid gap-4 border-b border-kumo-hairline pb-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl leading-tight">
-          {name}
-        </h1>
-            <Badge variant="outline">{detail.forgejo.default_branch}</Badge>
-            {failedChecks > 0 ? (
-              <Badge variant="outline">{failedChecks} failing checks</Badge>
-            ) : passingChecks > 0 ? (
-              <Badge variant="outline">{passingChecks} checks passing</Badge>
+            <h1 className="text-2xl leading-tight">{name}</h1>
+            <Badge variant="outline">{detail.default_branch}</Badge>
+            <Badge variant="outline">{detail.visibility}</Badge>
+            <Badge variant="outline">
+              {detail.configured ? detail.provider : "not configured"}
+            </Badge>
+            {failedActions > 0 ? (
+              <Badge variant="outline">{failedActions} failing actions</Badge>
+            ) : passingActions > 0 ? (
+              <Badge variant="outline">{passingActions} actions passing</Badge>
             ) : (
-              <Badge variant="outline">checks pending</Badge>
+              <Badge variant="outline">actions pending</Badge>
             )}
             {conflictedCount > 0 && (
               <Badge variant="outline">{conflictedCount} conflicts</Badge>
@@ -71,7 +73,7 @@ export default async function RepoPage({
             </p>
           )}
           <div className="mt-4 grid gap-2 text-xs text-kumo-inactive sm:grid-cols-2 lg:grid-cols-4">
-            <span>clone {cloneUrl(detail.owner, name)}</span>
+            <span>clone {detail.clone_url || cloneUrl(detail.owner, name)}</span>
             <span>
               latest{" "}
               {latestCommit ? shortId(latestCommit.commit_id) : "unborn"}
@@ -158,10 +160,26 @@ export default async function RepoPage({
           <section className="border border-kumo-hairline p-4">
             <SectionHeader title="collaboration" meta="native facade" />
             <div className="mt-4 grid gap-2 text-xs">
-              <DashboardLink href={`/repos/${name}/pulls`} label="pull requests" value={pulls.length} />
-              <DashboardLink href={`/repos/${name}/issues`} label="issues" value={issues.length} />
-              <DashboardLink href={`/repos/${name}/checks`} label="checks" value={statuses.length} />
-              <DashboardLink href={`/repos/${name}/agents`} label="agents" value={sessions.length} />
+              <DashboardLink
+                href={`/repos/${name}/pulls`}
+                label="pull requests"
+                value={pulls.length}
+              />
+              <DashboardLink
+                href={`/repos/${name}/issues`}
+                label="issues"
+                value={issues.length}
+              />
+              <DashboardLink
+                href={`/repos/${name}/actions`}
+                label="actions"
+                value={statuses.length}
+              />
+              <DashboardLink
+                href={`/repos/${name}/agents`}
+                label="agents"
+                value={sessions.length}
+              />
             </div>
           </section>
           <PresencePanel repo={name} />

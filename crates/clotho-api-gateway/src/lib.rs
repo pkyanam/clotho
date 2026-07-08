@@ -8,9 +8,15 @@
 //! tree/files/commits/op log from clotho-vcs, PRs proxied from Forgejo, the
 //! structured PR diff composed from clotho-vcs + clotho-diff, and agent
 //! presence proxied from the agent gateway's audit log.
+//!
+//! Stage 11 adds Clotho-owned users, orgs, repo ownership, visibility,
+//! default-branch metadata, and an activity feed in Postgres. Forgejo is still
+//! the internal collaboration provider, but the control plane owns the records.
 
+mod actions;
 mod agents;
 mod ci;
+pub mod control;
 pub mod error;
 pub mod forgejo;
 mod issues;
@@ -32,6 +38,7 @@ use clotho_common::pb::mergequeue::v1::SubmitChangeRequest;
 use clotho_common::pb::vcs::v1::vcs_client::VcsClient;
 use clotho_common::pb::vcs::v1::{CommitRequest, FileChange, InitRepoRequest};
 use serde::{Deserialize, Serialize};
+use sqlx::postgres::PgPoolOptions;
 use tonic::transport::Channel;
 use tower_http::cors::CorsLayer;
 
@@ -60,6 +67,23 @@ pub struct GatewayConfig {
     pub webhook_url: String,
     /// Public base URL of the web app, used for commit-status target links.
     pub web_url: String,
+    /// Default compute provider surfaced by the Actions control plane.
+    pub compute_provider: String,
+    /// Default provider image/snapshot for action jobs.
+    pub compute_default_image: String,
+    /// Default action timeout.
+    pub actions_timeout_seconds: u32,
+    /// Whether Daytona has a configured API key. The key itself never leaves
+    /// process environment.
+    pub daytona_configured: bool,
+    /// Deterministic bootstrap user for the Stage 11 auth placeholder.
+    pub bootstrap_user_name: String,
+    /// Email for the deterministic bootstrap user.
+    pub bootstrap_user_email: String,
+    /// Deterministic bootstrap org for the Stage 11 auth placeholder.
+    pub bootstrap_org_name: String,
+    /// Human-facing name for the bootstrap org.
+    pub bootstrap_org_display_name: String,
     pub forgejo: ForgejoConfig,
 }
 
@@ -77,6 +101,27 @@ pub(crate) struct AppState {
     pub(crate) webhook_secret: String,
     pub(crate) webhook_url: String,
     pub(crate) web_url: String,
+    pub(crate) actions: actions::ActionsState,
+    /// Control-plane Postgres pool, shared by Actions and Stage 11 tables.
+    pub(crate) pool: Option<sqlx::PgPool>,
+    /// Deterministic Stage 11 bootstrap identity.
+    pub(crate) bootstrap: control::Bootstrap,
+}
+
+/// Connect to Postgres and run the embedded gateway migrations.
+pub async fn init_db(database_url: &str) -> Result<sqlx::PgPool, clotho_common::Error> {
+    let pool = PgPoolOptions::new()
+        .max_connections(8)
+        .connect(database_url)
+        .await
+        .map_err(|e| clotho_common::Error::Config(format!("postgres connect: {e}")))?;
+    let mut migrator = sqlx::migrate!("./migrations");
+    migrator.set_ignore_missing(true);
+    migrator
+        .run(&pool)
+        .await
+        .map_err(|e| clotho_common::Error::Config(format!("postgres migrate: {e}")))?;
+    Ok(pool)
 }
 
 fn lazy_channel(url: &str, what: &str) -> Result<Channel, clotho_common::Error> {
@@ -86,6 +131,25 @@ fn lazy_channel(url: &str, what: &str) -> Result<Channel, clotho_common::Error> 
 }
 
 pub fn router(config: GatewayConfig) -> Result<Router, clotho_common::Error> {
+    let bootstrap = control::Bootstrap::from_config(&config);
+    router_with_pool(config, None, bootstrap)
+}
+
+pub fn router_with_pool(
+    config: GatewayConfig,
+    pool: Option<sqlx::PgPool>,
+    bootstrap: control::Bootstrap,
+) -> Result<Router, clotho_common::Error> {
+    let actions_defaults = actions::ActionsDefaults {
+        provider: config.compute_provider.to_lowercase(),
+        default_image: config.compute_default_image,
+        timeout_seconds: config.actions_timeout_seconds,
+        daytona_configured: config.daytona_configured,
+    };
+    let actions = match pool {
+        Some(ref p) => actions::ActionsState::with_pool(actions_defaults, p.clone()),
+        None => actions::ActionsState::new(actions_defaults),
+    };
     let state = Arc::new(AppState {
         vcs: VcsClient::new(lazy_channel(&config.vcs_grpc_url, "vcs")?)
             // ExportRepoArchive returns the git object DB; lift the 4 MiB cap.
@@ -103,11 +167,26 @@ pub fn router(config: GatewayConfig) -> Result<Router, clotho_common::Error> {
         webhook_secret: config.webhook_secret,
         webhook_url: config.webhook_url,
         web_url: config.web_url.trim_end_matches('/').to_string(),
+        actions,
+        pool,
+        bootstrap,
     });
     Ok(Router::new()
         .route("/healthz", get(healthz))
-        .route("/api/v1/repos", post(create_repo))
-        .route("/api/v1/repos", get(repos::list_repos))
+        // Stage 11: users, orgs, activity, and org-scoped repos.
+        .route("/api/v1/users", get(control::list_users_handler))
+        .route(
+            "/api/v1/orgs",
+            get(control::list_orgs_handler).post(control::create_org_handler),
+        )
+        .route("/api/v1/orgs/{org}", get(control::get_org_handler))
+        .route(
+            "/api/v1/orgs/{org}/repos",
+            get(control::list_org_repos_handler),
+        )
+        .route("/api/v1/activity", get(control::list_activity_handler))
+        // Repo CRUD and browser endpoints (Stage 3/6/11).
+        .route("/api/v1/repos", post(create_repo).get(repos::list_repos))
         .route("/api/v1/repos/{name}", get(repos::get_repo))
         .route("/api/v1/repos/{name}/tree", get(repos::tree))
         .route("/api/v1/repos/{name}/file", get(repos::file))
@@ -152,6 +231,27 @@ pub fn router(config: GatewayConfig) -> Result<Router, clotho_common::Error> {
         )
         .route("/api/v1/repos/{name}/branches", get(status::branches))
         .route(
+            "/api/v1/repos/{name}/actions/runs",
+            get(actions::list_runs).post(actions::create_run),
+        )
+        .route(
+            "/api/v1/repos/{name}/actions/runs/{run_id}",
+            get(actions::get_run),
+        )
+        .route(
+            "/api/v1/repos/{name}/actions/runs/{run_id}/logs",
+            get(actions::get_logs),
+        )
+        .route(
+            "/api/v1/repos/{name}/actions/config",
+            get(actions::get_config).put(actions::put_config),
+        )
+        .route("/api/v1/compute/providers", get(actions::providers))
+        .route(
+            "/api/v1/compute/providers/{provider}",
+            get(actions::provider),
+        )
+        .route(
             "/api/v1/repos/{name}/commits/{sha}/statuses",
             get(status::commit_statuses),
         )
@@ -176,15 +276,18 @@ async fn healthz() -> Json<serde_json::Value> {
     }))
 }
 
-#[derive(Deserialize)]
-struct CreateRepoRequest {
-    name: String,
-}
-
 #[derive(Serialize)]
 struct CreateRepoResponse {
     name: String,
+    /// Forgejo/clone-path owner (the git owner, not the Clotho org name).
     owner: String,
+    /// Clotho org that owns this repo.
+    owner_org: String,
+    visibility: String,
+    default_branch: String,
+    clone_url: String,
+    provider: String,
+    configured: bool,
     /// Root operation of the new repo's jj op log.
     operation_id: String,
     /// The empty initial commit that seeds `refs/heads/main`.
@@ -247,11 +350,29 @@ struct SubmitChangeJson {
 /// One call, two systems: initialize the jj-managed repository in clotho-vcs
 /// (which writes the backing bare git repo on the shared volume), then have
 /// Forgejo adopt it as a project with issues/PRs. Forgejo never owns the git
-/// objects — it reads what the VCS engine writes.
+/// objects — it reads what the VCS engine writes. Stage 11 persists Clotho
+/// repo ownership/visibility/default-branch metadata to Postgres first.
 async fn create_repo(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<CreateRepoRequest>,
+    Json(req): Json<control::CreateRepoRequest>,
 ) -> Result<(StatusCode, Json<CreateRepoResponse>), ApiError> {
+    control::valid_name(&req.name)?;
+
+    // Resolve the owning org before provisioning anything.
+    let owner_org = if req.owner_org.is_empty() {
+        state.bootstrap.org_name.clone()
+    } else {
+        req.owner_org.clone()
+    };
+    let (org_id, org_name, forgejo_owner) = match &state.pool {
+        Some(pool) => control::resolve_org(pool, &state.bootstrap, &owner_org).await?,
+        None => (
+            state.bootstrap.org_id.clone(),
+            state.bootstrap.org_name.clone(),
+            state.forgejo.owner().to_string(),
+        ),
+    };
+
     let mut vcs = state.vcs.clone();
     let init = vcs
         .init_repo(InitRepoRequest {
@@ -283,6 +404,22 @@ async fn create_repo(
         "repo provisioned in clotho-vcs and Forgejo"
     );
 
+    // Persist the Clotho control-plane record so the web app owns repo state.
+    let clotho_repo = if let Some(pool) = &state.pool {
+        Some(
+            control::insert_repo(
+                pool,
+                &state.bootstrap,
+                &req,
+                &(org_id, org_name.clone(), forgejo_owner.clone()),
+                &forgejo_repo,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+
     // Register the push webhook so future pushes trigger CI (docs/adr/0008).
     // Best-effort: a repo without CI is still a usable repo.
     if !state.webhook_url.is_empty() {
@@ -295,14 +432,38 @@ async fn create_repo(
         }
     }
 
+    let provider = state.actions.default_provider();
+    let configured = state.actions.provider_configured(&provider);
+    let base_url = state.forgejo.config().base_url.clone();
+    let mut repo_info = match &clotho_repo {
+        Some(c) => {
+            control::build_repo_info(c, Some(&forgejo_repo), &base_url, &provider, configured)
+        }
+        None => {
+            control::fallback_repo_info(&req.name, &forgejo_owner, &base_url, &provider, configured)
+        }
+    };
+    repo_info.owner = forgejo_owner.clone();
+    repo_info.clone_url = format!(
+        "{base}/{forgejo_owner}/{name}.git",
+        base = base_url.trim_end_matches('/'),
+        name = req.name
+    );
+
     Ok((
         StatusCode::CREATED,
         Json(CreateRepoResponse {
             name: init.name,
-            owner: state.forgejo.owner().to_string(),
+            owner: forgejo_owner,
+            owner_org: org_name,
+            visibility: req.visibility,
+            default_branch: req.default_branch,
+            clone_url: repo_info.clone_url.clone(),
+            provider,
+            configured,
             operation_id: init.operation_id,
             initial_commit_id: initial.commit_id,
-            forgejo: forgejo_repo,
+            forgejo: repo_info,
         }),
     ))
 }

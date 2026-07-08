@@ -58,14 +58,25 @@ describe("ClothoClient", () => {
     );
   });
 
-  it("posts repo creation as JSON", async () => {
+  it("posts repo creation as JSON with Stage 11 metadata", async () => {
     const { client, fetchMock } = clientWith(jsonResponse({ name: "weave" }));
-    await client.createRepo("weave");
+    await client.createRepo("weave", {
+      description: "a woven repo",
+      visibility: "private",
+      defaultBranch: "main",
+      ownerOrg: "clotho",
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://gateway.test/api/v1/repos",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ name: "weave" }),
+        body: JSON.stringify({
+          name: "weave",
+          description: "a woven repo",
+          visibility: "private",
+          default_branch: "main",
+          owner_org: "clotho",
+        }),
       }),
     );
   });
@@ -181,6 +192,105 @@ describe("ClothoClient", () => {
     expect(fetchMock).toHaveBeenLastCalledWith(
       "http://gateway.test/api/v1/repos/weave/commits/abc%2Fdef/statuses",
       undefined,
+    );
+  });
+
+  it("wraps actions runs, logs, config, and provider metadata", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ runs: [{ id: "run-1" }] }))
+      .mockResolvedValueOnce(jsonResponse({ id: "run-2" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "run-1" }))
+      .mockResolvedValueOnce(jsonResponse({ run_id: "run-1", text: "ok" }))
+      .mockResolvedValueOnce(jsonResponse({ enabled: true, provider: "daytona" }))
+      .mockResolvedValueOnce(jsonResponse({ enabled: false, provider: "daytona" }))
+      .mockResolvedValueOnce(jsonResponse({ providers: [{ id: "daytona" }] }))
+      .mockResolvedValueOnce(jsonResponse({ id: "daytona" }));
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    await expect(client.actionRuns("weave")).resolves.toEqual([{ id: "run-1" }]);
+    await client.createActionRun("weave", { commitId: "abc", actor: "preetham" });
+    await client.actionRun("weave", "run-1");
+    await client.actionLogs("weave", "run-1");
+    await client.actionsConfig("weave");
+    await client.updateActionsConfig("weave", { enabled: false });
+    await client.computeProviders();
+    await client.computeProvider("daytona");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://gateway.test/api/v1/repos/weave/actions/runs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          commit_id: "abc",
+          branch: "main",
+          actor: "preetham",
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "http://gateway.test/api/v1/repos/weave/actions/runs/run-1/logs",
+      undefined,
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      8,
+      "http://gateway.test/api/v1/compute/providers/daytona",
+      undefined,
+    );
+  });
+
+  it("queries users, orgs, org detail, org repos, and the activity feed", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ users: [{ id: "clotho" }] }))
+      .mockResolvedValueOnce(jsonResponse({ orgs: [{ name: "clotho" }] }))
+      .mockResolvedValueOnce(jsonResponse({ org: { name: "clotho" }, members: [] }))
+      .mockResolvedValueOnce(jsonResponse({ repos: [{ name: "weave" }] }))
+      .mockResolvedValueOnce(jsonResponse({ events: [{ event_type: "repo.created" }] }));
+
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    await expect(client.users()).resolves.toEqual([{ id: "clotho" }]);
+    await expect(client.orgs()).resolves.toEqual([{ name: "clotho" }]);
+    await expect(client.getOrg("clotho")).resolves.toEqual({
+      org: { name: "clotho" },
+      members: [],
+    });
+    await expect(client.getOrgRepos("clotho")).resolves.toEqual([{ name: "weave" }]);
+    await expect(client.activity({ limit: 10 })).resolves.toEqual([
+      { event_type: "repo.created" },
+    ]);
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://gateway.test/api/v1/activity?limit=10",
+      undefined,
+    );
+  });
+
+  it("creates an org with optional display name and forgejo owner", async () => {
+    const { client, fetchMock } = clientWith(jsonResponse({ name: "weavers" }));
+    await client.createOrg("weavers", {
+      displayName: "Weavers",
+      forgejoOwner: "weavers",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://gateway.test/api/v1/orgs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          name: "weavers",
+          display_name: "Weavers",
+          forgejo_owner: "weavers",
+        }),
+      }),
     );
   });
 });
