@@ -4,11 +4,12 @@ use clotho_common::pb::vcs::v1::{
     changed_file::ChangeKind,
     vcs_server::{Vcs, VcsServer},
     ChangedFile, CheckpointRequest, CheckpointResponse, CommitRequest, CommitResponse,
-    CommitSummary, DiffCommitsRequest, DiffCommitsResponse, FileEntry, GetFileRequest,
-    GetFileResponse, GetHeadsRequest, GetHeadsResponse, InitRepoRequest, InitRepoResponse,
-    IntegrateCommitRequest, IntegrateCommitResponse, ListFilesRequest, ListFilesResponse,
-    LogCommitsRequest, LogCommitsResponse, OpLogEntry, QueryOpLogRequest, QueryOpLogResponse,
-    RestoreToRequest, RestoreToResponse,
+    CommitSummary, DiffCommitsRequest, DiffCommitsResponse, ExportRepoArchiveRequest,
+    ExportRepoArchiveResponse, FileEntry, GetFileRequest, GetFileResponse, GetHeadsRequest,
+    GetHeadsResponse, InitRepoRequest, InitRepoResponse, IntegrateCommitRequest,
+    IntegrateCommitResponse, ListFilesRequest, ListFilesResponse, LogCommitsRequest,
+    LogCommitsResponse, OpLogEntry, QueryOpLogRequest, QueryOpLogResponse, RestoreToRequest,
+    RestoreToResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -293,6 +294,21 @@ impl Vcs for VcsService {
             fast_forwarded: outcome.fast_forwarded,
             conflicted: outcome.conflicted,
             conflicted_paths: outcome.conflicted_paths,
+        }))
+    }
+
+    async fn export_repo_archive(
+        &self,
+        request: Request<ExportRepoArchiveRequest>,
+    ) -> Result<Response<ExportRepoArchiveResponse>, Status> {
+        let repo = request.into_inner().repo;
+        let archive = self
+            .engine
+            .run(move |engine| async move { engine.export_repo_archive(&repo).await })
+            .await?;
+        Ok(Response::new(ExportRepoArchiveResponse {
+            tar: archive.tar,
+            main_commit_id: archive.main_commit_id,
         }))
     }
 }

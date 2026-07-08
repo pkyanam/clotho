@@ -40,6 +40,12 @@ service Vcs {
   // through a conflict does not stop; the commit lands marked conflicted).
   // The merge-queue serializes calls to this per repo (Stage 5).
   rpc IntegrateCommit(IntegrateCommitRequest) returns (IntegrateCommitResponse);
+  // Export the repo's backing bare git repository as a tar archive — the real
+  // git object database the engine writes. Lets external compute (Stage 7 CI
+  // sandboxes) obtain the git objects without a route back to the stack: the
+  // archive is unpacked and cloned inside the sandbox. Filesystem tar only,
+  // never a jj/git shell-out (docs/adr/0008).
+  rpc ExportRepoArchive(ExportRepoArchiveRequest) returns (ExportRepoArchiveResponse);
 }
 
 message InitRepoRequest {
@@ -247,4 +253,16 @@ message IntegrateCommitResponse {
   // conflict does not block: main advances and resolution happens later.
   bool conflicted = 5;
   repeated string conflicted_paths = 6;
+}
+
+message ExportRepoArchiveRequest {
+  string repo = 1;
+}
+
+message ExportRepoArchiveResponse {
+  // tar (uncompressed) of the bare git repo directory; unpack, then
+  // `git clone` the contained bare repo inside the sandbox.
+  bytes tar = 1;
+  // The `main` bookmark commit id at export time — the revision CI checks out.
+  string main_commit_id = 2;
 }

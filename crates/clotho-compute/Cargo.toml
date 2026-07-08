@@ -1,18 +1,17 @@
 [package]
-name = "clotho-vcs"
-description = "Clotho VCS engine — wraps jj-lib; init, commit, checkpoint, restore, op-log query"
+name = "clotho-compute"
+description = "Clotho Compute Interface (CCI) — provider-agnostic sandbox execution; Daytona provider"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-anyhow.workspace = true
+async-trait.workspace = true
 clotho-common.workspace = true
-futures.workspace = true
-gix.workspace = true
-jj-lib.workspace = true
-tar.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tonic.workspace = true
@@ -20,4 +19,3 @@ tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-tokio-stream.workspace = true

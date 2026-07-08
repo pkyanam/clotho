@@ -34,4 +34,9 @@ pub mod pb {
             tonic::include_proto!("clotho.mergequeue.v1");
         }
     }
+    pub mod compute {
+        pub mod v1 {
+            tonic::include_proto!("clotho.compute.v1");
+        }
+    }
 }

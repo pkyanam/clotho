@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package clotho.compute.v1;
+
+// The Clotho Compute Interface (CCI) — provider-agnostic sandbox execution
+// (vision spec §4.1, docs/prd.md §5 Stage 7). Behind this one RPC sits a
+// swappable `ComputeProvider` (Daytona first, docs/adr/0008); no vendor is
+// baked into callers. The service knows nothing about git or Forgejo: it
+// creates a sandbox from a snapshot, drops in files, runs commands, and
+// returns the exit code + logs. CI orchestration (what to run, reporting
+// status back to the PR) lives in the api-gateway.
+service Compute {
+  // Run a one-shot job in a fresh sandbox: create → place files → run
+  // commands in order (stop at the first non-zero) → collect exit code and
+  // combined logs → tear the sandbox down. Blocks until the job finishes.
+  rpc RunJob(RunJobRequest) returns (RunJobResponse);
+}
+
+// A file to place in the sandbox before the commands run.
+message JobFile {
+  // Absolute path inside the sandbox, e.g. "/home/daytona/ci/repo.tar".
+  string path = 1;
+  bytes content = 2;
+}
+
+message RunJobRequest {
+  // Free-form label for logs/audit (e.g. "<repo>@<short-sha>").
+  string label = 1;
+  // Provider snapshot/image to launch (e.g. "daytona-small"); empty = the
+  // provider's configured default.
+  string snapshot = 2;
+  // Files staged into the sandbox before the commands run.
+  repeated JobFile files = 3;
+  // Shell commands, executed in order; the job stops at the first non-zero
+  // exit and reports it.
+  repeated string commands = 4;
+  // Environment variables set for every command.
+  map<string, string> env = 5;
+  // Per-command timeout in seconds; 0 = the provider default.
+  uint32 timeout_secs = 6;
+}
+
+message RunJobResponse {
+  // Exit code of the last command run (the first failing one, if any).
+  int32 exit_code = 1;
+  // Combined stdout/stderr across the job's commands.
+  string logs = 2;
+  // Provider that ran the job (e.g. "daytona"), for provenance.
+  string provider = 3;
+  // Provider-side sandbox id that ran the job (already torn down), for
+  // cross-referencing in the provider's dashboard.
+  string sandbox_id = 4;
+}

@@ -102,6 +102,13 @@ pub struct Heads {
     pub main_commit_id: Option<String>,
 }
 
+pub struct RepoArchive {
+    /// Uncompressed tar of the bare git repo directory (top-level `repo.git`).
+    pub tar: Vec<u8>,
+    /// `main` bookmark commit id at export time; empty when main is unborn.
+    pub main_commit_id: String,
+}
+
 pub struct FileEntry {
     pub path: String,
     pub size_bytes: u64,
@@ -558,6 +565,36 @@ impl VcsEngine {
             .map(|id| id.hex());
         Ok(Heads {
             heads,
+            main_commit_id,
+        })
+    }
+
+    /// Export the backing bare git repository as an uncompressed tar of its
+    /// directory — the real git object database, delivered so external CI
+    /// compute (Stage 7) can `git clone` it inside a sandbox that has no route
+    /// back to the stack (docs/adr/0008). Loads the repo first so any external
+    /// ref moves are imported and `refs/heads/main` is current; the archive
+    /// itself is a plain filesystem tar (never a jj/git shell-out).
+    pub async fn export_repo_archive(&self, name: &str) -> Result<RepoArchive, EngineError> {
+        let repo = self.load_repo(name).await?;
+        let main_commit_id = repo
+            .view()
+            .get_local_bookmark(RefName::new(MAIN_BOOKMARK))
+            .as_normal()
+            .map(|id| id.hex())
+            .unwrap_or_default();
+        let git_dir = self.git_backend_path(name)?;
+
+        let mut builder = tar::Builder::new(Vec::new());
+        // Archive the bare repo under a stable top-level name so the sandbox
+        // clones a predictable path.
+        builder
+            .append_dir_all("repo.git", &git_dir)
+            .map_err(EngineError::other)?;
+        let tar = builder.into_inner().map_err(EngineError::other)?;
+
+        Ok(RepoArchive {
+            tar,
             main_commit_id,
         })
     }

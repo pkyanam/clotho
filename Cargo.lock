@@ -481,6 +481,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "clotho-compute"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "clotho-common",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tonic",
+ "tracing",
+]
+
+[[package]]
 name = "clotho-diff"
 version = "0.1.0"
 dependencies = [
@@ -535,6 +551,7 @@ dependencies = [
  "futures",
  "gix",
  "jj-lib",
+ "tar",
  "tempfile",
  "thiserror",
  "tokio",
@@ -3027,6 +3044,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
+name = "mime_guess"
+version = "2.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
+dependencies = [
+ "mime",
+ "unicase",
+]
+
+[[package]]
 name = "mio"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3708,6 +3735,7 @@ dependencies = [
  "base64",
  "bytes",
  "futures-core",
+ "futures-util",
  "http",
  "http-body",
  "http-body-util",
@@ -3716,6 +3744,7 @@ dependencies = [
  "hyper-util",
  "js-sys",
  "log",
+ "mime_guess",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
@@ -4643,6 +4672,17 @@ checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
 dependencies = [
  "core-foundation-sys",
  "libc",
+]
+
+[[package]]
+name = "tar"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
+dependencies = [
+ "filetime",
+ "libc",
+ "xattr",
 ]
 
 [[package]]
@@ -5678,6 +5718,16 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
+
+[[package]]
+name = "xattr"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
+dependencies = [
+ "libc",
+ "rustix",
+]
 
 [[package]]
 name = "xet-client"

@@ -8,6 +8,7 @@ members = [
     "crates/clotho-agent-gateway",
     "crates/clotho-diff",
     "crates/clotho-api-gateway",
+    "crates/clotho-compute",
 ]
 
 [workspace.package]
@@ -60,7 +61,7 @@ http = "1"
 schemars = "1"
 # Plain-HTTP/JSON client for Forgejo's REST API; rustls so the runtime image
 # needs no OpenSSL.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Text diffing for the edge PR view's line hunks (Myers over lines); the
@@ -69,6 +70,9 @@ similar = "2.7"
 # CORS for the REST edge — the web app (a different origin in dev) polls it.
 tower-http = { version = "0.6", features = ["cors"] }
 bytes = "1"
+# In-process tar for exporting a repo's bare git object DB to CI sandboxes
+# (docs/adr/0008) — filesystem archive only, never a git shell-out.
+tar = "0.4"
 tempfile = "3"
 prost = "0.14.4"
 thiserror = "2.0.18"

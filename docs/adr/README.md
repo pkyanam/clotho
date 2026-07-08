@@ -12,3 +12,4 @@ Context → Decision → Consequences. Supersede rather than edit.
 | [0005](0005-agent-identity-schema.md) | Agent identity schema in Postgres | Accepted |
 | [0006](0006-merge-queue-integration.md) | Merge-queue serialized rebase + git ref import | Accepted |
 | [0007](0007-edge-read-api-and-presence.md) | Edge read API; presence proxies the audit log | Accepted |
+| [0008](0008-compute-cci-daytona.md) | Rust-native CCI; Daytona provider; git objects shipped to the sandbox | Accepted |
