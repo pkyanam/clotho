@@ -198,6 +198,11 @@ impl DaytonaProvider {
     }
 
     /// Run one shell command; returns (exit_code, combined_output).
+    ///
+    /// Environment is folded into the command as leading `export`s rather than
+    /// sent as a body field: Daytona's `process/execute` ignores an `env`/`envs`
+    /// field (verified against the live API), and prepending exports is
+    /// portable across any provider.
     async fn execute(
         &self,
         id: &str,
@@ -206,10 +211,18 @@ impl DaytonaProvider {
         timeout_secs: u32,
     ) -> Result<(i32, String), ComputeError> {
         let url = format!("{}/toolbox/{id}/process/execute", self.config.proxy_url);
-        let mut body = json!({ "command": command, "timeout": timeout_secs });
-        if !env.is_empty() {
-            body["env"] = json!(env);
-        }
+        let full_command = if env.is_empty() {
+            command.to_string()
+        } else {
+            let mut prefix = String::new();
+            for (key, value) in env {
+                // POSIX single-quote escaping: close, escaped quote, reopen.
+                let escaped = value.replace('\'', r"'\''");
+                prefix.push_str(&format!("export {key}='{escaped}'; "));
+            }
+            format!("{prefix}{command}")
+        };
+        let body = json!({ "command": full_command, "timeout": timeout_secs });
         let resp = self
             .auth(self.http.post(&url).json(&body))
             .send()

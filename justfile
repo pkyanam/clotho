@@ -1,6 +1,11 @@
 # Clotho — cross-language task runner.
 # Rust lives in the Cargo workspace; TS/JS in the pnpm workspace.
 
+# Make cargo reachable from `just` even when the calling shell hasn't exported
+# it: Homebrew's rustup is keg-only (/opt/homebrew/opt/rustup/bin) and rustup's
+# shims live in ~/.cargo/bin. Non-existent entries are harmless on Linux/CI.
+export PATH := env_var("HOME") + "/.cargo/bin:/opt/homebrew/opt/rustup/bin:" + env_var("PATH")
+
 default:
     @just --list
 
