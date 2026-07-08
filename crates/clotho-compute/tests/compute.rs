@@ -7,7 +7,9 @@
 
 use std::collections::HashMap;
 
-use clotho_compute::{ComputeError, ComputeProvider, DaytonaProvider, DisabledProvider, JobFile, JobSpec};
+use clotho_compute::{
+    ComputeError, ComputeProvider, DaytonaProvider, DisabledProvider, JobFile, JobSpec,
+};
 
 #[tokio::test]
 async fn disabled_provider_fails_cleanly() {
