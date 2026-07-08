@@ -433,8 +433,10 @@ async fn upload(
     storage: &mut StorageClient<tonic::transport::Channel>,
     data: &[u8],
 ) -> Result<clotho_common::pb::storage::v1::UploadFileResponse> {
+    // 1 MiB blocks: stay well under the storage server's default 4 MiB
+    // per-message decode limit (a 4 MiB payload + protobuf framing exceeds it).
     let blocks: Vec<UploadFileRequest> = data
-        .chunks(4 * 1024 * 1024)
+        .chunks(1024 * 1024)
         .map(|c| UploadFileRequest { data: c.to_vec() })
         .collect();
     let resp = storage
