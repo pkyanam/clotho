@@ -1,0 +1,10 @@
+# Standalone workspace so Docker builds (which only COPY this directory) get
+# pnpm 11 allowBuilds. The monorepo root also lists this package under services/*.
+packages:
+  - "."
+
+allowBuilds:
+  bufferutil: true
+  cbor-extract: true
+  protobufjs: true
+  utf-8-validate: true
