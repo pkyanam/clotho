@@ -43,10 +43,9 @@ export default async function ActionsPage({
               {provider?.configured ? "provider configured" : "provider missing"}
             </Badge>
           </div>
-          <p className="mt-2 max-w-3xl text-sm text-kumo-subtle">
+          <p className="mt-2 max-w-3xl text-[0.9375rem] text-kumo-inactive">
             Clotho runs `.clotho/ci.sh` when present. Without it, the runner
-            probes Makefile, Cargo, then npm and syncs the final result back to
-            pull-request commit statuses.
+            probes Makefile, Cargo, then npm and reports status on pull requests.
           </p>
           {!config.enabled && (
             <p className="mt-3 max-w-2xl border border-kumo-hairline px-3 py-2 text-xs text-kumo-inactive">
@@ -131,22 +130,33 @@ export default async function ActionsPage({
 
         <aside className="space-y-4">
           <section className="border border-kumo-hairline p-4">
-            <h2 className="text-sm">workflow resolution</h2>
-            <ol className="mt-4 space-y-3 text-xs text-kumo-subtle">
-              <li>1. detect `.clotho/ci.sh` and run it as the repo-owned contract</li>
+            <h2 className="text-[0.9375rem]">workflow</h2>
+            <ol className="mt-4 space-y-3 text-[0.8125rem] text-kumo-inactive">
+              <li>1. run `.clotho/ci.sh` when present</li>
               <li>2. otherwise probe Makefile, Cargo, then npm</li>
-              <li>3. allocate a sandbox through the configured CCI provider</li>
-              <li>4. ship git objects, check out the target commit, run checks</li>
-              <li>5. persist logs and sync `clotho-ci` status to pull requests</li>
+              <li>3. allocate a sandbox via the configured compute provider</li>
+              <li>4. check out the target commit and run checks</li>
+              <li>5. persist logs and update pull request status</li>
             </ol>
+            {!provider?.configured && (
+              <p className="mt-4 text-[0.8125rem] text-kumo-inactive">
+                provider not connected —{" "}
+                <Link
+                  href="/settings/compute"
+                  className="underline hover:text-kumo-default"
+                >
+                  connect compute
+                </Link>
+              </p>
+            )}
           </section>
 
           <section className="border border-kumo-hairline p-4">
-            <h2 className="text-sm">runner policy</h2>
-            <dl className="mt-4 grid gap-3 text-xs">
+            <h2 className="text-[0.9375rem]">runner policy</h2>
+            <dl className="mt-4 grid gap-3 text-[0.8125rem]">
               <Meta label="timeout" value={`${config.timeout_seconds} seconds`} />
-              <Meta label="trigger" value="push webhook or manual start" />
-              <Meta label="status target" value="pull request commit status" />
+              <Meta label="trigger" value="push or manual start" />
+              <Meta label="status target" value="pull request checks" />
               <Meta
                 label="capabilities"
                 value={(provider?.capabilities ?? []).join(", ") || "unknown"}

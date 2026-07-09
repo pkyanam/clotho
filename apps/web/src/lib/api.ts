@@ -40,7 +40,28 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} mib`;
 }
 
+/**
+ * Public clone URL shown in the product UI.
+ * Prefer NEXT_PUBLIC_CLOTHO_GIT_URL when set; otherwise a Clotho-facing host
+ * (never internal docker service names).
+ */
 export function cloneUrl(owner: string, name: string): string {
-  const base = process.env.NEXT_PUBLIC_CLOTHO_GIT_URL ?? "http://localhost:13000";
-  return `${base.replace(/\/$/, "")}/${owner}/${name}.git`;
+  const base =
+    process.env.NEXT_PUBLIC_CLOTHO_GIT_URL ??
+    process.env.NEXT_PUBLIC_CLOTHO_PUBLIC_GIT_URL ??
+    "http://localhost:13000";
+  const cleaned = base.replace(/\/$/, "");
+  // Guard against accidental internal hostnames leaking into the product UI.
+  const publicBase = cleaned
+    .replace(/\/\/forgejo(?::\d+)?/, "//localhost:13000")
+    .replace(/\/\/gitea(?::\d+)?/, "//localhost:13000");
+  return `${publicBase}/${owner}/${name}.git`;
+}
+
+/** Sanitize a clone URL from the API so internal service hosts never render. */
+export function publicCloneUrl(url: string, owner: string, name: string): string {
+  if (!url || /forgejo|gitea|:3000\//i.test(url)) {
+    return cloneUrl(owner, name);
+  }
+  return url;
 }

@@ -115,4 +115,19 @@
   [data-kumo-part] {
     text-transform: lowercase;
   }
+
+  /*
+   * Type scale for the console (Stage 13): body ~15px, secondary ~13px.
+   * Pixel font stays readable; hierarchy via size/weight, not grey mud.
+   */
+  body {
+    font-size: 0.9375rem; /* 15px */
+    line-height: 1.55;
+  }
+  code,
+  pre,
+  kbd {
+    font-family: var(--font-geist-pixel), ui-monospace, "SFMono-Regular",
+      monospace;
+  }
 }

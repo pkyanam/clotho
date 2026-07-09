@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
-import Link from "next/link";
 import "./globals.css";
+
+import { AppShell } from "src/components/app-shell";
 
 // geist pixel — square element shape, the one typeface (see packages/ui)
 const geistPixel = localFont({
@@ -30,21 +31,8 @@ export default function RootLayout({
       data-mode="dark"
       className={`${geistPixel.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col bg-kumo-canvas text-kumo-default">
-        <header className="sticky top-0 z-10 border-b border-kumo-hairline bg-kumo-canvas/70 backdrop-blur-xl">
-          <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-6">
-            <Link href="/" className="text-sm">
-              clotho
-            </Link>
-            <Link href="/" className="text-xs text-kumo-subtle">
-              repos
-            </Link>
-            <Link href="/settings/compute" className="text-xs text-kumo-subtle">
-              compute
-            </Link>
-          </div>
-        </header>
-        <main className="flex-1">{children}</main>
+      <body className="min-h-full bg-kumo-canvas text-kumo-default">
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

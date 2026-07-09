@@ -1,8 +1,15 @@
-import { Badge } from "@cloudflare/kumo";
+import { Badge, Button } from "@cloudflare/kumo";
 import Link from "next/link";
 import type { ComputeProvider } from "@clotho/sdk-js";
 
 import { api } from "src/lib/api";
+import { SettingsNav } from "src/components/settings-nav";
+import {
+  EmptyState,
+  PageFrame,
+  PageTitle,
+} from "src/components/ui/page-frame";
+import { connectProvider } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +17,10 @@ export default async function ComputeSettingsPage() {
   let providers: ComputeProvider[] = [];
   let defaultProviderId = "";
   let error: string | null = null;
+  const orgs = await api()
+    .orgs()
+    .catch(() => []);
+  const primaryOrg = orgs[0]?.name ?? "clotho";
 
   try {
     const list = await api().computeProviderList();
@@ -25,85 +36,55 @@ export default async function ComputeSettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <div>
-          <p className="text-xs text-kumo-inactive">
-            <Link href="/" className="hover:text-kumo-default">
-              dashboard
-            </Link>
-            <span className="mx-2">/</span>
-            settings
-          </p>
-          <h1 className="mt-2 text-2xl leading-tight">compute providers</h1>
-          <p className="mt-2 max-w-2xl text-sm text-kumo-subtle">
-            Capability-aware CCI registry (Stage 12). Secrets stay in service
-            environment variables and are never returned to the browser.
-          </p>
-        </div>
-        {defaultProviderId && (
-          <Badge variant="outline">default: {defaultProviderId}</Badge>
-        )}
-      </div>
+    <PageFrame>
+      <PageTitle
+        title="compute"
+        description="capability-aware provider registry. connect credentials in Clotho — no host env files required."
+        eyebrow={<SettingsNav active="compute" />}
+        actions={
+          defaultProviderId ? (
+            <Badge variant="outline">default: {defaultProviderId}</Badge>
+          ) : undefined
+        }
+      />
 
       {error && (
-        <p className="mt-6 border border-kumo-hairline px-4 py-3 text-xs text-kumo-subtle">
+        <p className="mt-6 border border-kumo-hairline px-4 py-3 text-[0.8125rem] text-kumo-inactive">
           {error}. showing empty or partial list.
         </p>
       )}
 
       {providers.length === 0 ? (
-        <p className="mt-10 border border-kumo-hairline px-4 py-6 text-sm text-kumo-inactive">
-          no providers reported. is the api gateway and clotho-compute up?
-        </p>
+        <div className="mt-10">
+          <EmptyState
+            title="no providers reported"
+            description="start the api gateway and compute service, then refresh."
+          />
+        </div>
       ) : (
-        <ul className="mt-8 space-y-4">
+        <ul className="mt-8 space-y-5">
           {providers.map((p) => (
             <li
               key={p.id}
-              className="border border-kumo-hairline p-4 max-w-3xl"
+              className="border border-kumo-hairline bg-kumo-base p-5 max-w-3xl"
             >
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-sm">{p.name}</h2>
+                <h2 className="text-[1rem]">{p.name}</h2>
                 <Badge variant="outline">{p.id}</Badge>
                 {p.kind && <Badge variant="outline">{p.kind}</Badge>}
                 <Badge variant="outline">
-                  {p.configured ? "configured" : "not configured"}
+                  {p.configured ? "configured" : "not connected"}
                 </Badge>
                 {p.enabled && <Badge variant="outline">default</Badge>}
               </div>
-              <dl className="mt-4 grid gap-2 text-xs">
-                <Row
-                  label="configured reason"
-                  value={
-                    p.configured
-                      ? "ready"
-                      : p.configured_reason || "credentials missing"
-                  }
-                />
-                <Row
-                  label="default snapshot"
-                  value={p.default_snapshot || "provider default"}
-                />
-                <Row
-                  label="capabilities"
-                  value={(p.capabilities ?? []).join(", ") || "none"}
-                />
-                {p.capability_detail?.regions &&
-                  p.capability_detail.regions.length > 0 && (
-                    <Row
-                      label="regions"
-                      value={p.capability_detail.regions.join(", ")}
-                    />
-                  )}
-                {p.capability_detail?.cost_hints && (
-                  <Row
-                    label="cost hints"
-                    value={p.capability_detail.cost_hints}
-                  />
-                )}
-                {p.notes && <Row label="notes" value={p.notes} />}
-              </dl>
+
+              <p className="mt-3 text-[0.875rem] text-kumo-inactive">
+                {p.configured
+                  ? p.configured_reason || "ready for Actions and sandboxes"
+                  : p.configured_reason ||
+                    "connect credentials below to enable this provider"}
+              </p>
+
               {p.capability_detail && (
                 <div className="mt-4 flex flex-wrap gap-1.5">
                   {capChip("one-shot", p.capability_detail.one_shot_jobs)}
@@ -122,28 +103,80 @@ export default async function ComputeSettingsPage() {
                   )}
                 </div>
               )}
+
+              <dl className="mt-4 grid gap-2 text-[0.8125rem]">
+                <Row
+                  label="default snapshot"
+                  value={p.default_snapshot || "provider default"}
+                />
+                {p.capability_detail?.regions &&
+                  p.capability_detail.regions.length > 0 && (
+                    <Row
+                      label="regions"
+                      value={p.capability_detail.regions.join(", ")}
+                    />
+                  )}
+                {p.capability_detail?.cost_hints && (
+                  <Row label="cost" value={p.capability_detail.cost_hints} />
+                )}
+              </dl>
+
+              {(p.id === "daytona" || p.id === "box") && (
+                <div className="mt-5 border-t border-kumo-hairline pt-5">
+                  <h3 className="text-[0.875rem]">
+                    {p.configured ? "rotate connection" : `connect ${p.name}`}
+                  </h3>
+                  <p className="mt-1 text-[0.8125rem] text-kumo-inactive">
+                    paste an api key once. it is stored as an organization
+                    secret and never shown again.
+                  </p>
+                  <form
+                    action={connectProvider.bind(null, p.id)}
+                    className="mt-3 flex flex-wrap items-end gap-3"
+                  >
+                    <input type="hidden" name="org" value={primaryOrg} />
+                    <label className="min-w-[220px] grow text-[0.8125rem] text-kumo-inactive">
+                      api key
+                      <input
+                        name="api_key"
+                        type="password"
+                        required
+                        autoComplete="off"
+                        placeholder={
+                          p.configured ? "enter new key to rotate" : "paste key"
+                        }
+                        className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-canvas px-3 py-2 text-[0.875rem] text-kumo-default outline-none focus:border-kumo-contrast"
+                      />
+                    </label>
+                    <Button type="submit">
+                      {p.configured ? "rotate" : "connect"}
+                    </Button>
+                  </form>
+                </div>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      <p className="mt-8 max-w-3xl text-xs text-kumo-inactive">
-        Daytona uses <code className="text-kumo-subtle">DAYTONA_API_KEY</code>.
-        ComputeSDK bridge uses{" "}
-        <code className="text-kumo-subtle">CLOTHO_COMPUTE_SDK_BRIDGE_URL</code>{" "}
-        and upstream keys in the sidecar. Box uses{" "}
-        <code className="text-kumo-subtle">BOX_API_KEY</code> (stub until the
-        full adapter lands). See{" "}
-        <code className="text-kumo-subtle">.env.example</code>.
+      <p className="mt-8 max-w-3xl text-[0.8125rem] text-kumo-inactive">
+        manage all secrets in{" "}
+        <Link
+          href="/settings/secrets"
+          className="underline hover:text-kumo-default"
+        >
+          settings → secrets
+        </Link>
+        . process environment keys remain a local-dev escape hatch only.
       </p>
-    </div>
+    </PageFrame>
   );
 }
 
 function capChip(label: string, on: boolean) {
   return (
     <span
-      className={`border px-2 py-0.5 text-[11px] ${
+      className={`border px-2 py-0.5 text-[0.75rem] ${
         on
           ? "border-kumo-hairline text-kumo-default"
           : "border-kumo-hairline text-kumo-inactive opacity-50"
@@ -157,7 +190,7 @@ function capChip(label: string, on: boolean) {
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid gap-1 sm:grid-cols-[160px_minmax(0,1fr)]">
+    <div className="grid gap-1 sm:grid-cols-[140px_minmax(0,1fr)]">
       <dt className="text-kumo-inactive">{label}</dt>
       <dd className="min-w-0 break-all">{value}</dd>
     </div>

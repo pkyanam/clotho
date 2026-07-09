@@ -28,38 +28,32 @@ export function RepoNav({
   name: string;
   active: RepoSection;
 }) {
-  const tab = (href: string, label: string, current: boolean) => (
-    <Link
-      href={href}
-      className={`border-b pb-2 text-xs transition-colors ${
-        current
-          ? "border-kumo-contrast text-kumo-default"
-          : "border-transparent text-kumo-inactive hover:text-kumo-default"
-      }`}
-    >
-      {label}
-    </Link>
-  );
-
   return (
     <div className="border-b border-kumo-hairline">
-      <div className="flex items-baseline gap-2 pb-3 text-xs text-kumo-inactive">
-        <Link href="/" className="hover:text-kumo-default">
+      <div className="flex flex-wrap items-baseline gap-2 pb-3 text-[0.8125rem] text-kumo-inactive">
+        <Link href="/repos" className="hover:text-kumo-default">
           repos
         </Link>
         <span>/</span>
         <span className="text-kumo-default">{name}</span>
       </div>
-      <nav className="flex items-center gap-5 overflow-x-auto">
-        {sections.map((section) => (
-          <span key={section.key}>
-            {tab(
-              `/repos/${name}${section.href}`,
-              section.label,
-              active === section.key,
-            )}
-          </span>
-        ))}
+      <nav className="flex items-center gap-4 overflow-x-auto pb-px">
+        {sections.map((section) => {
+          const current = active === section.key;
+          return (
+            <Link
+              key={section.key}
+              href={`/repos/${name}${section.href}`}
+              className={`shrink-0 border-b-2 pb-2.5 text-[0.8125rem] transition-colors ${
+                current
+                  ? "border-kumo-contrast text-kumo-default"
+                  : "border-transparent text-kumo-inactive hover:text-kumo-default"
+              }`}
+            >
+              {section.label}
+            </Link>
+          );
+        })}
       </nav>
     </div>
   );

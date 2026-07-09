@@ -1,48 +1,57 @@
 import { Button } from "@cloudflare/kumo";
+import Link from "next/link";
 
+import {
+  PageFrame,
+  PageTitle,
+} from "src/components/ui/page-frame";
 import { createRepo } from "./actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewRepoPage() {
-  const action = createRepo;
-
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8">
-      <div className="border-b border-kumo-hairline pb-6">
-        <h1 className="text-2xl leading-tight">new repository</h1>
-        <p className="mt-2 max-w-2xl text-sm text-kumo-subtle">
-          create a jj-native repo owned by Clotho. Forgejo is provisioned behind
-          the scenes as the collaboration provider.
-        </p>
-      </div>
+    <PageFrame>
+      <PageTitle
+        title="new repository"
+        description="create a repository owned by your organization. collaboration, actions, and agents are ready out of the box."
+        eyebrow={
+          <Link
+            href="/"
+            className="text-[0.8125rem] text-kumo-inactive hover:text-kumo-default"
+          >
+            ← dashboard
+          </Link>
+        }
+      />
 
-      <form action={action} className="mt-8 max-w-3xl space-y-4">
-        <label className="block text-xs text-kumo-subtle">
+      <form action={createRepo} className="mt-8 max-w-xl space-y-5">
+        <label className="block text-[0.8125rem] text-kumo-inactive">
           name
           <input
             name="name"
             required
             pattern="[a-z0-9-_]+"
             placeholder="weave"
-            className="mt-2 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 text-sm text-kumo-default outline-none focus:border-kumo-contrast"
+            className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2.5 text-[0.9375rem] text-kumo-default outline-none focus:border-kumo-contrast"
           />
         </label>
 
-        <label className="block text-xs text-kumo-subtle">
+        <label className="block text-[0.8125rem] text-kumo-inactive">
           description
           <input
             name="description"
-            className="mt-2 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 text-sm text-kumo-default outline-none focus:border-kumo-contrast"
+            placeholder="optional"
+            className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2.5 text-[0.9375rem] text-kumo-default outline-none focus:border-kumo-contrast"
           />
         </label>
 
-        <label className="block text-xs text-kumo-subtle">
+        <label className="block text-[0.8125rem] text-kumo-inactive">
           visibility
           <select
             name="visibility"
             defaultValue="public"
-            className="mt-2 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 text-sm text-kumo-default outline-none focus:border-kumo-contrast"
+            className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2.5 text-[0.9375rem] text-kumo-default outline-none focus:border-kumo-contrast"
           >
             <option value="public">public</option>
             <option value="private">private</option>
@@ -52,6 +61,6 @@ export default async function NewRepoPage() {
 
         <Button type="submit">create repository</Button>
       </form>
-    </div>
+    </PageFrame>
   );
 }
