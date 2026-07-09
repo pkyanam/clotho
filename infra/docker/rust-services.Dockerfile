@@ -11,6 +11,8 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY proto ./proto
+# Stage 15: api-gateway embeds docs/openapi.yaml via include_str!.
+COPY docs ./docs
 RUN cargo build --release --bin "${SERVICE}"
 
 FROM debian:trixie-slim AS runtime
