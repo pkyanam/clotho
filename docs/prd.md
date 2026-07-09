@@ -329,8 +329,8 @@ Shipped a console-quality web redesign plus first-class secrets:
   documents bootstrap secrets; provider keys are secondary escape hatches.
 - **Deferred within Stage 13:** full issue/PR upgrade (labels/milestones/…),
   notifications, branches/commits/releases pages, OpenAPI generation.
-  **Intentionally deferred to Stage 14+:** finishing Box HTTP client and
-  ComputeSDK in-app secret wiring (stubs must not block the console redesign).
+  **Stage 14 completed** Box HTTP client + ComputeSDK secret/bridge maturity
+  (see Stage 14 implementation notes).
 
 ### Stage 14 — Platform Hardening & Honest Compute *(inject — recommended next for ops honesty; can run in parallel with Stage 15 start)*
 Short housekeeping stage so the multi-provider story is truthful and secrets
@@ -363,6 +363,31 @@ are first-class for every advertised provider — not only Daytona.
 - **Acceptance:** Daytona, Box, and ComputeSDK each have a clear path from
   “not connected” → “connected via Clotho secret or documented bootstrap” →
   “job fails only for real provider errors.” No provider card lies.
+
+#### Stage 14 implementation notes (2026-07-08)
+
+- **Box (Ascii):** real CCI provider in `crates/clotho-compute` against
+  `https://ascii.dev/api/box/v1` — create → poll ready/idle → write files
+  (base64) → `POST …/commands` → delete. Per-job `provider_credentials.api_key`
+  (gateway secrets path). Persistent hooks (`create_persistent`, `stop_box`,
+  `resume_box`) for a later session API. `configured` only when env key present
+  or Clotho secret overlay; never while stub-only. Note: Box API caps command
+  `timeoutSeconds` at 60.
+- **ComputeSDK bridge:** compose profile `compute-bridge` + `just dev-compute-bridge`
+  (and host `just dev-compute-bridge-host`). In-cluster default URL on
+  `clotho-compute`. Live `/health` probe for honest `configured`. Per-job
+  `credentials` on bridge jobs from Clotho secrets (`E2B_API_KEY`,
+  `MODAL_TOKEN_*`). Settings → connect E2B without host `.env`.
+- **Honest state:** “configured” = can accept a job with current credentials
+  (env, Clotho secret inject, or bridge upstream). Bridge URL alone is not
+  configured. REST overlay unifies gRPC + secrets for web/SDK.
+- **REST:** `DELETE /api/v1/providers/{id}/connect` disconnects (deletes
+  well-known secrets); connect extended for computesdk. SDK:
+  `disconnectProvider`. OpenAPI updated.
+- **Bootstrap:** `.env.example` documents safe `CLOTHO_SECRETS_MASTER_KEY`
+  generation (paste 64 hex chars; never shell command literals).
+- **Not in this slice:** Stage 16 discovery/social; sandbox session REST;
+  full Modal connect form in web (secrets page + connect API fields work).
 
 ### Stage 15 — World-Class API / CLI / SDK / MCP Parity *(was Stage 14; elevated priority for agent-native thesis)*
 Make REST the single product contract; every stable web capability must be
