@@ -108,6 +108,77 @@ describe("ClothoClient", () => {
     );
   });
 
+  it("lists and creates org secrets without returning raw values", async () => {
+    const meta = {
+      id: "s1",
+      scope: "org",
+      name: "DAYTONA_API_KEY",
+      value_last4: "x7k2",
+      description: "",
+      org_id: "clotho",
+      repo_id: null,
+      created_by: "clotho",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ secrets: [meta] }))
+      .mockResolvedValueOnce(jsonResponse(meta, 201))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    await expect(client.orgSecrets("clotho")).resolves.toEqual([meta]);
+    await client.createOrgSecret("clotho", {
+      name: "DAYTONA_API_KEY",
+      value: "super-secret-x7k2",
+    });
+    await client.deleteOrgSecret("clotho", "DAYTONA_API_KEY");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://gateway.test/api/v1/orgs/clotho/secrets",
+      undefined,
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://gateway.test/api/v1/orgs/clotho/secrets",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          name: "DAYTONA_API_KEY",
+          value: "super-secret-x7k2",
+          description: "",
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "http://gateway.test/api/v1/orgs/clotho/secrets/DAYTONA_API_KEY",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("connects a provider via the secrets convenience route", async () => {
+    const { client, fetchMock } = clientWith(
+      jsonResponse({ name: "DAYTONA_API_KEY", value_last4: "abcd" }),
+    );
+    await client.connectProvider("daytona", {
+      apiKey: "key-abcd",
+      org: "clotho",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://gateway.test/api/v1/providers/daytona/connect",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ api_key: "key-abcd", org: "clotho" }),
+      }),
+    );
+  });
+
   it("wraps native issue list and creation", async () => {
     const fetchMock = vi
       .fn()

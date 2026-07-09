@@ -405,6 +405,21 @@ export interface HealthStatus {
   status: string;
 }
 
+/** Metadata-only secret view — never includes plaintext (docs/adr/0014). */
+export interface SecretMeta {
+  id: string;
+  scope: "org" | "repo" | string;
+  org_id: string | null;
+  repo_id: string | null;
+  name: string;
+  description: string;
+  /** Last 4 characters of the secret value for UI masking. */
+  value_last4: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // ---------------------------------------------------------------------------
 // client
 // ---------------------------------------------------------------------------
@@ -446,7 +461,12 @@ export class ClothoClient {
       }
       throw new ClothoApiError(res.status, message);
     }
-    return (await res.json()) as T;
+    if (res.status === 204 || res.headers.get("content-length") === "0") {
+      return undefined as T;
+    }
+    const text = await res.text();
+    if (!text) return undefined as T;
+    return JSON.parse(text) as T;
   }
 
   health(): Promise<HealthStatus> {
@@ -856,6 +876,128 @@ export class ClothoClient {
       })}`,
     );
     return sessions;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Secrets (Stage 13, docs/adr/0014) — never returns raw values after write
+  // ---------------------------------------------------------------------------
+
+  async orgSecrets(org: string): Promise<SecretMeta[]> {
+    const { secrets } = await this.request<{ secrets: SecretMeta[] }>(
+      `/api/v1/orgs/${encodeURIComponent(org)}/secrets`,
+    );
+    return secrets;
+  }
+
+  createOrgSecret(
+    org: string,
+    options: { name: string; value: string; description?: string },
+  ): Promise<SecretMeta> {
+    return this.request(`/api/v1/orgs/${encodeURIComponent(org)}/secrets`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: options.name,
+        value: options.value,
+        description: options.description ?? "",
+      }),
+    });
+  }
+
+  getOrgSecret(org: string, name: string): Promise<SecretMeta> {
+    return this.request(
+      `/api/v1/orgs/${encodeURIComponent(org)}/secrets/${encodeURIComponent(name)}`,
+    );
+  }
+
+  updateOrgSecret(
+    org: string,
+    name: string,
+    options: { value?: string; description?: string },
+  ): Promise<SecretMeta> {
+    return this.request(
+      `/api/v1/orgs/${encodeURIComponent(org)}/secrets/${encodeURIComponent(name)}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(options),
+      },
+    );
+  }
+
+  async deleteOrgSecret(org: string, name: string): Promise<void> {
+    await this.request(
+      `/api/v1/orgs/${encodeURIComponent(org)}/secrets/${encodeURIComponent(name)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async repoSecrets(repo: string): Promise<SecretMeta[]> {
+    const { secrets } = await this.request<{ secrets: SecretMeta[] }>(
+      `/api/v1/repos/${encodeURIComponent(repo)}/secrets`,
+    );
+    return secrets;
+  }
+
+  createRepoSecret(
+    repo: string,
+    options: { name: string; value: string; description?: string },
+  ): Promise<SecretMeta> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(repo)}/secrets`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: options.name,
+          value: options.value,
+          description: options.description ?? "",
+        }),
+      },
+    );
+  }
+
+  updateRepoSecret(
+    repo: string,
+    name: string,
+    options: { value?: string; description?: string },
+  ): Promise<SecretMeta> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(repo)}/secrets/${encodeURIComponent(name)}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(options),
+      },
+    );
+  }
+
+  async deleteRepoSecret(repo: string, name: string): Promise<void> {
+    await this.request(
+      `/api/v1/repos/${encodeURIComponent(repo)}/secrets/${encodeURIComponent(name)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  /**
+   * Store a provider API key as an org secret (write-once to the browser).
+   * Response is metadata only (masked last4).
+   */
+  connectProvider(
+    provider: string,
+    options: { apiKey: string; org?: string },
+  ): Promise<SecretMeta> {
+    return this.request(
+      `/api/v1/providers/${encodeURIComponent(provider)}/connect`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          api_key: options.apiKey,
+          org: options.org ?? "",
+        }),
+      },
+    );
   }
 }
 
