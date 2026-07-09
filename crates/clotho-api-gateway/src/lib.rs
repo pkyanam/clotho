@@ -154,11 +154,21 @@ pub fn router_with_pool(
         Some(ref p) => actions::ActionsState::with_pool(actions_defaults, p.clone()),
         None => actions::ActionsState::new(actions_defaults),
     };
-    let secrets_crypto = secrets::SecretsCrypto::from_env()
-        .map_err(|e| clotho_common::Error::Config(e))?;
+    // Never fail process boot on secrets config: an unset/invalid master key
+    // disables write/resolve with a clear log line (docs/adr/0014).
+    let secrets_crypto = match secrets::SecretsCrypto::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                "CLOTHO_SECRETS_MASTER_KEY invalid — secret write/resolve disabled"
+            );
+            None
+        }
+    };
     if secrets_crypto.is_none() {
         tracing::warn!(
-            "CLOTHO_SECRETS_MASTER_KEY unset — secret write/resolve disabled (docs/adr/0014)"
+            "CLOTHO_SECRETS_MASTER_KEY unset or invalid — secret write/resolve disabled (docs/adr/0014)"
         );
     }
     let state = Arc::new(AppState {
