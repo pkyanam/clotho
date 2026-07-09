@@ -1,0 +1,1869 @@
+openapi: 3.0.3
+info:
+  title: Clotho API Gateway
+  description: |
+    Product REST contract for Clotho (`/api/v1/*`). Humans use the CLI; agents
+    use MCP tools that call this same edge; the web app and `@clotho/sdk-js`
+    share it. Errors use `{ "error": "..." }` with 4xx/5xx status codes.
+
+    **Auth (prototype):** most routes are unauthenticated. Agent admin lives on
+    the agent-gateway (`/admin/v1/*`), not this edge. Secrets master key is
+    server-side only (`CLOTHO_SECRETS_MASTER_KEY`).
+  version: 0.1.0
+  license:
+    name: Apache-2.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local dev stack (`just dev`)
+
+tags:
+  - name: health
+  - name: control
+  - name: repos
+  - name: issues
+  - name: pulls
+  - name: actions
+  - name: providers
+  - name: secrets
+  - name: agents
+  - name: webhooks
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      operationId: healthz
+      summary: Liveness probe
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /openapi.yaml:
+    get:
+      tags: [health]
+      operationId: openapiYaml
+      summary: This OpenAPI document (YAML)
+      responses:
+        "200":
+          description: OpenAPI 3 YAML
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+  /api/v1/users:
+    get:
+      tags: [control]
+      operationId: listUsers
+      summary: List control-plane users
+      responses:
+        "200":
+          description: User list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/User"
+
+  /api/v1/orgs:
+    get:
+      tags: [control]
+      operationId: listOrgs
+      summary: List organizations
+      responses:
+        "200":
+          description: Org list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orgs]
+                properties:
+                  orgs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Org"
+    post:
+      tags: [control]
+      operationId: createOrg
+      summary: Create an organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                display_name:
+                  type: string
+                forgejo_owner:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Org"
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/orgs/{org}:
+    get:
+      tags: [control]
+      operationId: getOrg
+      summary: Org detail with members
+      parameters:
+        - $ref: "#/components/parameters/org"
+      responses:
+        "200":
+          description: Org detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgDetail"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/orgs/{org}/repos:
+    get:
+      tags: [control]
+      operationId: listOrgRepos
+      summary: List repos owned by an org
+      parameters:
+        - $ref: "#/components/parameters/org"
+      responses:
+        "200":
+          description: Repo list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [repos]
+                properties:
+                  repos:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RepoInfo"
+
+  /api/v1/activity:
+    get:
+      tags: [control]
+      operationId: listActivity
+      summary: Global activity feed
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: Events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ActivityEvent"
+
+  /api/v1/repos:
+    get:
+      tags: [repos]
+      operationId: listRepos
+      summary: List all repos
+      responses:
+        "200":
+          description: Repo list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [repos]
+                properties:
+                  repos:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RepoInfo"
+    post:
+      tags: [repos]
+      operationId: createRepo
+      summary: Create a repo (VCS + collab shell)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                visibility:
+                  type: string
+                  enum: [public, private, internal]
+                default_branch:
+                  type: string
+                  default: main
+                owner_org:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedRepo"
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/repos/{name}:
+    get:
+      tags: [repos]
+      operationId: getRepo
+      summary: Repo detail (heads, main, clone URL)
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      responses:
+        "200":
+          description: Detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepoDetail"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/repos/{name}/tree:
+    get:
+      tags: [repos]
+      operationId: getTree
+      summary: File tree at a commit
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - name: commit_id
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tree"
+
+  /api/v1/repos/{name}/file:
+    get:
+      tags: [repos]
+      operationId: getFile
+      summary: Single file contents
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: commit_id
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileContent"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/repos/{name}/commits:
+    get:
+      tags: [repos]
+      operationId: listCommits
+      summary: Commit log
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - name: from_commit_id
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Commits
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [commits]
+                properties:
+                  commits:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Commit"
+    post:
+      tags: [repos]
+      operationId: createCommit
+      summary: Create a commit from explicit file contents
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                files:
+                  type: array
+                  items:
+                    type: object
+                    required: [path, content]
+                    properties:
+                      path:
+                        type: string
+                      content:
+                        type: string
+                      executable:
+                        type: boolean
+                deleted_paths:
+                  type: array
+                  items:
+                    type: string
+                parent_commit_ids:
+                  type: array
+                  items:
+                    type: string
+                author_name:
+                  type: string
+                author_email:
+                  type: string
+      responses:
+        "201":
+          description: Created commit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedCommit"
+        "400":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/repos/{name}/oplog:
+    get:
+      tags: [repos]
+      operationId: getOpLog
+      summary: jj operation log
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Op log
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OpLogEntry"
+
+  /api/v1/repos/{name}/submit:
+    post:
+      tags: [repos]
+      operationId: submitChange
+      summary: Submit a commit through the merge queue onto main
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [commit_id]
+              properties:
+                commit_id:
+                  type: string
+      responses:
+        "200":
+          description: Landed or conflicted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitResult"
+
+  /api/v1/repos/{name}/issues:
+    get:
+      tags: [issues]
+      operationId: listIssues
+      summary: List issues
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [open, closed, all]
+            default: open
+      responses:
+        "200":
+          description: Issues
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issues]
+                properties:
+                  issues:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Issue"
+    post:
+      tags: [issues]
+      operationId: createIssue
+      summary: Open an issue
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                body:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issue"
+        "400":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/repos/{name}/issues/{number}:
+    get:
+      tags: [issues]
+      operationId: getIssue
+      summary: Issue detail with comments
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - $ref: "#/components/parameters/issueNumber"
+      responses:
+        "200":
+          description: Detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueDetail"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/repos/{name}/issues/{number}/comments:
+    post:
+      tags: [issues]
+      operationId: commentOnIssue
+      summary: Comment on an issue
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - $ref: "#/components/parameters/issueNumber"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+
+  /api/v1/repos/{name}/pulls:
+    get:
+      tags: [pulls]
+      operationId: listPulls
+      summary: List pull requests
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [open, closed, all]
+            default: all
+      responses:
+        "200":
+          description: Pulls
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pulls]
+                properties:
+                  pulls:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Pull"
+    post:
+      tags: [pulls]
+      operationId: createPull
+      summary: Open a pull request
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, head]
+              properties:
+                title:
+                  type: string
+                body:
+                  type: string
+                head:
+                  type: string
+                base:
+                  type: string
+                  default: main
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pull"
+
+  /api/v1/repos/{name}/pulls/{number}:
+    get:
+      tags: [pulls]
+      operationId: getPull
+      summary: Pull request detail
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - $ref: "#/components/parameters/pullNumber"
+      responses:
+        "200":
+          description: Detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pull"
+
+  /api/v1/repos/{name}/pulls/{number}/comments:
+    post:
+      tags: [pulls]
+      operationId: commentOnPull
+      summary: Comment on a pull request
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - $ref: "#/components/parameters/pullNumber"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+
+  /api/v1/repos/{name}/pulls/{number}/reviews:
+    post:
+      tags: [pulls]
+      operationId: reviewPull
+      summary: Submit a review (COMMENT, APPROVE, REQUEST_CHANGES)
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - $ref: "#/components/parameters/pullNumber"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                body:
+                  type: string
+                event:
+                  type: string
+                  enum: [COMMENT, APPROVE, REQUEST_CHANGES]
+                  default: COMMENT
+      responses:
+        "201":
+          description: Review recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+
+  /api/v1/repos/{name}/pulls/{number}/merge:
+    post:
+      tags: [pulls]
+      operationId: mergePull
+      summary: Merge a pull request
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - $ref: "#/components/parameters/pullNumber"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method:
+                  type: string
+                  enum: [merge, rebase, rebase-merge, squash]
+                  default: merge
+                title:
+                  type: string
+                message:
+                  type: string
+      responses:
+        "200":
+          description: Merged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pull"
+
+  /api/v1/repos/{name}/pulls/{number}/diff:
+    get:
+      tags: [pulls]
+      operationId: pullDiff
+      summary: Structured symbol-level PR diff
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - $ref: "#/components/parameters/pullNumber"
+      responses:
+        "200":
+          description: Diff
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PullDiff"
+
+  /api/v1/repos/{name}/branches:
+    get:
+      tags: [repos]
+      operationId: listBranches
+      summary: List branches
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      responses:
+        "200":
+          description: Branches
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [branches]
+                properties:
+                  branches:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Branch"
+
+  /api/v1/repos/{name}/commits/{sha}/statuses:
+    get:
+      tags: [repos]
+      operationId: commitStatuses
+      summary: Commit status checks
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - name: sha
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Statuses
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [statuses]
+                properties:
+                  statuses:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CommitStatus"
+
+  /api/v1/repos/{name}/actions/runs:
+    get:
+      tags: [actions]
+      operationId: listActionRuns
+      summary: List Action runs
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: before
+          in: query
+          schema:
+            type: integer
+            format: int64
+            description: Cursor (created_at_millis of last seen run)
+      responses:
+        "200":
+          description: Runs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionRunList"
+    post:
+      tags: [actions]
+      operationId: createActionRun
+      summary: Start a manual Action run
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                commit_id:
+                  type: string
+                  description: Empty = current main head
+                branch:
+                  type: string
+                  default: main
+                actor:
+                  type: string
+                  default: manual
+      responses:
+        "202":
+          description: Accepted / queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionRun"
+        "400":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/repos/{name}/actions/runs/{run_id}:
+    get:
+      tags: [actions]
+      operationId: getActionRun
+      summary: Get one Action run
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - $ref: "#/components/parameters/runId"
+      responses:
+        "200":
+          description: Run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionRun"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/repos/{name}/actions/runs/{run_id}/logs:
+    get:
+      tags: [actions]
+      operationId: getActionLogs
+      summary: Action run logs (text)
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - $ref: "#/components/parameters/runId"
+      responses:
+        "200":
+          description: Logs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionLog"
+
+  /api/v1/repos/{name}/actions/config:
+    get:
+      tags: [actions]
+      operationId: getActionsConfig
+      summary: Repo Actions configuration
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      responses:
+        "200":
+          description: Config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionsConfig"
+    put:
+      tags: [actions]
+      operationId: putActionsConfig
+      summary: Update repo Actions configuration
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActionsConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionsConfig"
+
+  /api/v1/providers:
+    get:
+      tags: [providers]
+      operationId: listProviders
+      summary: Compute provider registry
+      responses:
+        "200":
+          description: Providers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderList"
+
+  /api/v1/providers/{provider}:
+    get:
+      tags: [providers]
+      operationId: getProvider
+      summary: One provider
+      parameters:
+        - $ref: "#/components/parameters/provider"
+      responses:
+        "200":
+          description: Provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Provider"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/providers/{provider}/connect:
+    post:
+      tags: [providers, secrets]
+      operationId: connectProvider
+      summary: Store a provider API key as an org secret (metadata-only response)
+      parameters:
+        - $ref: "#/components/parameters/provider"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [api_key]
+              properties:
+                api_key:
+                  type: string
+                org:
+                  type: string
+      responses:
+        "201":
+          description: Secret metadata (never raw value)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretMeta"
+
+  /api/v1/compute/providers:
+    get:
+      tags: [providers]
+      operationId: listProvidersAlias
+      summary: Alias of GET /api/v1/providers
+      responses:
+        "200":
+          description: Providers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderList"
+
+  /api/v1/compute/providers/{provider}:
+    get:
+      tags: [providers]
+      operationId: getProviderAlias
+      summary: Alias of GET /api/v1/providers/{provider}
+      parameters:
+        - $ref: "#/components/parameters/provider"
+      responses:
+        "200":
+          description: Provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Provider"
+
+  /api/v1/orgs/{org}/secrets:
+    get:
+      tags: [secrets]
+      operationId: listOrgSecrets
+      summary: List org secrets (metadata only)
+      parameters:
+        - $ref: "#/components/parameters/org"
+      responses:
+        "200":
+          description: Secrets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secrets]
+                properties:
+                  secrets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SecretMeta"
+    post:
+      tags: [secrets]
+      operationId: createOrgSecret
+      summary: Create org secret (value write-only)
+      parameters:
+        - $ref: "#/components/parameters/org"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, value]
+              properties:
+                name:
+                  type: string
+                value:
+                  type: string
+                description:
+                  type: string
+      responses:
+        "201":
+          description: Metadata only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretMeta"
+
+  /api/v1/orgs/{org}/secrets/{secretName}:
+    get:
+      tags: [secrets]
+      operationId: getOrgSecret
+      summary: Org secret metadata
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/secretName"
+      responses:
+        "200":
+          description: Metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretMeta"
+    patch:
+      tags: [secrets]
+      operationId: patchOrgSecret
+      summary: Update org secret value and/or description
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/secretName"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value:
+                  type: string
+                description:
+                  type: string
+      responses:
+        "200":
+          description: Metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretMeta"
+    delete:
+      tags: [secrets]
+      operationId: deleteOrgSecret
+      summary: Delete org secret
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/secretName"
+      responses:
+        "204":
+          description: Deleted
+
+  /api/v1/repos/{repo}/secrets:
+    get:
+      tags: [secrets]
+      operationId: listRepoSecrets
+      summary: List repo secrets (metadata only)
+      parameters:
+        - $ref: "#/components/parameters/repoPath"
+      responses:
+        "200":
+          description: Secrets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secrets]
+                properties:
+                  secrets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SecretMeta"
+    post:
+      tags: [secrets]
+      operationId: createRepoSecret
+      summary: Create repo secret (value write-only)
+      parameters:
+        - $ref: "#/components/parameters/repoPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, value]
+              properties:
+                name:
+                  type: string
+                value:
+                  type: string
+                description:
+                  type: string
+      responses:
+        "201":
+          description: Metadata only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretMeta"
+
+  /api/v1/repos/{repo}/secrets/{secretName}:
+    get:
+      tags: [secrets]
+      operationId: getRepoSecret
+      summary: Repo secret metadata
+      parameters:
+        - $ref: "#/components/parameters/repoPath"
+        - $ref: "#/components/parameters/secretName"
+      responses:
+        "200":
+          description: Metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretMeta"
+    patch:
+      tags: [secrets]
+      operationId: patchRepoSecret
+      summary: Update repo secret
+      parameters:
+        - $ref: "#/components/parameters/repoPath"
+        - $ref: "#/components/parameters/secretName"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value:
+                  type: string
+                description:
+                  type: string
+      responses:
+        "200":
+          description: Metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretMeta"
+    delete:
+      tags: [secrets]
+      operationId: deleteRepoSecret
+      summary: Delete repo secret
+      parameters:
+        - $ref: "#/components/parameters/repoPath"
+        - $ref: "#/components/parameters/secretName"
+      responses:
+        "204":
+          description: Deleted
+
+  /api/v1/repos/{name}/agent-sessions:
+    get:
+      tags: [agents]
+      operationId: listAgentSessions
+      summary: Recent agent sessions on a repo
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: within_secs
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentSession"
+
+  /api/v1/webhooks/forgejo:
+    post:
+      tags: [webhooks]
+      operationId: forgejoWebhook
+      summary: Internal Forgejo push webhook (HMAC-verified)
+      responses:
+        "200":
+          description: Accepted
+        "401":
+          $ref: "#/components/responses/Error"
+
+components:
+  parameters:
+    org:
+      name: org
+      in: path
+      required: true
+      schema:
+        type: string
+    repoName:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+    repoPath:
+      name: repo
+      in: path
+      required: true
+      schema:
+        type: string
+    issueNumber:
+      name: number
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    pullNumber:
+      name: number
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    runId:
+      name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
+    provider:
+      name: provider
+      in: path
+      required: true
+      schema:
+        type: string
+    secretName:
+      name: secretName
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    Error:
+      description: Error envelope
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    HealthStatus:
+      type: object
+      properties:
+        service:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        display_name:
+          type: string
+        created_at:
+          type: string
+    Org:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        display_name:
+          type: string
+        forgejo_owner:
+          type: string
+        created_by:
+          type: string
+        created_at:
+          type: string
+    OrgMembership:
+      type: object
+      properties:
+        org_id:
+          type: string
+        user_id:
+          type: string
+        role:
+          type: string
+        user_name:
+          type: string
+        user_display_name:
+          type: string
+    OrgDetail:
+      type: object
+      properties:
+        org:
+          $ref: "#/components/schemas/Org"
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrgMembership"
+    ActivityEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+        actor_id:
+          type: string
+        org_id:
+          type: string
+          nullable: true
+        repo_id:
+          type: string
+          nullable: true
+        event_type:
+          type: string
+        payload: {}
+        created_at:
+          type: string
+    RepoInfo:
+      type: object
+      properties:
+        id:
+          type: integer
+        clotho_id:
+          type: string
+        name:
+          type: string
+        full_name:
+          type: string
+        owner:
+          type: string
+        html_url:
+          type: string
+        clone_url:
+          type: string
+        default_branch:
+          type: string
+        description:
+          type: string
+        visibility:
+          type: string
+        has_issues:
+          type: boolean
+        has_pull_requests:
+          type: boolean
+        open_issues_count:
+          type: integer
+        open_pr_counter:
+          type: integer
+        updated_at:
+          type: string
+        provider:
+          type: string
+        configured:
+          type: boolean
+    CreatedRepo:
+      type: object
+      properties:
+        name:
+          type: string
+        owner:
+          type: string
+        owner_org:
+          type: string
+        visibility:
+          type: string
+        default_branch:
+          type: string
+        clone_url:
+          type: string
+        provider:
+          type: string
+        configured:
+          type: boolean
+        operation_id:
+          type: string
+        initial_commit_id:
+          type: string
+        forgejo:
+          $ref: "#/components/schemas/RepoInfo"
+    Commit:
+      type: object
+      properties:
+        commit_id:
+          type: string
+        change_id:
+          type: string
+        description:
+          type: string
+        author_name:
+          type: string
+        author_email:
+          type: string
+        timestamp_millis:
+          type: integer
+          format: int64
+        parent_commit_ids:
+          type: array
+          items:
+            type: string
+    RepoDetail:
+      type: object
+      properties:
+        name:
+          type: string
+        owner:
+          type: string
+        owner_org:
+          type: string
+        visibility:
+          type: string
+        default_branch:
+          type: string
+        clone_url:
+          type: string
+        provider:
+          type: string
+        configured:
+          type: boolean
+        forgejo:
+          $ref: "#/components/schemas/RepoInfo"
+        main_commit_id:
+          type: string
+        heads:
+          type: array
+          items:
+            $ref: "#/components/schemas/Commit"
+    CreatedCommit:
+      type: object
+      properties:
+        commit_id:
+          type: string
+        change_id:
+          type: string
+        operation_id:
+          type: string
+    SubmitResult:
+      type: object
+      properties:
+        commit_id:
+          type: string
+        change_id:
+          type: string
+        operation_id:
+          type: string
+        fast_forwarded:
+          type: boolean
+        conflicted:
+          type: boolean
+        conflicted_paths:
+          type: array
+          items:
+            type: string
+    TreeEntry:
+      type: object
+      properties:
+        path:
+          type: string
+        size_bytes:
+          type: integer
+        executable:
+          type: boolean
+        conflicted:
+          type: boolean
+    Tree:
+      type: object
+      properties:
+        commit_id:
+          type: string
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/TreeEntry"
+    FileContent:
+      type: object
+      properties:
+        commit_id:
+          type: string
+        path:
+          type: string
+        executable:
+          type: boolean
+        conflicted:
+          type: boolean
+        size_bytes:
+          type: integer
+        content:
+          type: string
+          nullable: true
+        binary:
+          type: boolean
+    OpLogEntry:
+      type: object
+      properties:
+        operation_id:
+          type: string
+        description:
+          type: string
+        start_time_millis:
+          type: integer
+          format: int64
+        end_time_millis:
+          type: integer
+          format: int64
+        parent_operation_ids:
+          type: array
+          items:
+            type: string
+    IssueLabel:
+      type: object
+      properties:
+        name:
+          type: string
+        color:
+          type: string
+    Issue:
+      type: object
+      properties:
+        number:
+          type: integer
+        title:
+          type: string
+        body:
+          type: string
+          nullable: true
+        state:
+          type: string
+        user:
+          type: object
+          properties:
+            login:
+              type: string
+        labels:
+          type: array
+          items:
+            $ref: "#/components/schemas/IssueLabel"
+        comments:
+          type: integer
+        html_url:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    Comment:
+      type: object
+      properties:
+        id:
+          type: integer
+        body:
+          type: string
+        user:
+          type: object
+          properties:
+            login:
+              type: string
+        html_url:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    IssueDetail:
+      type: object
+      properties:
+        issue:
+          $ref: "#/components/schemas/Issue"
+        comments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Comment"
+    PullRef:
+      type: object
+      properties:
+        ref:
+          type: string
+        sha:
+          type: string
+    Pull:
+      type: object
+      properties:
+        number:
+          type: integer
+        title:
+          type: string
+        body:
+          type: string
+          nullable: true
+        state:
+          type: string
+        user:
+          type: object
+          properties:
+            login:
+              type: string
+        head:
+          $ref: "#/components/schemas/PullRef"
+        base:
+          $ref: "#/components/schemas/PullRef"
+        merge_base:
+          type: string
+        merged:
+          type: boolean
+        mergeable:
+          type: boolean
+        html_url:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        comments:
+          type: integer
+    PullDiff:
+      type: object
+      properties:
+        from_commit_id:
+          type: string
+        to_commit_id:
+          type: string
+        conflicted:
+          type: boolean
+        files:
+          type: array
+          items:
+            type: object
+    Branch:
+      type: object
+      properties:
+        name:
+          type: string
+        commit:
+          type: object
+          properties:
+            id:
+              type: string
+            message:
+              type: string
+            url:
+              type: string
+        protected:
+          type: boolean
+    CommitStatus:
+      type: object
+      properties:
+        id:
+          type: integer
+        state:
+          type: string
+        context:
+          type: string
+        description:
+          type: string
+        target_url:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    ActionJob:
+      type: object
+      properties:
+        id:
+          type: string
+        run_id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        exit_code:
+          type: integer
+          nullable: true
+    ActionRun:
+      type: object
+      properties:
+        id:
+          type: string
+        repo:
+          type: string
+        commit_id:
+          type: string
+        branch:
+          type: string
+        status:
+          type: string
+        conclusion:
+          type: string
+        trigger:
+          type: string
+        actor:
+          type: string
+        provider:
+          type: string
+        sandbox_id:
+          type: string
+        created_at_millis:
+          type: integer
+          format: int64
+        started_at_millis:
+          type: integer
+          format: int64
+        finished_at_millis:
+          type: integer
+          format: int64
+        duration_ms:
+          type: integer
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActionJob"
+    ActionRunList:
+      type: object
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActionRun"
+        next_cursor:
+          type: integer
+          format: int64
+          nullable: true
+    ActionLog:
+      type: object
+      properties:
+        run_id:
+          type: string
+        text:
+          type: string
+    ActionsConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        provider:
+          type: string
+        default_image:
+          type: string
+        timeout_seconds:
+          type: integer
+    ProviderCapabilities:
+      type: object
+      properties:
+        one_shot_jobs:
+          type: boolean
+        persistent_workspaces:
+          type: boolean
+        snapshots:
+          type: boolean
+        templates:
+          type: boolean
+        regions:
+          type: array
+          items:
+            type: string
+        ssh:
+          type: boolean
+        desktop:
+          type: boolean
+        public_url:
+          type: boolean
+        file_api:
+          type: boolean
+        terminal_streaming:
+          type: boolean
+        cost_hints:
+          type: string
+    Provider:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+        enabled:
+          type: boolean
+        configured:
+          type: boolean
+        configured_reason:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        capability_detail:
+          $ref: "#/components/schemas/ProviderCapabilities"
+        default_snapshot:
+          type: string
+        notes:
+          type: string
+    ProviderList:
+      type: object
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Provider"
+        default_provider_id:
+          type: string
+    SecretMeta:
+      type: object
+      description: Metadata only — never includes plaintext secret values
+      properties:
+        id:
+          type: string
+        scope:
+          type: string
+        org_id:
+          type: string
+          nullable: true
+        repo_id:
+          type: string
+          nullable: true
+        name:
+          type: string
+        description:
+          type: string
+        value_last4:
+          type: string
+        created_by:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    AgentSession:
+      type: object
+      properties:
+        agent:
+          type: string
+        agent_id:
+          type: string
+        token_id:
+          type: string
+        last_tool:
+          type: string
+        last_status:
+          type: string
+        last_seen:
+          type: string
+        first_seen:
+          type: string
+        tool_calls:
+          type: integer

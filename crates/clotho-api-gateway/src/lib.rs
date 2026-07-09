@@ -195,6 +195,8 @@ pub fn router_with_pool(
     });
     Ok(Router::new()
         .route("/healthz", get(healthz))
+        // Stage 15: published OpenAPI contract (hand-maintained docs/openapi.yaml).
+        .route("/openapi.yaml", get(openapi_yaml))
         // Stage 11: users, orgs, activity, and org-scoped repos.
         .route("/api/v1/users", get(control::list_users_handler))
         .route(
@@ -301,6 +303,21 @@ async fn healthz() -> Json<serde_json::Value> {
         "version": env!("CARGO_PKG_VERSION"),
         "status": "ok",
     }))
+}
+
+/// Hand-maintained OpenAPI 3 document for `/api/v1/*` (Stage 15).
+/// Kept in `docs/openapi.yaml` and embedded so the running gateway always
+/// serves the same contract checked by `tests/openapi_drift.rs`.
+const OPENAPI_YAML: &str = include_str!("../../../docs/openapi.yaml");
+
+async fn openapi_yaml() -> impl axum::response::IntoResponse {
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/yaml; charset=utf-8",
+        )],
+        OPENAPI_YAML,
+    )
 }
 
 #[derive(Serialize)]
