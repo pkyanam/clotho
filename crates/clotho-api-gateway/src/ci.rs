@@ -163,17 +163,34 @@ async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<CiOutput, St
         sha.to_string()
     };
 
+    // Route through the CCI registry by Actions config provider id — never
+    // hard-code Daytona (docs/adr/0013). Empty provider_id lets the registry
+    // pick a configured one-shot provider.
+    let config = state.actions.config_for(repo).await;
+    let provider_id = config.provider.trim().to_string();
+    let snapshot = if config.default_image.trim().is_empty()
+        || config.default_image == "ubuntu:22.04"
+    {
+        // Leave empty so the provider uses its own default snapshot when the
+        // repo still has the generic gateway fallback image.
+        String::new()
+    } else {
+        config.default_image.clone()
+    };
+    let timeout_secs = config.timeout_seconds;
+
     let script = ci_script(repo, &checkout);
     let job = RunJobRequest {
         label: format!("{repo}@{}", checkout.get(..12).unwrap_or(&checkout)),
-        snapshot: String::new(),
+        snapshot,
         files: vec![JobFile {
             path: format!("{SANDBOX_WORKDIR}/repo.tar"),
             content: archive.tar,
         }],
         commands: vec![script],
         env: Default::default(),
-        timeout_secs: 0,
+        timeout_secs,
+        provider_id,
     };
     let result = state
         .compute

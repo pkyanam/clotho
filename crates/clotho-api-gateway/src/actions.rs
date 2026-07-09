@@ -27,7 +27,9 @@ pub struct ActionsDefaults {
     pub provider: String,
     pub default_image: String,
     pub timeout_seconds: u32,
-    pub daytona_configured: bool,
+    /// Env-derived configured flags keyed by provider id (no secrets).
+    /// Used as a fallback when clotho-compute ListProviders is unreachable.
+    pub configured_providers: HashMap<String, bool>,
 }
 
 impl ActionsDefaults {
@@ -37,6 +39,13 @@ impl ActionsDefaults {
         } else {
             self.default_image.clone()
         }
+    }
+
+    pub fn is_configured(&self, provider: &str) -> bool {
+        self.configured_providers
+            .get(&provider.to_lowercase())
+            .copied()
+            .unwrap_or(false)
     }
 }
 
@@ -55,7 +64,7 @@ impl ActionsState {
     }
 
     pub fn provider_configured(&self, provider: &str) -> bool {
-        provider.to_lowercase() == self.defaults.provider && self.defaults.daytona_configured
+        self.defaults.is_configured(provider)
     }
 
     pub fn new(defaults: ActionsDefaults) -> Self {
@@ -515,18 +524,79 @@ fn default_manual_actor() -> String {
     "manual".into()
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
+pub struct ProviderCapabilitiesJson {
+    pub one_shot_jobs: bool,
+    pub persistent_workspaces: bool,
+    pub snapshots: bool,
+    pub templates: bool,
+    pub regions: Vec<String>,
+    pub ssh: bool,
+    pub desktop: bool,
+    pub public_url: bool,
+    pub file_api: bool,
+    pub terminal_streaming: bool,
+    pub cost_hints: String,
+}
+
+impl ProviderCapabilitiesJson {
+    pub fn feature_tags(&self) -> Vec<String> {
+        let mut tags = Vec::new();
+        if self.one_shot_jobs {
+            tags.push("one-shot-jobs".into());
+        }
+        if self.persistent_workspaces {
+            tags.push("persistent-workspaces".into());
+        }
+        if self.snapshots {
+            tags.push("snapshots".into());
+        }
+        if self.templates {
+            tags.push("templates".into());
+        }
+        if self.ssh {
+            tags.push("ssh".into());
+        }
+        if self.desktop {
+            tags.push("desktop".into());
+        }
+        if self.public_url {
+            tags.push("public-url".into());
+        }
+        if self.file_api {
+            tags.push("file-api".into());
+        }
+        if self.terminal_streaming {
+            tags.push("terminal-streaming".into());
+        }
+        tags
+    }
+}
+
+#[derive(Clone, Serialize)]
 pub struct ComputeProviderJson {
     pub id: String,
     pub name: String,
+    /// Implementation kind: `direct`, `bridge`, or `stub`.
+    pub kind: String,
     pub enabled: bool,
     pub configured: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub configured_reason: String,
+    /// Flat capability tags for simple UI badges (backward compatible).
     pub capabilities: Vec<String>,
+    /// Structured capability flags (Stage 12).
+    pub capability_detail: ProviderCapabilitiesJson,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub default_snapshot: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub notes: String,
 }
 
 #[derive(Serialize)]
 pub struct ComputeProviderListResponse {
     pub providers: Vec<ComputeProviderJson>,
+    pub default_provider_id: String,
 }
 
 pub async fn list_runs(
@@ -625,36 +695,221 @@ pub async fn put_config(
     Ok(Json(config))
 }
 
+/// List every registered compute provider (Stage 12 registry).
+///
+/// Prefers live metadata from clotho-compute (`ListProviders`); falls back to
+/// env-derived descriptors when the compute service is unreachable so settings
+/// pages still render in partial-stack dev.
 pub async fn providers(State(state): State<Arc<AppState>>) -> Json<ComputeProviderListResponse> {
-    Json(ComputeProviderListResponse {
-        providers: vec![daytona_provider(&state)],
-    })
+    Json(list_providers_for(&state).await)
 }
 
 pub async fn provider(
     State(state): State<Arc<AppState>>,
     Path(provider): Path<String>,
 ) -> Result<Json<ComputeProviderJson>, ApiError> {
-    match provider.as_str() {
-        "daytona" => Ok(Json(daytona_provider(&state))),
-        _ => Err(ApiError::NotFound(format!(
-            "compute provider {provider:?} not found"
-        ))),
+    let list = list_providers_for(&state).await;
+    list.providers
+        .into_iter()
+        .find(|p| p.id.eq_ignore_ascii_case(&provider))
+        .map(Json)
+        .ok_or_else(|| ApiError::NotFound(format!("compute provider {provider:?} not found")))
+}
+
+pub async fn list_providers_for(state: &AppState) -> ComputeProviderListResponse {
+    match fetch_providers_from_compute(state).await {
+        Ok(list) if !list.providers.is_empty() => list,
+        Ok(_) => fallback_providers(state),
+        Err(e) => {
+            tracing::warn!(error = %e, "compute ListProviders failed; using env fallback");
+            fallback_providers(state)
+        }
     }
 }
 
-fn daytona_provider(state: &AppState) -> ComputeProviderJson {
+async fn fetch_providers_from_compute(
+    state: &AppState,
+) -> Result<ComputeProviderListResponse, String> {
+    use clotho_common::pb::compute::v1::ListProvidersRequest;
+
+    let resp = state
+        .compute
+        .clone()
+        .list_providers(ListProvidersRequest {})
+        .await
+        .map_err(|e| e.message().to_string())?
+        .into_inner();
+
+    let providers = resp
+        .providers
+        .into_iter()
+        .map(provider_from_pb)
+        .collect();
+    Ok(ComputeProviderListResponse {
+        providers,
+        default_provider_id: if resp.default_provider_id.is_empty() {
+            state.actions.defaults.provider.clone()
+        } else {
+            resp.default_provider_id
+        },
+    })
+}
+
+fn provider_from_pb(p: clotho_common::pb::compute::v1::ProviderInfo) -> ComputeProviderJson {
+    let detail = match p.capabilities {
+        Some(c) => ProviderCapabilitiesJson {
+            one_shot_jobs: c.one_shot_jobs,
+            persistent_workspaces: c.persistent_workspaces,
+            snapshots: c.snapshots,
+            templates: c.templates,
+            regions: c.regions,
+            ssh: c.ssh,
+            desktop: c.desktop,
+            public_url: c.public_url,
+            file_api: c.file_api,
+            terminal_streaming: c.terminal_streaming,
+            cost_hints: c.cost_hints,
+        },
+        None => ProviderCapabilitiesJson {
+            one_shot_jobs: false,
+            persistent_workspaces: false,
+            snapshots: false,
+            templates: false,
+            regions: vec![],
+            ssh: false,
+            desktop: false,
+            public_url: false,
+            file_api: false,
+            terminal_streaming: false,
+            cost_hints: String::new(),
+        },
+    };
+    let capabilities = detail.feature_tags();
     ComputeProviderJson {
-        id: "daytona".into(),
-        name: "Daytona".into(),
-        enabled: state.actions.defaults.provider == "daytona",
-        configured: state.actions.defaults.daytona_configured,
-        capabilities: vec![
-            "sandbox".into(),
-            "file-upload".into(),
-            "process-exec".into(),
-            "logs".into(),
-        ],
+        id: p.id,
+        name: p.name,
+        kind: p.kind,
+        enabled: p.enabled,
+        configured: p.configured,
+        configured_reason: p.configured_reason,
+        capabilities,
+        capability_detail: detail,
+        default_snapshot: p.default_snapshot,
+        notes: p.notes,
+    }
+}
+
+fn fallback_providers(state: &AppState) -> ComputeProviderListResponse {
+    let default = state.actions.defaults.provider.clone();
+    let mut providers = vec![
+        env_provider(
+            "daytona",
+            "Daytona",
+            "direct",
+            &default,
+            state.actions.defaults.is_configured("daytona"),
+            "DAYTONA_API_KEY not set",
+            ProviderCapabilitiesJson {
+                one_shot_jobs: true,
+                persistent_workspaces: true,
+                snapshots: true,
+                templates: false,
+                regions: vec![],
+                ssh: false,
+                desktop: false,
+                public_url: false,
+                file_api: true,
+                terminal_streaming: false,
+                cost_hints: "Daytona cloud sandbox (API-key billed)".into(),
+            },
+            state.actions.defaults.default_image_or_fallback(),
+            "direct Rust provider (env fallback; clotho-compute unreachable)".into(),
+        ),
+        env_provider(
+            "computesdk",
+            "ComputeSDK Bridge",
+            "bridge",
+            &default,
+            state.actions.defaults.is_configured("computesdk"),
+            "CLOTHO_COMPUTE_SDK_BRIDGE_URL not set",
+            ProviderCapabilitiesJson {
+                one_shot_jobs: true,
+                persistent_workspaces: false,
+                snapshots: true,
+                templates: true,
+                regions: vec![],
+                ssh: false,
+                desktop: false,
+                public_url: false,
+                file_api: true,
+                terminal_streaming: false,
+                cost_hints: "depends on upstream ComputeSDK provider".into(),
+            },
+            String::new(),
+            "optional TypeScript sidecar (env fallback)".into(),
+        ),
+        env_provider(
+            "box",
+            "Box",
+            "stub",
+            &default,
+            false,
+            "Box adapter is a Stage 12 stub",
+            ProviderCapabilitiesJson {
+                one_shot_jobs: true,
+                persistent_workspaces: true,
+                snapshots: true,
+                templates: false,
+                regions: vec![],
+                ssh: true,
+                desktop: true,
+                public_url: true,
+                file_api: true,
+                terminal_streaming: true,
+                cost_hints: "persistent Ubuntu VM; TTL / pay-per-use (see Box dashboard)".into(),
+            },
+            String::new(),
+            "stub for ascii Box API v1 (https://ascii.dev/api/box/v1); BOX_API_KEY".into(),
+        ),
+    ];
+    // Mark enabled only on the default id.
+    for p in &mut providers {
+        p.enabled = p.id == default;
+    }
+    ComputeProviderListResponse {
+        providers,
+        default_provider_id: default,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn env_provider(
+    id: &str,
+    name: &str,
+    kind: &str,
+    default: &str,
+    configured: bool,
+    unconfigured_reason: &str,
+    detail: ProviderCapabilitiesJson,
+    default_snapshot: String,
+    notes: String,
+) -> ComputeProviderJson {
+    let capabilities = detail.feature_tags();
+    ComputeProviderJson {
+        id: id.into(),
+        name: name.into(),
+        kind: kind.into(),
+        enabled: id == default,
+        configured,
+        configured_reason: if configured {
+            String::new()
+        } else {
+            unconfigured_reason.into()
+        },
+        capabilities,
+        capability_detail: detail,
+        default_snapshot,
+        notes,
     }
 }
 

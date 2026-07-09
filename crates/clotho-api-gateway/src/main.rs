@@ -63,10 +63,20 @@ async fn main() -> Result<(), Error> {
         compute_provider: env_or("CLOTHO_COMPUTE_PROVIDER", "daytona"),
         compute_default_image: env_or("CLOTHO_COMPUTE_SNAPSHOT", "ubuntu:22.04"),
         actions_timeout_seconds: env_u32_or("CLOTHO_ACTIONS_TIMEOUT_SECONDS", 900),
-        daytona_configured: env_truthy("CLOTHO_DAYTONA_CONFIGURED")
-            || std::env::var("DAYTONA_API_KEY")
-                .map(|key| !key.trim().is_empty())
-                .unwrap_or(false),
+        configured_providers: {
+            let mut m = std::collections::HashMap::new();
+            let daytona = env_truthy("CLOTHO_DAYTONA_CONFIGURED")
+                || std::env::var("DAYTONA_API_KEY")
+                    .map(|key| !key.trim().is_empty())
+                    .unwrap_or(false);
+            m.insert("daytona".into(), daytona);
+            let bridge = std::env::var("CLOTHO_COMPUTE_SDK_BRIDGE_URL")
+                .map(|u| !u.trim().is_empty())
+                .unwrap_or(false);
+            m.insert("computesdk".into(), bridge);
+            m.insert("box".into(), false);
+            m
+        },
         bootstrap_user_name: env_or("CLOTHO_BOOTSTRAP_USER_NAME", "clotho"),
         bootstrap_user_email: env_or("CLOTHO_BOOTSTRAP_USER_EMAIL", "admin@clotho.internal"),
         bootstrap_org_name: env_or("CLOTHO_BOOTSTRAP_ORG_NAME", "clotho"),

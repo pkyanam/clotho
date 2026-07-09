@@ -68,7 +68,13 @@ fn test_config() -> GatewayConfig {
         compute_provider: env_or("CLOTHO_STAGE11_TEST_COMPUTE_PROVIDER", "daytona"),
         compute_default_image: env_or("CLOTHO_STAGE11_TEST_COMPUTE_SNAPSHOT", "ubuntu:22.04"),
         actions_timeout_seconds: 900,
-        daytona_configured: false,
+        configured_providers: {
+            let mut m = std::collections::HashMap::new();
+            m.insert("daytona".into(), false);
+            m.insert("computesdk".into(), false);
+            m.insert("box".into(), false);
+            m
+        },
         bootstrap_user_name: env_or("CLOTHO_STAGE11_TEST_BOOTSTRAP_USER_NAME", "clotho"),
         bootstrap_user_email: env_or(
             "CLOTHO_STAGE11_TEST_BOOTSTRAP_USER_EMAIL",

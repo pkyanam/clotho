@@ -18,7 +18,10 @@ use async_trait::async_trait;
 use reqwest::multipart::{Form, Part};
 use serde_json::json;
 
-use crate::{ComputeError, ComputeProvider, JobResult, JobSpec};
+use crate::{
+    ComputeError, ComputeProvider, JobResult, JobSpec, ProviderCapabilities, ProviderDescriptor,
+    ProviderKind,
+};
 
 const DEFAULT_API_URL: &str = "https://app.daytona.io/api";
 const DEFAULT_PROXY_URL: &str = "https://proxy.app.daytona.io";
@@ -283,6 +286,35 @@ impl DaytonaProvider {
 impl ComputeProvider for DaytonaProvider {
     fn name(&self) -> &str {
         "daytona"
+    }
+
+    fn descriptor(&self) -> ProviderDescriptor {
+        let mut regions = Vec::new();
+        if !self.config.target.is_empty() {
+            regions.push(self.config.target.clone());
+        }
+        ProviderDescriptor {
+            id: "daytona".into(),
+            name: "Daytona".into(),
+            kind: ProviderKind::Direct,
+            configured: true,
+            configured_reason: String::new(),
+            capabilities: ProviderCapabilities {
+                one_shot_jobs: true,
+                persistent_workspaces: true,
+                snapshots: true,
+                templates: false,
+                regions,
+                ssh: false,
+                desktop: false,
+                public_url: false,
+                file_api: true,
+                terminal_streaming: false,
+                cost_hints: "Daytona cloud sandbox (API-key billed)".into(),
+            },
+            default_snapshot: self.config.default_snapshot.clone(),
+            notes: "direct Rust provider against Daytona control plane + toolbox proxy".into(),
+        }
     }
 
     async fn run_job(&self, spec: JobSpec) -> Result<JobResult, ComputeError> {

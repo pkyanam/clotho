@@ -274,6 +274,24 @@ Each stage lists a goal, key tasks, and an exit condition. Stages 1–2 can star
 - **Acceptance:** Clotho can list multiple configured providers, route
   Actions/sandbox requests by capability, and expose provider state
   consistently through API/web/SDK.
+- *Implementation note (2026-07-08):* ADR-0013 records the Stage 12 shape.
+  **`clotho-compute`** owns a multi-provider `ProviderRegistry` with structured
+  capabilities; gRPC adds `ListProviders` / `GetProvider`, and `RunJob` accepts
+  optional `provider_id` (empty → default + first configured one-shot).
+  Providers: **Daytona** (direct Rust, unchanged path), **computesdk** (optional
+  TypeScript HTTP sidecar at `services/compute-sdk-bridge`, disabled without
+  `CLOTHO_COMPUTE_SDK_BRIDGE_URL`; uses ComputeSDK
+  [docs](https://docs.computesdk.com/llms.txt) multi-provider
+  priority/round-robin when packages + keys are present), **box** (stub with
+  honest caps from Box API v1 at `https://ascii.dev/api/box/v1`,
+  [docs](https://docs.ascii.dev/llms.txt); full client deferred).
+  **api-gateway** exposes `/api/v1/providers` (+ Stage 10
+  `/api/v1/compute/providers` alias), proxies registry metadata (env fallback),
+  and routes Actions CI with `provider_id` from repo Actions config — no
+  Daytona hard-coding. **Web:** `/settings/compute` + repo settings provider
+  list (masked/configured only). **SDK:** `computeProviders` /
+  `computeProviderList` / richer `ComputeProvider`. Secrets remain env-backed.
+  PRD §11 #4 resolved (TS sidecar).
 
 ### Stage 13 — Web Product Expansion
 - Build first-class pages for: new repo, org dashboard, repo settings sections,
@@ -399,12 +417,17 @@ Each stage lists a goal, key tasks, and an exit condition. Stages 1–2 can star
 1. **Clotho's own license** — MIT/Apache-2.0 (max adoption, permissive) vs. AGPLv3 (closes the SaaS loophole competitors could exploit, consistent with Forgejo's own GPLv3 stance) vs. a source-available/BSL model. This affects how tightly we can integrate Forgejo's GPLv3 code and what "open-source" means in the marketing page's promises.
 2. **Fork Forgejo vs. stay API-level** — PRD v2 assumes we keep Forgejo internal and unmodified. Decide explicitly if deeper integration (for example surfacing jj's operation log inside Forgejo's own UI) is ever worth taking on GPLv3 obligations for that specific code.
 3. **First external compute provider** — ~~Daytona is recommended for Stage 7 (persistent workspace, fast cold start, self-hosting story), but E2B (microVM isolation) is the safer pick if untrusted agent-generated code execution is a concern even in prototype form.~~ **Resolved (2026-07-07):** Daytona, integrated behind the Rust-native CCI so it stays swappable (docs/adr/0008, Stage 7 note). E2B remains a drop-in second `ComputeProvider` impl if microVM isolation is later wanted.
-4. **Provider bridge deployment shape** — Stage 12 needs a concrete choice for
+4. **Provider bridge deployment shape** — ~~Stage 12 needs a concrete choice for
    whether the ComputeSDK bridge runs as a small TypeScript sidecar, a separate
-   service, or a constrained worker process behind `clotho-compute`.
+   service, or a constrained worker process behind `clotho-compute`.~~
+   **Resolved (2026-07-08):** optional TypeScript HTTP sidecar
+   (`services/compute-sdk-bridge`) behind CCI — not an in-process Node worker
+   and not a public product boundary (docs/adr/0013). ComputeSDK packages and
+   multi-provider routing stay inside the sidecar; Clotho depends only on CCI.
 5. **Durable Actions store** — Stage 10 intentionally uses gateway-local state.
    Before Actions become product history, choose Postgres-in-gateway vs. a
-   separate `clotho-actions` service.
+   separate `clotho-actions` service. (Stage 11 already persists runs in
+   gateway Postgres migrations; product-history design remains open.)
 
 ---
 

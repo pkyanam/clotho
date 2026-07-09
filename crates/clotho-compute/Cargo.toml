@@ -1,6 +1,6 @@
 [package]
 name = "clotho-compute"
-description = "Clotho Compute Interface (CCI) — provider-agnostic sandbox execution; Daytona provider"
+description = "Clotho Compute Interface (CCI) — multi-provider registry, Daytona, ComputeSDK bridge, Box stub"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

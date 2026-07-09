@@ -3,12 +3,14 @@
 //! The Daytona round-trip is env-gated: it self-skips unless `DAYTONA_API_KEY`
 //! is set, so plain `cargo test` and CI stay green without a paid credential
 //! (docs/adr/0008). Run it against the real provider with `just test-compute`
-//! after filling in `.env`. The disabled-provider test always runs.
+//! after filling in `.env`. Registry and stub tests always run.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use clotho_compute::{
-    ComputeError, ComputeProvider, DaytonaProvider, DisabledProvider, JobFile, JobSpec,
+    BoxStubProvider, ComputeError, ComputeProvider, ComputeSdkBridgeProvider, DaytonaProvider,
+    DisabledProvider, JobFile, JobSpec, ProviderRegistry,
 };
 
 #[tokio::test]
@@ -22,6 +24,43 @@ async fn disabled_provider_fails_cleanly() {
         .await
         .expect_err("disabled provider must fail");
     assert!(matches!(err, ComputeError::Disabled(_)), "got {err:?}");
+    assert!(!provider.descriptor().configured);
+}
+
+#[tokio::test]
+async fn registry_lists_multiple_providers_with_capabilities() {
+    let reg = ProviderRegistry::new(
+        vec![
+            Arc::new(DisabledProvider::with_id("daytona", "no key")),
+            Arc::new(ComputeSdkBridgeProvider::unconfigured()),
+            Arc::new(BoxStubProvider::unconfigured()),
+        ],
+        "daytona",
+    );
+    let infos = reg.list_infos();
+    assert_eq!(infos.len(), 3);
+    let ids: Vec<_> = infos.iter().map(|(d, _)| d.id.as_str()).collect();
+    assert_eq!(ids, ["daytona", "computesdk", "box"]);
+
+    let box_d = reg.get("box").expect("box registered");
+    assert!(box_d.capabilities.persistent_workspaces);
+    assert!(box_d.capabilities.ssh);
+    assert!(box_d.capabilities.desktop);
+    // Box API v1 also supports create → commands → delete as one-shot.
+    assert!(box_d.capabilities.one_shot_jobs);
+
+    let daytona = reg.get("daytona").expect("daytona registered");
+    assert!(!daytona.configured);
+
+    // Routing with no configured one-shot provider still resolves default.
+    let err = reg
+        .run_job(JobSpec {
+            commands: vec!["true".into()],
+            ..Default::default()
+        })
+        .await
+        .expect_err("must fail without credentials");
+    assert!(matches!(err, ComputeError::Disabled(_)));
 }
 
 #[tokio::test]
@@ -30,6 +69,11 @@ async fn daytona_runs_a_real_job_and_reports_exit_and_logs() {
         eprintln!("skipping daytona test: DAYTONA_API_KEY not set");
         return;
     };
+
+    let d = provider.descriptor();
+    assert!(d.configured);
+    assert!(d.capabilities.one_shot_jobs);
+    assert!(d.capabilities.file_api);
 
     // Success path: a staged file is present and the command exits 0.
     let mut env = HashMap::new();
@@ -47,6 +91,7 @@ async fn daytona_runs_a_real_job_and_reports_exit_and_logs() {
         ],
         env,
         timeout_secs: 120,
+        provider_id: String::new(),
     };
     let result = provider.run_job(spec).await.expect("daytona job runs");
     assert_eq!(result.provider, "daytona");

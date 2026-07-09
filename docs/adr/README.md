@@ -16,3 +16,5 @@ Context → Decision → Consequences. Supersede rather than edit.
 | [0009](0009-agent-write-tools-through-merge-queue.md) | Agent write tools route through VCS and merge-queue over MCP | Accepted |
 | [0010](0010-clotho-cli-uses-rest-edge.md) | The clotho CLI uses the api-gateway REST edge | Accepted |
 | [0011](0011-clotho-collaboration-facade.md) | Clotho owns the collaboration facade | Accepted |
+| [0012](0012-actions-compute-control-plane.md) | Clotho owns Actions and the compute control plane | Accepted |
+| [0013](0013-compute-provider-registry.md) | Capability-aware provider registry; ComputeSDK TS sidecar behind CCI | Accepted |

@@ -216,10 +216,10 @@ services:
     ports:
       - "50055:50055"
 
-  # Pluggable compute (docs/prd.md §5 Stage 7, docs/adr/0008): the CCI over
-  # gRPC. Daytona is the first provider; with no DAYTONA_API_KEY it starts in
-  # disabled mode (the stack stays healthy, CI jobs fail cleanly). Credentials
-  # come from a gitignored .env (see .env.example).
+  # Pluggable compute (docs/prd.md §5 Stage 7/12, docs/adr/0008, docs/adr/0013):
+  # CCI over gRPC with a multi-provider registry (Daytona direct, optional
+  # ComputeSDK bridge, Box stub). With no credentials the stack stays healthy
+  # and CI jobs fail cleanly. Credentials come from a gitignored .env.
   clotho-compute:
     <<: *clotho-service
     build:
@@ -235,6 +235,10 @@ services:
       DAYTONA_TARGET: ${DAYTONA_TARGET:-}
       DAYTONA_ORGANIZATION_ID: ${DAYTONA_ORGANIZATION_ID:-}
       CLOTHO_COMPUTE_SNAPSHOT: ${CLOTHO_COMPUTE_SNAPSHOT:-}
+      # Optional ComputeSDK sidecar URL (services/compute-sdk-bridge); empty = unconfigured.
+      CLOTHO_COMPUTE_SDK_BRIDGE_URL: ${CLOTHO_COMPUTE_SDK_BRIDGE_URL:-}
+      BOX_API_KEY: ${BOX_API_KEY:-}
+      BOX_API_URL: ${BOX_API_URL:-}
     ports:
       - "50057:50057"
 
@@ -266,6 +270,7 @@ services:
       CLOTHO_COMPUTE_SNAPSHOT: ${CLOTHO_COMPUTE_SNAPSHOT:-}
       CLOTHO_ACTIONS_TIMEOUT_SECONDS: ${CLOTHO_ACTIONS_TIMEOUT_SECONDS:-900}
       CLOTHO_DAYTONA_CONFIGURED: ${DAYTONA_API_KEY:+true}
+      CLOTHO_COMPUTE_SDK_BRIDGE_URL: ${CLOTHO_COMPUTE_SDK_BRIDGE_URL:-}
       CLOTHO_WEBHOOK_URL: http://clotho-api-gateway:8080/api/v1/webhooks/forgejo
       CLOTHO_WEBHOOK_SECRET: ${CLOTHO_WEBHOOK_SECRET:-clotho-webhook-dev}
       CLOTHO_WEB_URL: ${CLOTHO_WEB_URL:-http://localhost:3100}

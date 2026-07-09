@@ -39,6 +39,9 @@ export default function RootLayout({
             <Link href="/" className="text-xs text-kumo-subtle">
               repos
             </Link>
+            <Link href="/settings/compute" className="text-xs text-kumo-subtle">
+              compute
+            </Link>
           </div>
         </header>
         <main className="flex-1">{children}</main>

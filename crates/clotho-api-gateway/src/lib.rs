@@ -73,9 +73,9 @@ pub struct GatewayConfig {
     pub compute_default_image: String,
     /// Default action timeout.
     pub actions_timeout_seconds: u32,
-    /// Whether Daytona has a configured API key. The key itself never leaves
-    /// process environment.
-    pub daytona_configured: bool,
+    /// Env-derived configured flags by provider id (no secrets). Used when
+    /// clotho-compute ListProviders is unreachable.
+    pub configured_providers: std::collections::HashMap<String, bool>,
     /// Deterministic bootstrap user for the Stage 11 auth placeholder.
     pub bootstrap_user_name: String,
     /// Email for the deterministic bootstrap user.
@@ -144,7 +144,7 @@ pub fn router_with_pool(
         provider: config.compute_provider.to_lowercase(),
         default_image: config.compute_default_image,
         timeout_seconds: config.actions_timeout_seconds,
-        daytona_configured: config.daytona_configured,
+        configured_providers: config.configured_providers.clone(),
     };
     let actions = match pool {
         Some(ref p) => actions::ActionsState::with_pool(actions_defaults, p.clone()),
@@ -246,6 +246,10 @@ pub fn router_with_pool(
             "/api/v1/repos/{name}/actions/config",
             get(actions::get_config).put(actions::put_config),
         )
+        // Stage 12 canonical provider registry routes (docs/adr/0013).
+        .route("/api/v1/providers", get(actions::providers))
+        .route("/api/v1/providers/{provider}", get(actions::provider))
+        // Stage 10 aliases kept for SDK/web compatibility.
         .route("/api/v1/compute/providers", get(actions::providers))
         .route(
             "/api/v1/compute/providers/{provider}",

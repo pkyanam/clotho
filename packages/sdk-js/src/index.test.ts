@@ -204,8 +204,25 @@ describe("ClothoClient", () => {
       .mockResolvedValueOnce(jsonResponse({ run_id: "run-1", text: "ok" }))
       .mockResolvedValueOnce(jsonResponse({ enabled: true, provider: "daytona" }))
       .mockResolvedValueOnce(jsonResponse({ enabled: false, provider: "daytona" }))
-      .mockResolvedValueOnce(jsonResponse({ providers: [{ id: "daytona" }] }))
-      .mockResolvedValueOnce(jsonResponse({ id: "daytona" }));
+      .mockResolvedValueOnce(
+        jsonResponse({
+          providers: [
+            {
+              id: "daytona",
+              name: "Daytona",
+              kind: "direct",
+              configured: true,
+              capabilities: ["one-shot-jobs"],
+              capability_detail: { one_shot_jobs: true, regions: [] },
+            },
+            { id: "box", name: "Box", kind: "stub", configured: false, capabilities: ["ssh"] },
+          ],
+          default_provider_id: "daytona",
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ id: "daytona", name: "Daytona", kind: "direct", configured: true }),
+      );
     const client = new ClothoClient({
       baseUrl: "http://gateway.test",
       fetch: fetchMock as unknown as typeof fetch,
@@ -217,7 +234,8 @@ describe("ClothoClient", () => {
     await client.actionLogs("weave", "run-1");
     await client.actionsConfig("weave");
     await client.updateActionsConfig("weave", { enabled: false });
-    await client.computeProviders();
+    const providers = await client.computeProviders();
+    expect(providers.map((p) => p.id)).toEqual(["daytona", "box"]);
     await client.computeProvider("daytona");
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -238,8 +256,13 @@ describe("ClothoClient", () => {
       undefined,
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
+      "http://gateway.test/api/v1/providers",
+      undefined,
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
       8,
-      "http://gateway.test/api/v1/compute/providers/daytona",
+      "http://gateway.test/api/v1/providers/daytona",
       undefined,
     );
   });

@@ -255,12 +255,40 @@ export interface ActionsConfig {
   timeout_seconds: number;
 }
 
+/** Structured capability flags from the CCI provider registry (Stage 12). */
+export interface ProviderCapabilities {
+  one_shot_jobs: boolean;
+  persistent_workspaces: boolean;
+  snapshots: boolean;
+  templates: boolean;
+  regions: string[];
+  ssh: boolean;
+  desktop: boolean;
+  public_url: boolean;
+  file_api: boolean;
+  terminal_streaming: boolean;
+  cost_hints: string;
+}
+
 export interface ComputeProvider {
   id: string;
   name: string;
+  /** Implementation kind: direct | bridge | stub. */
+  kind?: string;
   enabled: boolean;
   configured: boolean;
+  configured_reason?: string;
+  /** Flat capability tags for badges. */
   capabilities: string[];
+  /** Structured capabilities (Stage 12). */
+  capability_detail?: ProviderCapabilities;
+  default_snapshot?: string;
+  notes?: string;
+}
+
+export interface ComputeProviderList {
+  providers: ComputeProvider[];
+  default_provider_id: string;
 }
 
 export type DiffLineKind = "context" | "add" | "del";
@@ -742,17 +770,34 @@ export class ClothoClient {
     );
   }
 
+  /**
+   * List compute providers from the CCI registry (Stage 12).
+   * Prefers `/api/v1/providers`; falls back to the Stage 10 path.
+   */
   async computeProviders(): Promise<ComputeProvider[]> {
-    const { providers } = await this.request<{ providers: ComputeProvider[] }>(
-      "/api/v1/compute/providers",
-    );
-    return providers;
+    const list = await this.computeProviderList();
+    return list.providers;
   }
 
-  computeProvider(provider: string): Promise<ComputeProvider> {
-    return this.request(
-      `/api/v1/compute/providers/${encodeURIComponent(provider)}`,
-    );
+  /** Full provider registry response including the default provider id. */
+  async computeProviderList(): Promise<ComputeProviderList> {
+    try {
+      return await this.request<ComputeProviderList>("/api/v1/providers");
+    } catch {
+      return this.request<ComputeProviderList>("/api/v1/compute/providers");
+    }
+  }
+
+  async computeProvider(provider: string): Promise<ComputeProvider> {
+    try {
+      return await this.request<ComputeProvider>(
+        `/api/v1/providers/${encodeURIComponent(provider)}`,
+      );
+    } catch {
+      return this.request<ComputeProvider>(
+        `/api/v1/compute/providers/${encodeURIComponent(provider)}`,
+      );
+    }
   }
 
   // Stage 11: users, orgs, activity, and org-scoped repos.

@@ -1,0 +1,15 @@
+{
+  "name": "@clotho/compute-sdk-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Optional ComputeSDK TypeScript sidecar behind the Clotho CCI (docs/adr/0013). Install computesdk and @computesdk/* packages only when enabling live providers — see README.md and https://docs.computesdk.com/llms.txt",
+  "type": "module",
+  "main": "src/server.mjs",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test test/server.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -3,17 +3,27 @@ syntax = "proto3";
 package clotho.compute.v1;
 
 // The Clotho Compute Interface (CCI) — provider-agnostic sandbox execution
-// (vision spec §4.1, docs/prd.md §5 Stage 7). Behind this one RPC sits a
-// swappable `ComputeProvider` (Daytona first, docs/adr/0008); no vendor is
-// baked into callers. The service knows nothing about git or Forgejo: it
-// creates a sandbox from a snapshot, drops in files, runs commands, and
-// returns the exit code + logs. CI orchestration (what to run, reporting
-// status back to the PR) lives in the api-gateway.
+// (vision spec §4.1, docs/prd.md §5 Stage 7/12, docs/adr/0008, docs/adr/0013).
+// Behind these RPCs sits a capability-aware ProviderRegistry of swappable
+// ComputeProvider implementations (Daytona direct, optional ComputeSDK
+// bridge, Box stub, …). No vendor is baked into callers. The service knows
+// nothing about git or Forgejo: it creates a sandbox from a snapshot, drops
+// in files, runs commands, and returns the exit code + logs. CI orchestration
+// lives in the api-gateway.
 service Compute {
   // Run a one-shot job in a fresh sandbox: create → place files → run
   // commands in order (stop at the first non-zero) → collect exit code and
   // combined logs → tear the sandbox down. Blocks until the job finishes.
+  // When provider_id is empty, the registry routes by required capabilities
+  // and the configured default provider.
   rpc RunJob(RunJobRequest) returns (RunJobResponse);
+
+  // List every registered provider with capability and configured-state
+  // metadata (no secrets). Stage 12 control-plane surface.
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+
+  // Fetch one provider by id.
+  rpc GetProvider(GetProviderRequest) returns (GetProviderResponse);
 }
 
 // A file to place in the sandbox before the commands run.
@@ -38,6 +48,9 @@ message RunJobRequest {
   map<string, string> env = 5;
   // Per-command timeout in seconds; 0 = the provider default.
   uint32 timeout_secs = 6;
+  // Registry provider id (e.g. "daytona"). Empty → registry default routing
+  // for one-shot jobs (docs/adr/0013).
+  string provider_id = 7;
 }
 
 message RunJobResponse {
@@ -50,4 +63,59 @@ message RunJobResponse {
   // Provider-side sandbox id that ran the job (already torn down), for
   // cross-referencing in the provider's dashboard.
   string sandbox_id = 4;
+}
+
+// Honest capability flags for a provider (docs/adr/0013). Not marketing —
+// only features the adapter can actually use or honestly advertise.
+message ProviderCapabilities {
+  bool one_shot_jobs = 1;
+  bool persistent_workspaces = 2;
+  bool snapshots = 3;
+  bool templates = 4;
+  // Advertised region codes (e.g. "us", "eu"); may be empty.
+  repeated string regions = 5;
+  bool ssh = 6;
+  bool desktop = 7;
+  bool public_url = 8;
+  bool file_api = 9;
+  bool terminal_streaming = 10;
+  // Free-text cost/tier hint when known (e.g. "pay-as-you-go"); never a secret.
+  string cost_hints = 11;
+}
+
+// Non-secret provider state for API/web/SDK.
+message ProviderInfo {
+  // Stable registry id, e.g. "daytona", "computesdk", "box".
+  string id = 1;
+  // Human-readable display name.
+  string name = 2;
+  // Kind of implementation: "direct", "bridge", "stub".
+  string kind = 3;
+  // Whether this provider is selected as the default for unmatched jobs.
+  bool enabled = 4;
+  // Whether credentials/config are present (never returns secret values).
+  bool configured = 5;
+  // Short reason when not configured (e.g. "DAYTONA_API_KEY not set").
+  string configured_reason = 6;
+  ProviderCapabilities capabilities = 7;
+  // Default snapshot/image when jobs omit one.
+  string default_snapshot = 8;
+  // Implementation notes for operators (non-secret).
+  string notes = 9;
+}
+
+message ListProvidersRequest {}
+
+message ListProvidersResponse {
+  repeated ProviderInfo providers = 1;
+  // Default provider id used when RunJob.provider_id is empty.
+  string default_provider_id = 2;
+}
+
+message GetProviderRequest {
+  string provider_id = 1;
+}
+
+message GetProviderResponse {
+  ProviderInfo provider = 1;
 }
