@@ -21,19 +21,16 @@ dev:
 dev-down:
     docker compose -f docker-compose.dev.yml down -v
 
-# Optional ComputeSDK bridge sidecar (Stage 14, docs/adr/0013).
+# Optional ComputeSDK bridge sidecar (docs/adr/0013).
 # Starts services/compute-sdk-bridge on :8091 via compose profile `compute-bridge`.
-# Point clotho-compute at it with:
-#   CLOTHO_COMPUTE_SDK_BRIDGE_URL=http://clotho-compute-sdk-bridge:8091
-# (in-cluster) or http://localhost:8091 (host-run compute). Upstream keys:
-# Clotho Settings → Compute (E2B/Modal secrets) or env on this service.
-# Does not tear down volumes. Safe to run alongside `just dev`.
+# Upstream keys: Clotho Settings → Compute (any ComputeSDK provider) or env.
+# Image uses pnpm only. Does not tear down volumes.
 dev-compute-bridge:
     docker compose -f docker-compose.dev.yml --profile compute-bridge up -d --build clotho-compute-sdk-bridge
 
-# Host-run bridge without Docker (Node 20+). Upstream packages optional.
+# Host-run bridge with pnpm workspace (Node 20+).
 dev-compute-bridge-host:
-    cd services/compute-sdk-bridge && PORT=8091 node src/server.mjs
+    pnpm --filter @clotho/compute-sdk-bridge start
 
 # Run all tests across both workspaces
 test: test-rust test-js
@@ -66,7 +63,7 @@ test-agent:
 # unless DAYTONA_API_KEY / BOX_API_KEY are set — loaded from .env if present.
 test-compute:
     set -a; [ -f .env ] && . ./.env; set +a; cargo test -p clotho-compute -- --nocapture
-    cd services/compute-sdk-bridge && node --test test/server.test.mjs
+    pnpm --filter @clotho/compute-sdk-bridge test
 
 # Stage 7 end-to-end definition-of-done demo (`just dev` first). One command:
 # two agent sessions push concurrent commits reconciled by the merge-queue, a

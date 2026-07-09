@@ -247,26 +247,46 @@ services:
     ports:
       - "50057:50057"
 
-  # Optional ComputeSDK TypeScript sidecar (Stage 14). Start with:
+  # Optional ComputeSDK TypeScript sidecar. Start with:
   #   just dev-compute-bridge
-  # or: docker compose -f docker-compose.dev.yml --profile compute-bridge up -d clotho-compute-sdk-bridge
-  # Upstream keys: Clotho secrets (injected per job) and/or env below.
+  # Upstream keys: Clotho secrets (any ComputeSDK provider) and/or host env.
+  # Image builds with pnpm only (services/compute-sdk-bridge/Dockerfile).
   clotho-compute-sdk-bridge:
     profiles: ["compute-bridge"]
-    image: node:22-alpine
-    working_dir: /app
-    command: ["node", "src/server.mjs"]
+    build:
+      context: ./services/compute-sdk-bridge
+      dockerfile: Dockerfile
     environment:
       PORT: "8091"
       CLOTHO_COMPUTE_SDK_STRATEGY: ${CLOTHO_COMPUTE_SDK_STRATEGY:-priority}
       CLOTHO_COMPUTE_SDK_FALLBACK: ${CLOTHO_COMPUTE_SDK_FALLBACK:-true}
-      # Dev escape hatch only — prefer Clotho Settings → Compute for E2B/Modal keys.
+      # Dev escape hatch — prefer Settings → Compute for any upstream keys.
       E2B_API_KEY: ${E2B_API_KEY:-}
       MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
       MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:-}
       DAYTONA_API_KEY: ${DAYTONA_API_KEY:-}
-    volumes:
-      - ./services/compute-sdk-bridge:/app:ro
+      VERCEL_TOKEN: ${VERCEL_TOKEN:-}
+      VERCEL_TEAM_ID: ${VERCEL_TEAM_ID:-}
+      VERCEL_PROJECT_ID: ${VERCEL_PROJECT_ID:-}
+      CSB_API_KEY: ${CSB_API_KEY:-}
+      RUNLOOP_API_KEY: ${RUNLOOP_API_KEY:-}
+      LEAP0_API_KEY: ${LEAP0_API_KEY:-}
+      UPSTASH_BOX_API_KEY: ${UPSTASH_BOX_API_KEY:-}
+      HOPX_API_KEY: ${HOPX_API_KEY:-}
+      FREESTYLE_API_KEY: ${FREESTYLE_API_KEY:-}
+      DECLAW_API_KEY: ${DECLAW_API_KEY:-}
+      TENSORLAKE_API_KEY: ${TENSORLAKE_API_KEY:-}
+      NSC_TOKEN: ${NSC_TOKEN:-}
+      AGENTUITY_SDK_KEY: ${AGENTUITY_SDK_KEY:-}
+      BEAM_TOKEN: ${BEAM_TOKEN:-}
+      BEAM_WORKSPACE_ID: ${BEAM_WORKSPACE_ID:-}
+      BL_API_KEY: ${BL_API_KEY:-}
+      BL_WORKSPACE: ${BL_WORKSPACE:-}
+      ARCHIL_API_KEY: ${ARCHIL_API_KEY:-}
+      ARCHIL_REGION: ${ARCHIL_REGION:-}
+      CLOUDFLARE_SANDBOX_URL: ${CLOUDFLARE_SANDBOX_URL:-}
+      CLOUDFLARE_SANDBOX_SECRET: ${CLOUDFLARE_SANDBOX_SECRET:-}
+      AWS_REGION: ${AWS_REGION:-}
     ports:
       - "8091:8091"
     restart: unless-stopped

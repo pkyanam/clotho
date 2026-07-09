@@ -781,7 +781,8 @@ async fn overlay_secret_configured(state: &AppState, list: &mut ComputeProviderL
                         .into();
             } else if p.configured_reason.is_empty() {
                 p.configured_reason =
-                    "connect E2B or Modal keys in Clotho settings (and run the bridge)".into();
+                    "connect ComputeSDK upstream keys in Clotho settings (and run the bridge)"
+                        .into();
             }
             continue;
         }

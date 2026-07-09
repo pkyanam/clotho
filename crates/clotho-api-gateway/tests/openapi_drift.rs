@@ -38,6 +38,7 @@ const EXPECTED_PATHS: &[&str] = &[
     "/api/v1/providers",
     "/api/v1/providers/{provider}",
     "/api/v1/providers/{provider}/connect",
+    "/api/v1/providers/computesdk/upstreams",
     "/api/v1/compute/providers",
     "/api/v1/compute/providers/{provider}",
     "/api/v1/repos/{name}/commits/{sha}/statuses",

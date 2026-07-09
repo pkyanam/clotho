@@ -16,6 +16,7 @@
 mod actions;
 mod agents;
 mod ci;
+pub mod computesdk_catalog;
 pub mod control;
 pub mod error;
 pub mod forgejo;

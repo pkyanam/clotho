@@ -1,9 +1,15 @@
 packages:
   - "apps/*"
   - "packages/*"
+  - "services/*"
 
 allowBuilds:
   # vitest -> esbuild: its install script just links the prebuilt binary.
   esbuild: true
   sharp: true
   unrs-resolver: true
+  # ComputeSDK / optional provider native deps (services/compute-sdk-bridge).
+  bufferutil: true
+  cbor-extract: true
+  protobufjs: true
+  utf-8-validate: true

@@ -1,6 +1,6 @@
 /**
  * Unit tests for the ComputeSDK bridge without real provider packages.
- * Spawns the server with no credentials and checks health/job behavior.
+ * Spawns the server with no credentials and checks health/job/catalog.
  */
 
 import assert from "node:assert/strict";
@@ -25,14 +25,16 @@ async function withServer(fn) {
       MODAL_TOKEN_ID: "",
       MODAL_TOKEN_SECRET: "",
       DAYTONA_API_KEY: "",
+      VERCEL_TOKEN: "",
+      CSB_API_KEY: "",
+      RUNLOOP_API_KEY: "",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  // Wait until the process prints its listen line or a short timeout.
   await Promise.race([
     once(child.stdout, "data"),
-    new Promise((r) => setTimeout(r, 1500)),
+    new Promise((r) => setTimeout(r, 2000)),
   ]);
 
   try {
@@ -51,6 +53,21 @@ test("health reports unconfigured without provider credentials", async () => {
     assert.equal(body.configured, false);
     assert.ok(Array.isArray(body.providers));
     assert.equal(body.providers.length, 0);
+    assert.ok(Array.isArray(body.catalog));
+    assert.ok(body.catalog.includes("e2b"));
+    assert.ok(body.catalog.includes("vercel"));
+    assert.ok(body.catalog.includes("modal"));
+  });
+});
+
+test("GET /catalog lists all upstreams with required fields", async () => {
+  await withServer(async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/catalog`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.ok(body.providers.length >= 20);
+    const vercel = body.providers.find((p) => p.id === "vercel");
+    assert.ok(vercel.required.includes("VERCEL_TOKEN"));
   });
 });
 

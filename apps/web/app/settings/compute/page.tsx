@@ -10,13 +10,24 @@ import {
   PageTitle,
 } from "src/components/ui/page-frame";
 import { connectProvider, disconnectProvider } from "./actions";
+import { ComputesdkConnectForm } from "./computesdk-form";
 
 export const dynamic = "force-dynamic";
+
+type Upstream = {
+  id: string;
+  name: string;
+  pkg: string;
+  required: string[];
+  optional?: string[];
+  notes?: string;
+};
 
 export default async function ComputeSettingsPage() {
   let providers: ComputeProvider[] = [];
   let defaultProviderId = "";
   let error: string | null = null;
+  let upstreams: Upstream[] = [];
   const orgs = await api()
     .orgs()
     .catch(() => []);
@@ -33,6 +44,13 @@ export default async function ComputeSettingsPage() {
     } catch {
       providers = [];
     }
+  }
+
+  try {
+    const cat = await api().listComputesdkUpstreams();
+    upstreams = cat.upstreams;
+  } catch {
+    upstreams = [];
   }
 
   return (
@@ -170,43 +188,23 @@ export default async function ComputeSettingsPage() {
                 <div className="mt-5 border-t border-kumo-hairline pt-5">
                   <h3 className="text-[0.875rem]">
                     {p.configured
-                      ? "rotate ComputeSDK upstream key"
+                      ? "rotate ComputeSDK upstream"
                       : "connect ComputeSDK upstream"}
                   </h3>
                   <p className="mt-1 text-[0.8125rem] text-kumo-inactive">
-                    store an E2B (or Modal) key in Clotho. start the optional
+                    Clotho routes through ComputeSDK for any installed upstream
+                    (E2B, Modal, Vercel, Cloudflare, Runloop, …). start the
                     bridge with{" "}
                     <code className="text-kumo-default">
                       just dev-compute-bridge
-                    </code>{" "}
-                    — no host env file required for keys. values are never shown
-                    again.
+                    </code>
+                    . secrets never leave the server after save.
                   </p>
-                  <form
-                    action={connectProvider.bind(null, p.id)}
-                    className="mt-3 flex flex-wrap items-end gap-3"
-                  >
-                    <input type="hidden" name="org" value={primaryOrg} />
-                    <input type="hidden" name="upstream" value="e2b" />
-                    <label className="min-w-[220px] grow text-[0.8125rem] text-kumo-inactive">
-                      E2B api key
-                      <input
-                        name="api_key"
-                        type="password"
-                        required
-                        autoComplete="off"
-                        placeholder={
-                          p.configured
-                            ? "enter new key to rotate"
-                            : "paste E2B key"
-                        }
-                        className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-canvas px-3 py-2 text-[0.875rem] text-kumo-default outline-none focus:border-kumo-contrast"
-                      />
-                    </label>
-                    <Button type="submit">
-                      {p.configured ? "rotate" : "connect E2B"}
-                    </Button>
-                  </form>
+                  <ComputesdkConnectForm
+                    org={primaryOrg}
+                    upstreams={upstreams}
+                    configured={p.configured}
+                  />
                   {p.configured && (
                     <form
                       action={disconnectProvider.bind(null, p.id)}
@@ -214,7 +212,7 @@ export default async function ComputeSettingsPage() {
                     >
                       <input type="hidden" name="org" value={primaryOrg} />
                       <Button type="submit" variant="outline">
-                        disconnect
+                        disconnect all ComputeSDK secrets
                       </Button>
                     </form>
                   )}

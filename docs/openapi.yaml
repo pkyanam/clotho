@@ -903,14 +903,55 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
+  /api/v1/providers/computesdk/upstreams:
+    get:
+      tags: [providers, secrets]
+      operationId: listComputesdkUpstreams
+      summary: Catalog of ComputeSDK upstream providers and required secret names
+      description: |
+        Mirrors https://docs.computesdk.com/providers.md. No secret values.
+        Used by settings UI to connect any ComputeSDK provider (not only E2B).
+      responses:
+        "200":
+          description: Upstream catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [upstreams]
+                properties:
+                  upstreams:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, pkg, required]
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        pkg:
+                          type: string
+                        required:
+                          type: array
+                          items:
+                            type: string
+                        optional:
+                          type: array
+                          items:
+                            type: string
+                        notes:
+                          type: string
+
   /api/v1/providers/{provider}/connect:
     post:
       tags: [providers, secrets]
       operationId: connectProvider
       summary: Store a provider API key as an org secret (metadata-only response)
       description: |
-        daytona/box: `api_key`. computesdk: E2B via `api_key` (or Modal via
-        `modal_token_id` + `modal_token_secret`). Never returns the raw value.
+        daytona/box: `api_key`. computesdk: any upstream from
+        GET /providers/computesdk/upstreams via `upstream` + `credentials`
+        (env-name keys) or single-key `api_key`. Never returns the raw value.
       parameters:
         - $ref: "#/components/parameters/provider"
       requestBody:
@@ -926,11 +967,18 @@ paths:
                   type: string
                 upstream:
                   type: string
-                  description: "e2b (default) or modal for computesdk"
+                  description: "ComputeSDK upstream id (e2b, vercel, modal, …)"
+                credentials:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Map of secret names to values (VERCEL_TOKEN, …)
                 modal_token_id:
                   type: string
+                  deprecated: true
                 modal_token_secret:
                   type: string
+                  deprecated: true
       responses:
         "200":
           description: Secret metadata (never raw value)

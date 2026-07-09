@@ -81,28 +81,9 @@ impl ComputeSdkBridgeProvider {
 
     /// Whether job credentials include at least one usable upstream key.
     fn job_has_upstream_credentials(spec: &JobSpec) -> bool {
-        let c = &spec.provider_credentials;
-        let e2b = c
-            .get("e2b_api_key")
-            .or_else(|| c.get("E2B_API_KEY"))
-            .map(|s| !s.trim().is_empty())
-            .unwrap_or(false);
-        let modal = c
-            .get("modal_token_id")
-            .or_else(|| c.get("MODAL_TOKEN_ID"))
-            .map(|s| !s.trim().is_empty())
-            .unwrap_or(false)
-            && c.get("modal_token_secret")
-                .or_else(|| c.get("MODAL_TOKEN_SECRET"))
-                .map(|s| !s.trim().is_empty())
-                .unwrap_or(false);
-        let daytona = c
-            .get("daytona_api_key")
-            .or_else(|| c.get("DAYTONA_API_KEY"))
-            .or_else(|| c.get("api_key"))
-            .map(|s| !s.trim().is_empty())
-            .unwrap_or(false);
-        e2b || modal || daytona
+        spec.provider_credentials
+            .values()
+            .any(|v| !v.trim().is_empty())
     }
 
     async fn probe_health(&self, base: &str) -> Option<HealthSnapshot> {
@@ -116,32 +97,22 @@ impl ComputeSdkBridgeProvider {
         })
     }
 
+    /// Forward all non-empty credentials as UPPER_SNAKE keys for the bridge
+    /// catalog (any ComputeSDK upstream, not only E2B/Modal).
     fn credentials_for_bridge(spec: &JobSpec) -> serde_json::Map<String, serde_json::Value> {
         let mut m = serde_json::Map::new();
-        let c = &spec.provider_credentials;
-        let put = |m: &mut serde_json::Map<String, serde_json::Value>, key: &str, val: &str| {
-            if !val.trim().is_empty() {
-                m.insert(key.into(), serde_json::Value::String(val.to_string()));
+        for (k, v) in &spec.provider_credentials {
+            if v.trim().is_empty() {
+                continue;
             }
-        };
-        if let Some(v) = c.get("e2b_api_key").or_else(|| c.get("E2B_API_KEY")) {
-            put(&mut m, "e2b_api_key", v);
-        }
-        if let Some(v) = c.get("modal_token_id").or_else(|| c.get("MODAL_TOKEN_ID")) {
-            put(&mut m, "modal_token_id", v);
-        }
-        if let Some(v) = c
-            .get("modal_token_secret")
-            .or_else(|| c.get("MODAL_TOKEN_SECRET"))
-        {
-            put(&mut m, "modal_token_secret", v);
-        }
-        if let Some(v) = c
-            .get("daytona_api_key")
-            .or_else(|| c.get("DAYTONA_API_KEY"))
-            .or_else(|| c.get("api_key"))
-        {
-            put(&mut m, "daytona_api_key", v);
+            let key = if k.chars().all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
+            {
+                k.clone()
+            } else {
+                // e2b_api_key → E2B_API_KEY
+                k.to_uppercase()
+            };
+            m.insert(key, serde_json::Value::String(v.clone()));
         }
         m
     }
@@ -176,16 +147,16 @@ impl ComputeSdkBridgeProvider {
                             h.message
                         },
                         format!(
-                            "ComputeSDK bridge at {url}; connect E2B/Modal keys in Clotho settings or on the bridge"
+                            "ComputeSDK bridge at {url}; connect any ComputeSDK upstream keys in Clotho settings or on the bridge"
                         ),
                     ),
                     None => (
                         // Without a probe, do not claim configured — URL alone is not enough.
                         false,
-                        "bridge URL set; upstream credentials not verified (connect E2B/Modal in settings or on the bridge)"
+                        "bridge URL set; upstream credentials not verified (connect ComputeSDK providers in settings)"
                             .into(),
                         format!(
-                            "ComputeSDK bridge at {url}; configured only when upstream keys exist"
+                            "ComputeSDK bridge at {url}; supports all @computesdk/* providers when keys + packages present"
                         ),
                     ),
                 }
@@ -281,7 +252,7 @@ impl ComputeProvider for ComputeSdkBridgeProvider {
             }
             if !snap.configured && !job_creds {
                 let msg = if snap.message.is_empty() {
-                    "ComputeSDK bridge has no configured upstream providers — connect E2B/Modal in Clotho settings"
+                    "ComputeSDK bridge has no configured upstream providers — connect credentials in Clotho settings (any ComputeSDK provider)"
                         .into()
                 } else {
                     snap.message

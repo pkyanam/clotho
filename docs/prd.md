@@ -374,10 +374,13 @@ are first-class for every advertised provider — not only Daytona.
   or Clotho secret overlay; never while stub-only. Note: Box API caps command
   `timeoutSeconds` at 60.
 - **ComputeSDK bridge:** compose profile `compute-bridge` + `just dev-compute-bridge`
-  (and host `just dev-compute-bridge-host`). In-cluster default URL on
-  `clotho-compute`. Live `/health` probe for honest `configured`. Per-job
-  `credentials` on bridge jobs from Clotho secrets (`E2B_API_KEY`,
-  `MODAL_TOKEN_*`). Settings → connect E2B without host `.env`.
+  (pnpm-only image/workspace). Catalog of **all** ComputeSDK upstreams
+  (AgentCore, Agentuity, Archil, Beam, Blaxel, Cloudflare, CodeSandbox, Daytona,
+  Declaw, E2B, Freestyle, HopX, k8s, Leap0, Modal, Namespace, Runloop,
+  Tensorlake, Upstash, Vercel) in bridge `providers.mjs` + gateway
+  `computesdk_catalog`. `GET /api/v1/providers/computesdk/upstreams` for UI.
+  Connect any upstream via `credentials` map; secrets inject as UPPER_SNAKE
+  env names on jobs. Live `/health` for honest `configured`.
 - **Honest state:** “configured” = can accept a job with current credentials
   (env, Clotho secret inject, or bridge upstream). Bridge URL alone is not
   configured. REST overlay unifies gRPC + secrets for web/SDK.

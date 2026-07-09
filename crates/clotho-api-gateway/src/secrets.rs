@@ -23,12 +23,11 @@ use crate::AppState;
 
 const NONCE_LEN: usize = 12;
 
-/// Well-known secret names that bind to compute providers.
+/// Well-known secret names that bind to direct CCI providers.
 pub const SECRET_DAYTONA_API_KEY: &str = "DAYTONA_API_KEY";
 pub const SECRET_BOX_API_KEY: &str = "BOX_API_KEY";
-pub const SECRET_E2B_API_KEY: &str = "E2B_API_KEY";
-pub const SECRET_MODAL_TOKEN_ID: &str = "MODAL_TOKEN_ID";
-pub const SECRET_MODAL_TOKEN_SECRET: &str = "MODAL_TOKEN_SECRET";
+
+use crate::computesdk_catalog;
 
 /// Master key for sealing secret values. Loaded from CLOTHO_SECRETS_MASTER_KEY.
 #[derive(Clone)]
@@ -160,22 +159,30 @@ pub struct PatchSecretRequest {
 
 #[derive(Deserialize)]
 pub struct ConnectProviderRequest {
-    /// Provider API key (write-once). Stored as a well-known org secret.
-    /// For `computesdk`, this is the E2B key unless `upstream` says otherwise.
+    /// Provider API key (write-once). For single-key ComputeSDK upstreams this
+    /// is the sole credential when `credentials` is empty.
     #[serde(default)]
     pub api_key: String,
     /// Org that owns the secret; defaults to bootstrap org.
     #[serde(default)]
     pub org: String,
-    /// Upstream for ComputeSDK bridge: `e2b` (default) or `modal`.
+    /// ComputeSDK upstream id (`e2b`, `vercel`, `modal`, …). See catalog.
     #[serde(default)]
     pub upstream: String,
-    /// Modal token id (when connecting computesdk with upstream=modal).
+    /// Multi-field credentials keyed by env/secret name (e.g. VERCEL_TOKEN).
+    /// Preferred for multi-key upstreams; values never returned after write.
+    #[serde(default)]
+    pub credentials: std::collections::HashMap<String, String>,
+    /// Deprecated aliases kept for older clients (Modal).
     #[serde(default)]
     pub modal_token_id: String,
-    /// Modal token secret (when connecting computesdk with upstream=modal).
     #[serde(default)]
     pub modal_token_secret: String,
+}
+
+#[derive(Serialize)]
+pub struct ComputesdkUpstreamsResponse {
+    pub upstreams: Vec<computesdk_catalog::ComputesdkUpstream>,
 }
 
 #[derive(Serialize)]
@@ -239,6 +246,16 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/v1/providers/{provider}/connect",
             post(connect_provider).delete(disconnect_provider),
         )
+        .route(
+            "/api/v1/providers/computesdk/upstreams",
+            get(list_computesdk_upstreams),
+        )
+}
+
+async fn list_computesdk_upstreams() -> Json<ComputesdkUpstreamsResponse> {
+    Json(ComputesdkUpstreamsResponse {
+        upstreams: computesdk_catalog::UPSTREAMS.to_vec(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -539,60 +556,16 @@ async fn connect_provider(
     };
     let org_row = control::get_org(pool, &org_name).await?;
 
-    // ComputeSDK may store E2B or Modal credentials (possibly two secrets).
+    // ComputeSDK: store credentials for any catalogued upstream.
     if provider_id == "computesdk" {
-        let upstream = body.upstream.trim().to_lowercase();
-        let meta = if upstream == "modal"
-            || (!body.modal_token_id.trim().is_empty()
-                && !body.modal_token_secret.trim().is_empty())
-        {
-            if body.modal_token_id.trim().is_empty() || body.modal_token_secret.trim().is_empty() {
-                return Err(ApiError::InvalidRequest(
-                    "modal_token_id and modal_token_secret are required for Modal".into(),
-                ));
-            }
-            upsert_org_secret(
-                pool,
-                crypto,
-                &org_row.id,
-                SECRET_MODAL_TOKEN_ID,
-                body.modal_token_id.trim(),
-                "Modal token id for ComputeSDK bridge",
-                &state.bootstrap.user_id,
-                false,
-            )
-            .await?;
-            upsert_org_secret(
-                pool,
-                crypto,
-                &org_row.id,
-                SECRET_MODAL_TOKEN_SECRET,
-                body.modal_token_secret.trim(),
-                "Modal token secret for ComputeSDK bridge",
-                &state.bootstrap.user_id,
-                false,
-            )
-            .await?
-        } else {
-            let key = if !body.api_key.trim().is_empty() {
-                body.api_key.trim()
-            } else {
-                return Err(ApiError::InvalidRequest(
-                    "api_key is required (E2B API key for ComputeSDK)".into(),
-                ));
-            };
-            upsert_org_secret(
-                pool,
-                crypto,
-                &org_row.id,
-                SECRET_E2B_API_KEY,
-                key,
-                "E2B API key for ComputeSDK bridge",
-                &state.bootstrap.user_id,
-                false,
-            )
-            .await?
-        };
+        let meta = connect_computesdk_upstream(
+            pool,
+            crypto,
+            &org_row.id,
+            &state.bootstrap.user_id,
+            &body,
+        )
+        .await?;
         control::log_activity(
             pool,
             ActivityEventInput {
@@ -602,6 +575,7 @@ async fn connect_provider(
                 event_type: "provider.connected".into(),
                 payload: serde_json::json!({
                     "provider": provider_id,
+                    "upstream": body.upstream.trim().to_lowercase(),
                     "secret_name": meta.name,
                 }),
             },
@@ -719,7 +693,8 @@ pub fn provider_secret_name(provider_id: &str) -> Option<&'static str> {
     match provider_id.to_lowercase().as_str() {
         "daytona" => Some(SECRET_DAYTONA_API_KEY),
         "box" => Some(SECRET_BOX_API_KEY),
-        "computesdk" => Some(SECRET_E2B_API_KEY),
+        // Any connected ComputeSDK secret indicates overlay readiness.
+        "computesdk" => computesdk_catalog::all_secret_names().into_iter().next(),
         _ => None,
     }
 }
@@ -729,11 +704,7 @@ pub fn provider_secret_names(provider_id: &str) -> Vec<&'static str> {
     match provider_id.to_lowercase().as_str() {
         "daytona" => vec![SECRET_DAYTONA_API_KEY],
         "box" => vec![SECRET_BOX_API_KEY],
-        "computesdk" => vec![
-            SECRET_E2B_API_KEY,
-            SECRET_MODAL_TOKEN_ID,
-            SECRET_MODAL_TOKEN_SECRET,
-        ],
+        "computesdk" => computesdk_catalog::all_secret_names(),
         _ => vec![],
     }
 }
@@ -748,25 +719,156 @@ pub async fn resolve_provider_api_key(
     let Some(secret_name) = provider_secret_name(provider_id) else {
         return Ok(None);
     };
+    // For computesdk, prefer the first present secret rather than only the
+    // alphabetically first catalog name.
+    if provider_id.eq_ignore_ascii_case("computesdk") {
+        let creds = resolve_computesdk_credentials(state, repo_name).await?;
+        return Ok(creds.into_values().next());
+    }
     resolve_named_secret(state, repo_name, secret_name).await
 }
 
 /// Resolve all ComputeSDK upstream credentials for injection into CCI jobs.
+/// Keys are UPPER_SNAKE env names the bridge catalog understands.
 pub async fn resolve_computesdk_credentials(
     state: &AppState,
     repo_name: &str,
 ) -> Result<std::collections::HashMap<String, String>, ApiError> {
     let mut out = std::collections::HashMap::new();
-    if let Some(v) = resolve_named_secret(state, repo_name, SECRET_E2B_API_KEY).await? {
-        out.insert("e2b_api_key".into(), v);
-    }
-    if let Some(v) = resolve_named_secret(state, repo_name, SECRET_MODAL_TOKEN_ID).await? {
-        out.insert("modal_token_id".into(), v);
-    }
-    if let Some(v) = resolve_named_secret(state, repo_name, SECRET_MODAL_TOKEN_SECRET).await? {
-        out.insert("modal_token_secret".into(), v);
+    for name in computesdk_catalog::all_secret_names() {
+        if let Some(v) = resolve_named_secret(state, repo_name, name).await? {
+            out.insert(name.to_string(), v);
+        }
     }
     Ok(out)
+}
+
+/// Store credentials for one ComputeSDK upstream (any catalogued provider).
+async fn connect_computesdk_upstream(
+    pool: &PgPool,
+    crypto: &SecretsCrypto,
+    org_id: &str,
+    user_id: &str,
+    body: &ConnectProviderRequest,
+) -> Result<SecretMeta, ApiError> {
+    let mut creds = body.credentials.clone();
+    // Back-compat: modal_token_* fields and bare api_key.
+    if !body.modal_token_id.trim().is_empty() {
+        creds.insert(
+            "MODAL_TOKEN_ID".into(),
+            body.modal_token_id.trim().to_string(),
+        );
+    }
+    if !body.modal_token_secret.trim().is_empty() {
+        creds.insert(
+            "MODAL_TOKEN_SECRET".into(),
+            body.modal_token_secret.trim().to_string(),
+        );
+    }
+
+    let upstream_id = {
+        let u = body.upstream.trim().to_lowercase();
+        if u.is_empty() {
+            // Infer from credential keys or default e2b when only api_key set.
+            if creds.contains_key("MODAL_TOKEN_ID") || creds.contains_key("modal_token_id") {
+                "modal".into()
+            } else if creds.keys().any(|k| k.to_uppercase().starts_with("VERCEL_")) {
+                "vercel".into()
+            } else if !body.api_key.trim().is_empty() && creds.is_empty() {
+                "e2b".into()
+            } else if let Some(first) = creds.keys().next() {
+                // Match any upstream whose required list is subset of keys.
+                infer_upstream_from_keys(&creds).unwrap_or_else(|| first.clone())
+            } else {
+                "e2b".into()
+            }
+        } else {
+            u
+        }
+    };
+
+    let Some(spec) = computesdk_catalog::find_upstream(&upstream_id) else {
+        let known: Vec<_> = computesdk_catalog::UPSTREAMS.iter().map(|u| u.id).collect();
+        return Err(ApiError::InvalidRequest(format!(
+            "unknown ComputeSDK upstream {upstream_id:?}; known: {known:?}"
+        )));
+    };
+
+    // Single-key convenience: api_key → first required secret.
+    if !body.api_key.trim().is_empty() && spec.required.len() == 1 {
+        creds
+            .entry(spec.required[0].to_string())
+            .or_insert_with(|| body.api_key.trim().to_string());
+    }
+
+    // Normalize keys to UPPER_SNAKE.
+    let mut normalized = std::collections::HashMap::new();
+    for (k, v) in creds {
+        if v.trim().is_empty() {
+            continue;
+        }
+        let key = k.trim().to_uppercase().replace('-', "_");
+        valid_secret_name(&key)?;
+        normalized.insert(key, v.trim().to_string());
+    }
+
+    // Require all required fields for this upstream (k8s may have none).
+    for req in spec.required {
+        if !normalized.contains_key(*req) {
+            return Err(ApiError::InvalidRequest(format!(
+                "ComputeSDK upstream {:?} requires secret {req} (pass credentials.{req} or api_key for single-key providers)",
+                spec.id
+            )));
+        }
+    }
+    if normalized.is_empty() && spec.required.is_empty() {
+        // k8s with optional-only: require at least one optional secret.
+        return Err(ApiError::InvalidRequest(format!(
+            "ComputeSDK upstream {:?} needs at least one of {:?}",
+            spec.id, spec.optional
+        )));
+    }
+    if normalized.is_empty() {
+        return Err(ApiError::InvalidRequest(
+            "at least one credential value is required".into(),
+        ));
+    }
+
+    let mut last_meta = None;
+    for (name, value) in &normalized {
+        let desc = format!("ComputeSDK {} ({})", spec.name, name);
+        let meta = upsert_org_secret(
+            pool,
+            crypto,
+            org_id,
+            name,
+            value,
+            &desc,
+            user_id,
+            false,
+        )
+        .await?;
+        last_meta = Some(meta);
+    }
+    last_meta.ok_or_else(|| ApiError::Internal("no secrets written".into()))
+}
+
+fn infer_upstream_from_keys(
+    creds: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    let keys: std::collections::HashSet<String> = creds
+        .keys()
+        .map(|k| k.to_uppercase().replace('-', "_"))
+        .collect();
+    for u in computesdk_catalog::UPSTREAMS {
+        if u.required.is_empty() {
+            continue;
+        }
+        if u.required.iter().all(|r| keys.contains(*r)) {
+            return Some(u.id.to_string());
+        }
+    }
+    None
 }
 
 async fn resolve_named_secret(
@@ -831,24 +933,35 @@ pub async fn provider_secret_configured(
 }
 
 /// Whether ComputeSDK has enough Clotho secrets to accept a job (with bridge up).
+/// True when any catalogued upstream has its required secrets present.
 pub async fn computesdk_secrets_ready(state: &AppState) -> bool {
     let pool = match state.pool.as_ref() {
         Some(p) => p,
         None => return false,
     };
-    if get_by_org_name(pool, &state.bootstrap.org_id, SECRET_E2B_API_KEY)
-        .await
-        .is_ok()
-    {
-        return true;
+    let org = state.bootstrap.org_id.as_str();
+    for upstream in computesdk_catalog::UPSTREAMS {
+        if upstream.required.is_empty() {
+            // Optional-only (e.g. k8s): any optional secret counts.
+            for name in upstream.optional {
+                if get_by_org_name(pool, org, name).await.is_ok() {
+                    return true;
+                }
+            }
+            continue;
+        }
+        let mut all = true;
+        for name in upstream.required {
+            if get_by_org_name(pool, org, name).await.is_err() {
+                all = false;
+                break;
+            }
+        }
+        if all {
+            return true;
+        }
     }
-    let has_id = get_by_org_name(pool, &state.bootstrap.org_id, SECRET_MODAL_TOKEN_ID)
-        .await
-        .is_ok();
-    let has_secret = get_by_org_name(pool, &state.bootstrap.org_id, SECRET_MODAL_TOKEN_SECRET)
-        .await
-        .is_ok();
-    has_id && has_secret
+    false
 }
 
 // ---------------------------------------------------------------------------

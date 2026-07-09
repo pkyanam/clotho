@@ -1,123 +1,36 @@
 /**
- * ComputeSDK HTTP bridge for Clotho CCI (docs/adr/0013, Stage 14).
+ * ComputeSDK HTTP bridge for Clotho CCI (docs/adr/0013).
  *
- * Implements the minimal JSON surface clotho-compute's ComputeSdkBridgeProvider
- * expects. Uses computesdk multi-provider config when packages + credentials
- * are present; otherwise reports configured:false and rejects jobs.
+ * Supports every ComputeSDK provider catalogued in providers.mjs
+ * (https://docs.computesdk.com/providers.md). Credentials come from:
+ * 1. Per-job `credentials` on POST /jobs (Clotho secrets via gateway)
+ * 2. Process environment (dev escape hatch)
  *
- * Credentials sources (in priority for a job):
- * 1. Per-job `credentials` on POST /jobs (from Clotho secrets via gateway)
- * 2. Process environment (E2B_API_KEY, MODAL_TOKEN_*, DAYTONA_API_KEY)
- *
- * ComputeSDK docs: https://docs.computesdk.com/llms.txt
+ * Install packages with pnpm only (workspace member).
  */
 
 import http from "node:http";
+import {
+  buildRuntime,
+  catalogPublic,
+  envCredentials,
+  normalizeCreds,
+} from "./providers.mjs";
 
 const PORT = Number(process.env.PORT || process.env.CLOTHO_COMPUTE_SDK_BRIDGE_PORT || 8091);
 
 /** @type {{ compute: any, names: string[] } | null} */
 let runtime = null;
 let initError = "";
-
-/**
- * Build a ComputeSDK multi-provider runtime from credential bags.
- * @param {Record<string, string>} creds
- */
-async function buildRuntime(creds) {
-  const providers = [];
-  const names = [];
-
-  async function tryProvider(pkg, factoryName, build) {
-    try {
-      const mod = await import(pkg);
-      const factory = mod[factoryName] ?? mod.default?.[factoryName] ?? mod.default;
-      if (typeof factory !== "function") return;
-      const instance = build(factory);
-      if (instance) {
-        providers.push(instance);
-        names.push(instance.name ?? factoryName);
-      }
-    } catch (e) {
-      if (process.env.CLOTHO_COMPUTE_SDK_DEBUG) {
-        console.warn(`skip provider ${pkg}:`, e?.message ?? e);
-      }
-    }
-  }
-
-  const e2b = creds.e2b_api_key || creds.E2B_API_KEY;
-  if (e2b) {
-    await tryProvider("@computesdk/e2b", "e2b", (e2bFactory) =>
-      e2bFactory({ apiKey: e2b }),
-    );
-  }
-  const modalId = creds.modal_token_id || creds.MODAL_TOKEN_ID;
-  const modalSecret = creds.modal_token_secret || creds.MODAL_TOKEN_SECRET;
-  if (modalId && modalSecret) {
-    await tryProvider("@computesdk/modal", "modal", (modal) =>
-      modal({
-        tokenId: modalId,
-        tokenSecret: modalSecret,
-      }),
-    );
-  }
-  const daytona =
-    creds.daytona_api_key || creds.DAYTONA_API_KEY || creds.api_key;
-  if (daytona) {
-    await tryProvider("@computesdk/daytona", "daytona", (daytonaFactory) =>
-      daytonaFactory({ apiKey: daytona }),
-    );
-  }
-
-  if (providers.length === 0) {
-    return {
-      runtime: null,
-      error:
-        "no ComputeSDK upstream providers configured (install @computesdk/* packages and set provider credentials)",
-      names: [],
-    };
-  }
-
-  try {
-    const { compute } = await import("computesdk");
-    const strategy =
-      process.env.CLOTHO_COMPUTE_SDK_STRATEGY === "round-robin"
-        ? "round-robin"
-        : "priority";
-    const fallbackOnError =
-      (process.env.CLOTHO_COMPUTE_SDK_FALLBACK ?? "true").toLowerCase() !==
-      "false";
-    compute.setConfig({
-      providers,
-      providerStrategy: strategy,
-      fallbackOnError,
-    });
-    return { runtime: { compute, names }, error: "", names };
-  } catch (e) {
-    return {
-      runtime: null,
-      error: `computesdk core unavailable: ${e?.message ?? e}`,
-      names: [],
-    };
-  }
-}
-
-function envCredentials() {
-  return {
-    e2b_api_key: process.env.E2B_API_KEY || "",
-    modal_token_id: process.env.MODAL_TOKEN_ID || "",
-    modal_token_secret: process.env.MODAL_TOKEN_SECRET || "",
-    daytona_api_key: process.env.DAYTONA_API_KEY || "",
-  };
-}
+/** @type {string[]} */
+let lastSkipped = [];
 
 async function tryInitCompute() {
-  const { runtime: rt, error, names } = await buildRuntime(envCredentials());
+  const { runtime: rt, error, names, skipped } = await buildRuntime(envCredentials());
   runtime = rt;
   initError = error;
-  if (rt) {
-    initError = "";
-  }
+  lastSkipped = (skipped ?? []).map((s) => `${s.id}: ${s.reason}`);
+  if (rt) initError = "";
   return names;
 }
 
@@ -144,11 +57,11 @@ function healthBody() {
       ? `ComputeSDK bridge ready (${runtime.names.join(", ")})`
       : initError || "not configured",
     providers: runtime?.names ?? [],
+    catalog: catalogPublic().map((p) => p.id),
   };
 }
 
 /**
- * Merge job credentials over env defaults for this job only.
  * @param {Record<string, string> | undefined} jobCreds
  */
 async function runtimeForJob(jobCreds) {
@@ -157,22 +70,12 @@ async function runtimeForJob(jobCreds) {
   }
   const merged = {
     ...envCredentials(),
-    ...Object.fromEntries(
-      Object.entries(jobCreds).filter(
-        ([, v]) => typeof v === "string" && v.trim() !== "",
-      ),
-    ),
+    ...normalizeCreds(jobCreds),
   };
-  // If job brings no extra keys beyond empty strings, use process runtime.
-  const hasJob =
-    merged.e2b_api_key ||
-    (merged.modal_token_id && merged.modal_token_secret) ||
-    merged.daytona_api_key;
-  if (!hasJob) {
+  const hasAny = Object.values(merged).some((v) => v && String(v).trim());
+  if (!hasAny) {
     return { rt: runtime, err: initError };
   }
-  // Prefer job-scoped runtime when credentials are supplied so Clotho secrets
-  // work without restarting the sidecar.
   const built = await buildRuntime(merged);
   return { rt: built.runtime, err: built.error };
 }
@@ -192,11 +95,17 @@ async function runJob(body) {
   }
 
   const timeoutMs = Math.max(1, Number(body.timeout_secs || 900)) * 1000;
-  const sandbox = await rt.compute.sandbox.create({
+  const createOpts = {
     timeout: timeoutMs,
     envs: body.env && typeof body.env === "object" ? body.env : {},
     ...(body.snapshot ? { template: body.snapshot } : {}),
-  });
+  };
+  // Optional per-job provider override (ComputeSDK multi-provider name).
+  if (body.upstream_provider || body.provider) {
+    createOpts.provider = body.upstream_provider || body.provider;
+  }
+
+  const sandbox = await rt.compute.sandbox.create(createOpts);
 
   const logs = [];
   let exitCode = 0;
@@ -245,6 +154,12 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/health") {
       return send(res, 200, healthBody());
     }
+    if (req.method === "GET" && url.pathname === "/catalog") {
+      return send(res, 200, {
+        providers: catalogPublic(),
+        strategy: process.env.CLOTHO_COMPUTE_SDK_STRATEGY || "priority",
+      });
+    }
     if (req.method === "GET" && url.pathname === "/providers") {
       return send(res, 200, {
         providers: (runtime?.names ?? []).map((name) => ({
@@ -252,6 +167,7 @@ const server = http.createServer(async (req, res) => {
           name,
           configured: true,
         })),
+        catalog: catalogPublic(),
       });
     }
     if (req.method === "POST" && url.pathname === "/jobs") {
@@ -279,6 +195,7 @@ server.listen(PORT, "0.0.0.0", () => {
       service: "clotho-compute-sdk-bridge",
       port: PORT,
       ...healthBody(),
+      skipped: lastSkipped.slice(0, 8),
     }),
   );
 });

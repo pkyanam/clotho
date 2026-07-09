@@ -989,7 +989,8 @@ export class ClothoClient {
   /**
    * Store a provider API key as an org secret (write-once to the browser).
    * Response is metadata only (masked last4).
-   * For `computesdk`, pass `upstream: "e2b"` (default) or modal fields.
+   * For `computesdk`, pass `upstream` + `credentials` (env-name keys) for any
+   * ComputeSDK provider, or `apiKey` for single-key upstreams.
    */
   connectProvider(
     provider: string,
@@ -997,6 +998,7 @@ export class ClothoClient {
       apiKey?: string;
       org?: string;
       upstream?: string;
+      credentials?: Record<string, string>;
       modalTokenId?: string;
       modalTokenSecret?: string;
     },
@@ -1010,11 +1012,29 @@ export class ClothoClient {
           api_key: options.apiKey ?? "",
           org: options.org ?? "",
           upstream: options.upstream ?? "",
+          credentials: options.credentials ?? {},
           modal_token_id: options.modalTokenId ?? "",
           modal_token_secret: options.modalTokenSecret ?? "",
         }),
       },
     );
+  }
+
+  /**
+   * Catalog of ComputeSDK upstream providers and required secret names.
+   * @see https://docs.computesdk.com/providers.md
+   */
+  listComputesdkUpstreams(): Promise<{
+    upstreams: Array<{
+      id: string;
+      name: string;
+      pkg: string;
+      required: string[];
+      optional?: string[];
+      notes?: string;
+    }>;
+  }> {
+    return this.request("/api/v1/providers/computesdk/upstreams");
   }
 
   /**

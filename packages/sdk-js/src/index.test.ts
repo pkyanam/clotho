@@ -201,6 +201,7 @@ describe("ClothoClient", () => {
           api_key: "key-abcd",
           org: "clotho",
           upstream: "",
+          credentials: {},
           modal_token_id: "",
           modal_token_secret: "",
         }),
