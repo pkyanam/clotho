@@ -101,21 +101,20 @@ Rationale:
 - A future "separate service" promotion is just giving the same binary its
   own deploy; the HTTP contract stays the same.
 
-### 4. Box is a stub adapter behind the same registry
+### 4. Box is a real adapter behind the same registry
 
-A `BoxStubProvider` registers with honest capabilities from the public Box
-API v1 (https://docs.ascii.dev/llms.txt, base `https://ascii.dev/api/box/v1`,
-bearer `BOX_API_KEY`):
+A `BoxProvider` (Stage 14; was a Stage 12 stub) implements one-shot jobs
+against the public Box API v1 (https://docs.ascii.dev/llms.txt, base
+`https://ascii.dev/api/box/v1`, bearer `BOX_API_KEY` or per-job Clotho
+secrets):
 
-- lifecycle create / stop(archive) / resume / fork / delete;
-- work: prompt (codex | claude-code), events, interrupt;
-- access: SSH, desktop/noVNC, public hosting subdomain;
-- files, command exec, artifacts, snapshots.
+- one-shot: create → poll ready/idle → files → commands → delete;
+- lifecycle hooks for later sessions: stop(archive) / resume / persistent create;
+- capabilities: SSH, desktop/noVNC, public hosting, file API, snapshots.
 
-Primary model is **persistent agent workspace**; one-shot jobs are also
-feasible via create → files → commands → delete. The stub remains
-**unconfigured** until a real HTTP client lands. Full Box integration is
-Stage 12+; the registry shape is the Stage 12 deliverable.
+Primary product model remains **persistent agent workspace**; one-shot CI is
+supported. `configured` is true only when credentials can actually run jobs
+(env key or gateway secret inject).
 
 ### 5. Public surface
 

@@ -26,7 +26,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 
-pub use box_provider::BoxStubProvider;
+pub use box_provider::{BoxProvider, BoxStubProvider};
 pub use computesdk::ComputeSdkBridgeProvider;
 pub use daytona::DaytonaProvider;
 pub use registry::ProviderRegistry;
@@ -194,7 +194,15 @@ pub trait ComputeProvider: Send + Sync {
     fn name(&self) -> &str;
 
     /// Capability and configured-state metadata (no secrets).
+    ///
+    /// Prefer [`Self::live_descriptor`] for list/get when the provider can
+    /// refresh honest configured state (e.g. probe a bridge health endpoint).
     fn descriptor(&self) -> ProviderDescriptor;
+
+    /// Async refresh of configured state. Default: same as [`Self::descriptor`].
+    async fn live_descriptor(&self) -> ProviderDescriptor {
+        self.descriptor()
+    }
 
     /// Run a job to completion in a fresh sandbox and tear it down.
     async fn run_job(&self, spec: JobSpec) -> Result<JobResult, ComputeError>;
@@ -276,8 +284,9 @@ impl ComputeProvider for DisabledProvider {
     }
 }
 
-/// Build the Stage 12 registry from environment: always registers Daytona
-/// (configured or not), optional ComputeSDK bridge, and a Box stub.
+/// Build the Stage 12/14 registry from environment: always registers Daytona,
+/// ComputeSDK bridge, and Box (each may be unconfigured until credentials
+/// exist — env or per-job Clotho secrets).
 pub fn registry_from_env() -> ProviderRegistry {
     let default_id = std::env::var("CLOTHO_COMPUTE_PROVIDER")
         .unwrap_or_else(|_| "daytona".to_string())
@@ -297,18 +306,17 @@ pub fn registry_from_env() -> ProviderRegistry {
     // even when process env is empty (docs/adr/0014).
     providers.push(std::sync::Arc::new(DaytonaProvider::from_env_or_unconfigured()));
 
-    // Optional ComputeSDK bridge (docs/adr/0013): registered whenever the
-    // bridge URL is set so operators can see configured state; jobs fail
-    // cleanly if the sidecar is down or has no upstream providers.
+    // Optional ComputeSDK bridge (docs/adr/0013): always listed; configured
+    // only when the bridge URL is set *and* upstream providers can accept jobs.
     if let Some(bridge) = ComputeSdkBridgeProvider::from_env() {
         providers.push(std::sync::Arc::new(bridge));
     } else {
         providers.push(std::sync::Arc::new(ComputeSdkBridgeProvider::unconfigured()));
     }
 
-    // Box stub: always listed so the registry surface is multi-provider even
-    // before full integration (docs/prd.md Stage 12).
-    providers.push(std::sync::Arc::new(BoxStubProvider::from_env()));
+    // Box (Ascii) real client (Stage 14): always listed; per-job keys work
+    // when process env is empty (docs/adr/0014).
+    providers.push(std::sync::Arc::new(BoxProvider::from_env_or_unconfigured()));
 
     // If the operator named an unknown default, fall back to daytona for routing.
     let default = if providers.iter().any(|p| p.name() == default_id) {

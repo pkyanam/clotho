@@ -1,9 +1,9 @@
 //! Clotho Compute service — the CCI over gRPC (docs/prd.md §5 Stage 7/12).
 //!
 //! Builds a capability-aware [`ProviderRegistry`] from the environment
-//! (Daytona direct, optional ComputeSDK bridge, Box stub). With no provider
+//! (Daytona direct, optional ComputeSDK bridge, Box). With no provider
 //! credentials the gRPC surface stays up; jobs fail with FAILED_PRECONDITION
-//! (docs/adr/0008, docs/adr/0013).
+//! (docs/adr/0008, docs/adr/0013, Stage 14).
 
 use std::sync::Arc;
 

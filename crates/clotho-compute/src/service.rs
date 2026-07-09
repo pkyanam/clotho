@@ -120,9 +120,11 @@ impl Compute for ComputeService {
         &self,
         _request: Request<ListProvidersRequest>,
     ) -> Result<Response<ListProvidersResponse>, Status> {
+        // Prefer live descriptors so bridge health (upstream keys) is honest.
         let providers = self
             .registry
-            .list_infos()
+            .list_infos_live()
+            .await
             .into_iter()
             .map(|(d, enabled)| to_pb_info(d, enabled))
             .collect();
@@ -140,7 +142,7 @@ impl Compute for ComputeService {
         if id.trim().is_empty() {
             return Err(Status::invalid_argument("provider_id is required"));
         }
-        let Some(d) = self.registry.get(&id) else {
+        let Some(d) = self.registry.get_live(&id).await else {
             return Err(Status::not_found(format!(
                 "compute provider {id:?} not found"
             )));

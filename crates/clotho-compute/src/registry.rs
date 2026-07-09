@@ -44,12 +44,34 @@ impl ProviderRegistry {
             .collect()
     }
 
+    /// Async list using each provider's live configured state (e.g. bridge health).
+    pub async fn list_infos_live(&self) -> Vec<(ProviderDescriptor, bool)> {
+        let mut out = Vec::with_capacity(self.providers.len());
+        for p in &self.providers {
+            let d = p.live_descriptor().await;
+            let enabled = d.id == self.default_id;
+            out.push((d, enabled));
+        }
+        out
+    }
+
     pub fn get(&self, id: &str) -> Option<ProviderDescriptor> {
         let id = id.to_lowercase();
         self.providers
             .iter()
             .find(|p| p.name() == id)
             .map(|p| p.descriptor())
+    }
+
+    /// Async get using live configured state when available.
+    pub async fn get_live(&self, id: &str) -> Option<ProviderDescriptor> {
+        let id = id.to_lowercase();
+        for p in &self.providers {
+            if p.name() == id {
+                return Some(p.live_descriptor().await);
+            }
+        }
+        None
     }
 
     fn provider_by_id(&self, id: &str) -> Option<Arc<dyn ComputeProvider>> {

@@ -33,7 +33,7 @@ async fn registry_lists_multiple_providers_with_capabilities() {
         vec![
             Arc::new(DisabledProvider::with_id("daytona", "no key")),
             Arc::new(ComputeSdkBridgeProvider::unconfigured()),
-            Arc::new(BoxStubProvider::unconfigured()),
+            Arc::new(BoxStubProvider::from_env_or_unconfigured()),
         ],
         "daytona",
     );
