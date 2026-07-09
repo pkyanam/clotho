@@ -220,10 +220,10 @@ services:
     ports:
       - "50055:50055"
 
-  # Pluggable compute (docs/prd.md §5 Stage 7/12, docs/adr/0008, docs/adr/0013):
+  # Pluggable compute (docs/prd.md §5 Stage 7/12/14, docs/adr/0008, docs/adr/0013):
   # CCI over gRPC with a multi-provider registry (Daytona direct, optional
-  # ComputeSDK bridge, Box stub). With no credentials the stack stays healthy
-  # and CI jobs fail cleanly. Credentials come from a gitignored .env.
+  # ComputeSDK bridge, Box). With no credentials the stack stays healthy and
+  # CI jobs fail cleanly. Prefer Clotho secrets over host env for keys.
   clotho-compute:
     <<: *clotho-service
     build:
@@ -239,12 +239,37 @@ services:
       DAYTONA_TARGET: ${DAYTONA_TARGET:-}
       DAYTONA_ORGANIZATION_ID: ${DAYTONA_ORGANIZATION_ID:-}
       CLOTHO_COMPUTE_SNAPSHOT: ${CLOTHO_COMPUTE_SNAPSHOT:-}
-      # Optional ComputeSDK sidecar URL (services/compute-sdk-bridge); empty = unconfigured.
-      CLOTHO_COMPUTE_SDK_BRIDGE_URL: ${CLOTHO_COMPUTE_SDK_BRIDGE_URL:-}
+      # In-cluster default (profile `compute-bridge`). Probe fails cleanly when
+      # the sidecar is not running — never marks configured without upstream keys.
+      CLOTHO_COMPUTE_SDK_BRIDGE_URL: ${CLOTHO_COMPUTE_SDK_BRIDGE_URL:-http://clotho-compute-sdk-bridge:8091}
       BOX_API_KEY: ${BOX_API_KEY:-}
       BOX_API_URL: ${BOX_API_URL:-}
     ports:
       - "50057:50057"
+
+  # Optional ComputeSDK TypeScript sidecar (Stage 14). Start with:
+  #   just dev-compute-bridge
+  # or: docker compose -f docker-compose.dev.yml --profile compute-bridge up -d clotho-compute-sdk-bridge
+  # Upstream keys: Clotho secrets (injected per job) and/or env below.
+  clotho-compute-sdk-bridge:
+    profiles: ["compute-bridge"]
+    image: node:22-alpine
+    working_dir: /app
+    command: ["node", "src/server.mjs"]
+    environment:
+      PORT: "8091"
+      CLOTHO_COMPUTE_SDK_STRATEGY: ${CLOTHO_COMPUTE_SDK_STRATEGY:-priority}
+      CLOTHO_COMPUTE_SDK_FALLBACK: ${CLOTHO_COMPUTE_SDK_FALLBACK:-true}
+      # Dev escape hatch only — prefer Clotho Settings → Compute for E2B/Modal keys.
+      E2B_API_KEY: ${E2B_API_KEY:-}
+      MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
+      MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:-}
+      DAYTONA_API_KEY: ${DAYTONA_API_KEY:-}
+    volumes:
+      - ./services/compute-sdk-bridge:/app:ro
+    ports:
+      - "8091:8091"
+    restart: unless-stopped
 
   clotho-api-gateway:
     <<: *clotho-service
@@ -276,7 +301,9 @@ services:
       CLOTHO_COMPUTE_SNAPSHOT: ${CLOTHO_COMPUTE_SNAPSHOT:-}
       CLOTHO_ACTIONS_TIMEOUT_SECONDS: ${CLOTHO_ACTIONS_TIMEOUT_SECONDS:-900}
       CLOTHO_DAYTONA_CONFIGURED: ${DAYTONA_API_KEY:+true}
-      CLOTHO_COMPUTE_SDK_BRIDGE_URL: ${CLOTHO_COMPUTE_SDK_BRIDGE_URL:-}
+      # Prefer in-cluster bridge when the compute-bridge profile is running.
+      CLOTHO_COMPUTE_SDK_BRIDGE_URL: ${CLOTHO_COMPUTE_SDK_BRIDGE_URL:-http://clotho-compute-sdk-bridge:8091}
+      CLOTHO_BOX_CONFIGURED: ${BOX_API_KEY:+true}
       CLOTHO_WEBHOOK_URL: http://clotho-api-gateway:8080/api/v1/webhooks/forgejo
       CLOTHO_WEBHOOK_SECRET: ${CLOTHO_WEBHOOK_SECRET:-clotho-webhook-dev}
       CLOTHO_WEB_URL: ${CLOTHO_WEB_URL:-http://localhost:3100}

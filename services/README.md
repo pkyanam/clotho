@@ -4,4 +4,4 @@ Long-lived sidecars that are **not** part of the default `just dev` Rust stack.
 
 | Service | Purpose |
 |---|---|
-| [`compute-sdk-bridge`](./compute-sdk-bridge/) | TypeScript HTTP bridge for ComputeSDK behind the CCI (docs/adr/0013). Disabled unless `CLOTHO_COMPUTE_SDK_BRIDGE_URL` points at it. |
+| [`compute-sdk-bridge`](./compute-sdk-bridge/) | TypeScript HTTP bridge for ComputeSDK behind the CCI (docs/adr/0013). Optional compose profile `compute-bridge` / `just dev-compute-bridge`. Configured only when upstream keys exist (env or Clotho secrets per job). |

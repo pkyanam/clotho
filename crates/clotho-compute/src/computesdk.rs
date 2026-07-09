@@ -5,9 +5,15 @@
 //! sidecar (`services/compute-sdk-bridge`) that may host ComputeSDK provider
 //! packages (docs/adr/0013). Without the URL the provider is registered as
 //! unconfigured so multi-provider listing stays honest.
+//!
+//! **Configured means jobs can run:** URL alone is not enough. We probe
+//! `/health` (live descriptor / job path) and also accept per-job upstream
+//! credentials from Clotho secrets (`e2b_api_key`, `modal_token_id`, …)
+//! forwarded in the job body so the bridge need not hold only host env keys.
 
 use async_trait::async_trait;
 use serde::Deserialize;
+use std::sync::Mutex;
 
 use crate::{
     ComputeError, ComputeProvider, JobResult, JobSpec, ProviderCapabilities, ProviderDescriptor,
@@ -17,12 +23,21 @@ use crate::{
 const PROVIDER_ID: &str = "computesdk";
 const DEFAULT_TIMEOUT_SECS: u32 = 900;
 
+#[derive(Clone, Debug)]
+struct HealthSnapshot {
+    configured: bool,
+    message: String,
+    providers: Vec<String>,
+}
+
 pub struct ComputeSdkBridgeProvider {
     /// Base URL of the sidecar, e.g. `http://clotho-compute-sdk-bridge:8091`.
     bridge_url: Option<String>,
     http: reqwest::Client,
     /// Cached non-secret reason when unconfigured.
     reason: String,
+    /// Last health probe (updated by live_descriptor / run_job).
+    last_health: Mutex<Option<HealthSnapshot>>,
 }
 
 impl ComputeSdkBridgeProvider {
@@ -45,6 +60,7 @@ impl ComputeSdkBridgeProvider {
                 .build()
                 .expect("reqwest client"),
             reason: String::new(),
+            last_health: Mutex::new(None),
         }
     }
 
@@ -52,55 +68,128 @@ impl ComputeSdkBridgeProvider {
         Self {
             bridge_url: None,
             http: reqwest::Client::new(),
-            reason: "CLOTHO_COMPUTE_SDK_BRIDGE_URL not set; ComputeSDK bridge disabled".into(),
+            reason:
+                "ComputeSDK bridge not running — start with `just dev-compute-bridge` or set CLOTHO_COMPUTE_SDK_BRIDGE_URL"
+                    .into(),
+            last_health: Mutex::new(None),
         }
     }
 
     fn provider(err: impl std::fmt::Display) -> ComputeError {
         ComputeError::Provider(err.to_string())
     }
-}
 
-#[derive(Debug, Deserialize)]
-struct BridgeHealth {
-    #[serde(default)]
-    configured: bool,
-    #[serde(default)]
-    message: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    providers: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct BridgeJobResponse {
-    exit_code: i32,
-    #[serde(default)]
-    logs: String,
-    #[serde(default)]
-    provider: String,
-    #[serde(default)]
-    sandbox_id: String,
-}
-
-#[async_trait]
-impl ComputeProvider for ComputeSdkBridgeProvider {
-    fn name(&self) -> &str {
-        PROVIDER_ID
+    /// Whether job credentials include at least one usable upstream key.
+    fn job_has_upstream_credentials(spec: &JobSpec) -> bool {
+        let c = &spec.provider_credentials;
+        let e2b = c
+            .get("e2b_api_key")
+            .or_else(|| c.get("E2B_API_KEY"))
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+        let modal = c
+            .get("modal_token_id")
+            .or_else(|| c.get("MODAL_TOKEN_ID"))
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+            && c.get("modal_token_secret")
+                .or_else(|| c.get("MODAL_TOKEN_SECRET"))
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+        let daytona = c
+            .get("daytona_api_key")
+            .or_else(|| c.get("DAYTONA_API_KEY"))
+            .or_else(|| c.get("api_key"))
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+        e2b || modal || daytona
     }
 
-    fn descriptor(&self) -> ProviderDescriptor {
+    async fn probe_health(&self, base: &str) -> Option<HealthSnapshot> {
+        let health_url = format!("{base}/health");
+        let resp = self.http.get(&health_url).send().await.ok()?;
+        let health: BridgeHealth = resp.json().await.ok()?;
+        Some(HealthSnapshot {
+            configured: health.configured,
+            message: health.message,
+            providers: health.providers,
+        })
+    }
+
+    fn credentials_for_bridge(spec: &JobSpec) -> serde_json::Map<String, serde_json::Value> {
+        let mut m = serde_json::Map::new();
+        let c = &spec.provider_credentials;
+        let put = |m: &mut serde_json::Map<String, serde_json::Value>, key: &str, val: &str| {
+            if !val.trim().is_empty() {
+                m.insert(key.into(), serde_json::Value::String(val.to_string()));
+            }
+        };
+        if let Some(v) = c.get("e2b_api_key").or_else(|| c.get("E2B_API_KEY")) {
+            put(&mut m, "e2b_api_key", v);
+        }
+        if let Some(v) = c.get("modal_token_id").or_else(|| c.get("MODAL_TOKEN_ID")) {
+            put(&mut m, "modal_token_id", v);
+        }
+        if let Some(v) = c
+            .get("modal_token_secret")
+            .or_else(|| c.get("MODAL_TOKEN_SECRET"))
+        {
+            put(&mut m, "modal_token_secret", v);
+        }
+        if let Some(v) = c
+            .get("daytona_api_key")
+            .or_else(|| c.get("DAYTONA_API_KEY"))
+            .or_else(|| c.get("api_key"))
+        {
+            put(&mut m, "daytona_api_key", v);
+        }
+        m
+    }
+
+    fn descriptor_from_state(&self) -> ProviderDescriptor {
         let (configured, reason, notes) = match &self.bridge_url {
             None => (
                 false,
                 self.reason.clone(),
                 "optional TypeScript sidecar wrapping ComputeSDK providers".to_string(),
             ),
-            Some(url) => (
-                true,
-                String::new(),
-                format!("ComputeSDK bridge at {url}; upstream provider keys stay in the sidecar"),
-            ),
+            Some(url) => {
+                let health = self.last_health.lock().ok().and_then(|g| g.clone());
+                match health {
+                    Some(h) if h.configured => (
+                        true,
+                        if h.providers.is_empty() {
+                            String::new()
+                        } else {
+                            format!("upstream: {}", h.providers.join(", "))
+                        },
+                        format!(
+                            "ComputeSDK bridge at {url}; upstream providers: {}",
+                            h.providers.join(", ")
+                        ),
+                    ),
+                    Some(h) => (
+                        false,
+                        if h.message.is_empty() {
+                            "bridge reachable but no upstream provider credentials".into()
+                        } else {
+                            h.message
+                        },
+                        format!(
+                            "ComputeSDK bridge at {url}; connect E2B/Modal keys in Clotho settings or on the bridge"
+                        ),
+                    ),
+                    None => (
+                        // Without a probe, do not claim configured — URL alone is not enough.
+                        false,
+                        "bridge URL set; upstream credentials not verified (connect E2B/Modal in settings or on the bridge)"
+                            .into(),
+                        format!(
+                            "ComputeSDK bridge at {url}; configured only when upstream keys exist"
+                        ),
+                    ),
+                }
+            }
         };
 
         ProviderDescriptor {
@@ -126,6 +215,56 @@ impl ComputeProvider for ComputeSdkBridgeProvider {
             notes,
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct BridgeHealth {
+    #[serde(default)]
+    configured: bool,
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    providers: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BridgeJobResponse {
+    exit_code: i32,
+    #[serde(default)]
+    logs: String,
+    #[serde(default)]
+    provider: String,
+    #[serde(default)]
+    sandbox_id: String,
+}
+
+#[async_trait]
+impl ComputeProvider for ComputeSdkBridgeProvider {
+    fn name(&self) -> &str {
+        PROVIDER_ID
+    }
+
+    fn descriptor(&self) -> ProviderDescriptor {
+        self.descriptor_from_state()
+    }
+
+    async fn live_descriptor(&self) -> ProviderDescriptor {
+        if let Some(base) = &self.bridge_url {
+            let snap = match self.probe_health(base).await {
+                Some(s) => s,
+                None => HealthSnapshot {
+                    configured: false,
+                    message: "ComputeSDK bridge unreachable — start with `just dev-compute-bridge`"
+                        .into(),
+                    providers: vec![],
+                },
+            };
+            if let Ok(mut g) = self.last_health.lock() {
+                *g = Some(snap);
+            }
+        }
+        self.descriptor_from_state()
+    }
 
     async fn run_job(&self, spec: JobSpec) -> Result<JobResult, ComputeError> {
         let Some(base) = &self.bridge_url else {
@@ -135,20 +274,24 @@ impl ComputeProvider for ComputeSdkBridgeProvider {
             return Err(ComputeError::Invalid("no commands".into()));
         }
 
-        // Best-effort health check so we fail with Disabled when the sidecar
-        // has no upstream providers configured.
-        let health_url = format!("{base}/health");
-        if let Ok(resp) = self.http.get(&health_url).send().await {
-            if let Ok(health) = resp.json::<BridgeHealth>().await {
-                if !health.configured {
-                    let msg = if health.message.is_empty() {
-                        "ComputeSDK bridge has no configured upstream providers".into()
-                    } else {
-                        health.message
-                    };
-                    return Err(ComputeError::Disabled(msg));
-                }
+        let job_creds = Self::job_has_upstream_credentials(&spec);
+        if let Some(snap) = self.probe_health(base).await {
+            if let Ok(mut g) = self.last_health.lock() {
+                *g = Some(snap.clone());
             }
+            if !snap.configured && !job_creds {
+                let msg = if snap.message.is_empty() {
+                    "ComputeSDK bridge has no configured upstream providers — connect E2B/Modal in Clotho settings"
+                        .into()
+                } else {
+                    snap.message
+                };
+                return Err(ComputeError::Disabled(msg));
+            }
+        } else if !job_creds {
+            return Err(ComputeError::Disabled(
+                "ComputeSDK bridge unreachable and no per-job upstream credentials".into(),
+            ));
         }
 
         let timeout = if spec.timeout_secs == 0 {
@@ -168,7 +311,8 @@ impl ComputeProvider for ComputeSdkBridgeProvider {
             })
             .collect();
 
-        let body = serde_json::json!({
+        let creds = Self::credentials_for_bridge(&spec);
+        let mut body = serde_json::json!({
             "label": spec.label,
             "snapshot": spec.snapshot,
             "commands": spec.commands,
@@ -176,6 +320,9 @@ impl ComputeProvider for ComputeSdkBridgeProvider {
             "timeout_secs": timeout,
             "files": files,
         });
+        if !creds.is_empty() {
+            body["credentials"] = serde_json::Value::Object(creds);
+        }
 
         let url = format!("{base}/jobs");
         let resp = self
@@ -188,6 +335,12 @@ impl ComputeProvider for ComputeSdkBridgeProvider {
         let status = resp.status();
         let text = resp.text().await.map_err(Self::provider)?;
         if !status.is_success() {
+            // Map 503 (unconfigured) to Disabled for honest FAILED_PRECONDITION.
+            if status.as_u16() == 503 {
+                return Err(ComputeError::Disabled(format!(
+                    "computesdk bridge: {text}"
+                )));
+            }
             return Err(ComputeError::Provider(format!(
                 "computesdk bridge job: {status}: {text}"
             )));
@@ -242,6 +395,7 @@ mod tests {
     async fn unconfigured_bridge_fails_cleanly() {
         let p = ComputeSdkBridgeProvider::unconfigured();
         assert!(!p.descriptor().configured);
+        assert!(!p.live_descriptor().await.configured);
         let err = p
             .run_job(JobSpec {
                 commands: vec!["true".into()],
@@ -250,5 +404,13 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ComputeError::Disabled(_)));
+    }
+
+    #[tokio::test]
+    async fn url_only_does_not_claim_configured_without_health() {
+        let p = ComputeSdkBridgeProvider::with_url("http://127.0.0.1:1");
+        // No successful probe yet — must not lie.
+        assert!(!p.descriptor().configured);
+        assert!(p.descriptor().configured_reason.contains("upstream"));
     }
 }
