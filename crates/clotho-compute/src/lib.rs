@@ -55,6 +55,9 @@ pub struct JobSpec {
     pub timeout_secs: u32,
     /// Preferred registry provider id; empty lets the registry route.
     pub provider_id: String,
+    /// Per-job credentials resolved by the api-gateway from Clotho secrets
+    /// (docs/adr/0014). Common key: `api_key`. Prefer over process env.
+    pub provider_credentials: HashMap<String, String>,
 }
 
 /// The result of a finished job (the sandbox is already torn down).
@@ -290,13 +293,9 @@ pub fn registry_from_env() -> ProviderRegistry {
         return ProviderRegistry::new(providers, "disabled");
     }
 
-    match DaytonaProvider::from_env() {
-        Some(p) => providers.push(std::sync::Arc::new(p)),
-        None => providers.push(std::sync::Arc::new(DisabledProvider::with_id(
-            "daytona",
-            "DAYTONA_API_KEY not set; set it (in .env) to enable Daytona compute",
-        ))),
-    }
+    // Always register Daytona so per-job credentials from Clotho secrets work
+    // even when process env is empty (docs/adr/0014).
+    providers.push(std::sync::Arc::new(DaytonaProvider::from_env_or_unconfigured()));
 
     // Optional ComputeSDK bridge (docs/adr/0013): registered whenever the
     // bridge URL is set so operators can see configured state; jobs fail

@@ -32,6 +32,7 @@ const START_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// Default per-command timeout when a job doesn't set one (CI can be slow).
 const DEFAULT_CMD_TIMEOUT_SECS: u32 = 900;
 
+#[derive(Clone)]
 pub struct DaytonaConfig {
     pub api_key: String,
     /// Control-plane base, e.g. `https://app.daytona.io/api`.
@@ -54,26 +55,41 @@ pub struct DaytonaProvider {
 impl DaytonaProvider {
     /// Build a provider from the environment, or `None` when `DAYTONA_API_KEY`
     /// is unset (so the service can fall back to the disabled provider without
-    /// a credential — docs/adr/0008).
+    /// a credential — docs/adr/0008). Prefer [`Self::from_env_or_unconfigured`]
+    /// so Clotho secrets can supply per-job keys (docs/adr/0014).
     pub fn from_env() -> Option<Self> {
         let api_key = std::env::var("DAYTONA_API_KEY")
             .ok()
             .filter(|k| !k.is_empty())?;
+        Some(Self::from_key(api_key))
+    }
+
+    /// Always construct a Daytona provider. When env key is empty the provider
+    /// is listed as unconfigured but can still run jobs that carry
+    /// `provider_credentials.api_key` from the api-gateway secrets store.
+    pub fn from_env_or_unconfigured() -> Self {
+        let api_key = std::env::var("DAYTONA_API_KEY")
+            .ok()
+            .filter(|k| !k.is_empty())
+            .unwrap_or_default();
+        Self::from_key(api_key)
+    }
+
+    fn from_key(api_key: String) -> Self {
         let env_or = |name: &str, default: &str| {
             std::env::var(name)
                 .ok()
                 .filter(|v| !v.is_empty())
                 .unwrap_or_else(|| default.to_string())
         };
-        let config = DaytonaConfig {
+        Self::new(DaytonaConfig {
             api_key,
             api_url: env_or("DAYTONA_API_URL", DEFAULT_API_URL),
             proxy_url: env_or("DAYTONA_PROXY_URL", DEFAULT_PROXY_URL),
             default_snapshot: env_or("CLOTHO_COMPUTE_SNAPSHOT", DEFAULT_SNAPSHOT),
             target: std::env::var("DAYTONA_TARGET").unwrap_or_default(),
             organization_id: std::env::var("DAYTONA_ORGANIZATION_ID").unwrap_or_default(),
-        };
-        Some(Self::new(config))
+        })
     }
 
     pub fn new(config: DaytonaConfig) -> Self {
@@ -93,12 +109,39 @@ impl DaytonaProvider {
         }
     }
 
-    fn auth(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        let mut b = builder.bearer_auth(&self.config.api_key);
+    /// Prefer per-job credential from Clotho secrets over process env.
+    fn resolve_api_key(&self, spec: &crate::JobSpec) -> Result<String, ComputeError> {
+        if let Some(key) = spec
+            .provider_credentials
+            .get("api_key")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            return Ok(key.to_string());
+        }
+        if !self.config.api_key.is_empty() {
+            return Ok(self.config.api_key.clone());
+        }
+        Err(ComputeError::Disabled(
+            "Daytona is not connected — add an API key in Clotho settings (compute), or set DAYTONA_API_KEY for local dev"
+                .into(),
+        ))
+    }
+
+    fn auth_with_key(
+        &self,
+        builder: reqwest::RequestBuilder,
+        api_key: &str,
+    ) -> reqwest::RequestBuilder {
+        let mut b = builder.bearer_auth(api_key);
         if !self.config.organization_id.is_empty() {
             b = b.header("X-Daytona-Organization-ID", &self.config.organization_id);
         }
         b
+    }
+
+    fn auth(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        self.auth_with_key(builder, &self.config.api_key)
     }
 
     fn provider(err: impl std::fmt::Display) -> ComputeError {
@@ -293,12 +336,18 @@ impl ComputeProvider for DaytonaProvider {
         if !self.config.target.is_empty() {
             regions.push(self.config.target.clone());
         }
+        let configured = !self.config.api_key.is_empty();
         ProviderDescriptor {
             id: "daytona".into(),
             name: "Daytona".into(),
             kind: ProviderKind::Direct,
-            configured: true,
-            configured_reason: String::new(),
+            configured,
+            configured_reason: if configured {
+                String::new()
+            } else {
+                "not connected — add an API key in Clotho settings or set DAYTONA_API_KEY for local dev"
+                    .into()
+            },
             capabilities: ProviderCapabilities {
                 one_shot_jobs: true,
                 persistent_workspaces: true,
@@ -313,7 +362,7 @@ impl ComputeProvider for DaytonaProvider {
                 cost_hints: "Daytona cloud sandbox (API-key billed)".into(),
             },
             default_snapshot: self.config.default_snapshot.clone(),
-            notes: "direct Rust provider against Daytona control plane + toolbox proxy".into(),
+            notes: "direct Rust provider; credentials from Clotho secrets or process env".into(),
         }
     }
 
@@ -321,8 +370,20 @@ impl ComputeProvider for DaytonaProvider {
         if spec.commands.is_empty() {
             return Err(ComputeError::Invalid("no commands".into()));
         }
+        // Per-job key from api-gateway secrets overrides process env (docs/adr/0014).
+        let api_key = self.resolve_api_key(&spec)?;
+        let runner = if api_key == self.config.api_key {
+            None
+        } else {
+            Some(Self::new(DaytonaConfig {
+                api_key,
+                ..self.config.clone()
+            }))
+        };
+        let this = runner.as_ref().unwrap_or(self);
+
         let snapshot = if spec.snapshot.is_empty() {
-            self.config.default_snapshot.clone()
+            this.config.default_snapshot.clone()
         } else {
             spec.snapshot.clone()
         };
@@ -333,10 +394,10 @@ impl ComputeProvider for DaytonaProvider {
         };
 
         tracing::info!(job = %spec.label, %snapshot, "creating daytona sandbox");
-        let id = self.create_sandbox(&snapshot).await?;
+        let id = this.create_sandbox(&snapshot).await?;
         // From here on always tear the sandbox down.
-        let result = self.run_on_sandbox(&id, &spec, timeout).await;
-        self.delete_sandbox(&id).await;
+        let result = this.run_on_sandbox(&id, &spec, timeout).await;
+        this.delete_sandbox(&id).await;
         let (exit_code, logs) = result?;
 
         Ok(JobResult {

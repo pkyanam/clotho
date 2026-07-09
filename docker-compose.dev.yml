@@ -252,6 +252,8 @@ services:
       RUST_LOG: info
       CLOTHO_GATEWAY_HTTP_ADDR: 0.0.0.0:8080
       CLOTHO_GATEWAY_DATABASE_URL: postgres://clotho:clotho-dev@postgres:5432/clotho
+      # Stage 13 secrets seal key (docs/adr/0014). Generate with openssl rand -hex 32.
+      CLOTHO_SECRETS_MASTER_KEY: ${CLOTHO_SECRETS_MASTER_KEY:-}
       CLOTHO_VCS_GRPC_URL: http://clotho-vcs:50051
       CLOTHO_DIFF_GRPC_URL: http://clotho-diff:50055
       CLOTHO_MERGE_QUEUE_GRPC_URL: http://clotho-merge-queue:50053

@@ -51,6 +51,10 @@ message RunJobRequest {
   // Registry provider id (e.g. "daytona"). Empty → registry default routing
   // for one-shot jobs (docs/adr/0013).
   string provider_id = 7;
+  // Optional per-job provider credentials resolved by the api-gateway from
+  // the Clotho secrets store (docs/adr/0014). Never logged. Common keys:
+  // "api_key". Process env remains a dev escape hatch when this is empty.
+  map<string, string> provider_credentials = 8;
 }
 
 message RunJobResponse {

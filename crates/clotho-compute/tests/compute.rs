@@ -92,6 +92,7 @@ async fn daytona_runs_a_real_job_and_reports_exit_and_logs() {
         env,
         timeout_secs: 120,
         provider_id: String::new(),
+        provider_credentials: Default::default(),
     };
     let result = provider.run_job(spec).await.expect("daytona job runs");
     assert_eq!(result.provider, "daytona");

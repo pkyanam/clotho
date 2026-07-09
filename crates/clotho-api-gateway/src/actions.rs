@@ -717,12 +717,40 @@ pub async fn provider(
 }
 
 pub async fn list_providers_for(state: &AppState) -> ComputeProviderListResponse {
-    match fetch_providers_from_compute(state).await {
+    let mut list = match fetch_providers_from_compute(state).await {
         Ok(list) if !list.providers.is_empty() => list,
         Ok(_) => fallback_providers(state),
         Err(e) => {
             tracing::warn!(error = %e, "compute ListProviders failed; using env fallback");
             fallback_providers(state)
+        }
+    };
+    // Overlay Clotho-stored secrets so settings show Configured without env keys.
+    overlay_secret_configured(state, &mut list).await;
+    list
+}
+
+/// Mark providers as configured when a Clotho secret is present (docs/adr/0014).
+async fn overlay_secret_configured(state: &AppState, list: &mut ComputeProviderListResponse) {
+    for p in &mut list.providers {
+        if p.configured {
+            continue;
+        }
+        if let Some(meta) = crate::secrets::provider_secret_configured(state, &p.id).await {
+            p.configured = true;
+            p.configured_reason = if meta.value_last4.is_empty() {
+                "connected via Clotho secret".into()
+            } else {
+                format!("connected · ···{}", meta.value_last4)
+            };
+            if !p.notes.contains("Clotho secret") {
+                p.notes = format!(
+                    "{}; credentials from Clotho secrets store",
+                    p.notes.trim_end_matches(';')
+                )
+                .trim_start_matches("; ")
+                .to_string();
+            }
         }
     }
 }
@@ -808,7 +836,7 @@ fn fallback_providers(state: &AppState) -> ComputeProviderListResponse {
             "direct",
             &default,
             state.actions.defaults.is_configured("daytona"),
-            "DAYTONA_API_KEY not set",
+            "not connected — add credentials in Clotho settings",
             ProviderCapabilitiesJson {
                 one_shot_jobs: true,
                 persistent_workspaces: true,
@@ -831,7 +859,7 @@ fn fallback_providers(state: &AppState) -> ComputeProviderListResponse {
             "bridge",
             &default,
             state.actions.defaults.is_configured("computesdk"),
-            "CLOTHO_COMPUTE_SDK_BRIDGE_URL not set",
+            "bridge URL not configured",
             ProviderCapabilitiesJson {
                 one_shot_jobs: true,
                 persistent_workspaces: false,

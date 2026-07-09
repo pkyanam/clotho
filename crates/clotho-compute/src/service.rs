@@ -90,6 +90,7 @@ impl Compute for ComputeService {
             env: req.env,
             timeout_secs: req.timeout_secs,
             provider_id: req.provider_id,
+            provider_credentials: req.provider_credentials,
         };
         let label = spec.label.clone();
         let requested = spec.provider_id.clone();

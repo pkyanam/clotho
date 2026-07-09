@@ -359,6 +359,23 @@ pub async fn create_org(
     })
 }
 
+/// Fetch an org by name or id; 404 if missing.
+pub async fn get_org(pool: &PgPool, org: &str) -> Result<Org, ApiError> {
+    sqlx::query_as::<_, Org>("select * from orgs where name = $1 or id = $1")
+        .bind(org)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| ApiError::Internal(format!("get org: {e}")))?
+        .ok_or_else(|| ApiError::NotFound(format!("org {org:?} not found")))
+}
+
+/// Fetch a Clotho repo by unique name; 404 if missing.
+pub async fn get_repo_by_name(pool: &PgPool, name: &str) -> Result<Repo, ApiError> {
+    let row = get_repo_with_org(pool, name).await?;
+    row.map(|r| r.repo)
+        .ok_or_else(|| ApiError::NotFound(format!("repo {name:?} not found")))
+}
+
 pub async fn get_org_with_members(
     pool: &PgPool,
     org: &str,

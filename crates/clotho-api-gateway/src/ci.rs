@@ -179,6 +179,19 @@ async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<CiOutput, St
     };
     let timeout_secs = config.timeout_seconds;
 
+    // Resolve provider credentials from Clotho secrets (docs/adr/0014).
+    // Env-backed keys on clotho-compute remain a dev escape hatch.
+    let mut provider_credentials = std::collections::HashMap::new();
+    match crate::secrets::resolve_provider_api_key(state, repo, &provider_id).await {
+        Ok(Some(api_key)) => {
+            provider_credentials.insert("api_key".into(), api_key);
+        }
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!(%repo, error = %e, "secret resolve failed; relying on compute env");
+        }
+    }
+
     let script = ci_script(repo, &checkout);
     let job = RunJobRequest {
         label: format!("{repo}@{}", checkout.get(..12).unwrap_or(&checkout)),
@@ -191,6 +204,7 @@ async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<CiOutput, St
         env: Default::default(),
         timeout_secs,
         provider_id,
+        provider_credentials,
     };
     let result = state
         .compute

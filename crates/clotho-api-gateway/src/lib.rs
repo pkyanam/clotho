@@ -22,6 +22,7 @@ pub mod forgejo;
 mod issues;
 mod pulls;
 mod repos;
+mod secrets;
 mod status;
 mod webhooks;
 
@@ -106,6 +107,9 @@ pub(crate) struct AppState {
     pub(crate) pool: Option<sqlx::PgPool>,
     /// Deterministic Stage 11 bootstrap identity.
     pub(crate) bootstrap: control::Bootstrap,
+    /// AES-256-GCM master key for secrets at rest (docs/adr/0014). None when
+    /// CLOTHO_SECRETS_MASTER_KEY is unset — list still works; write/resolve fail clearly.
+    pub(crate) secrets_crypto: Option<secrets::SecretsCrypto>,
 }
 
 /// Connect to Postgres and run the embedded gateway migrations.
@@ -150,6 +154,13 @@ pub fn router_with_pool(
         Some(ref p) => actions::ActionsState::with_pool(actions_defaults, p.clone()),
         None => actions::ActionsState::new(actions_defaults),
     };
+    let secrets_crypto = secrets::SecretsCrypto::from_env()
+        .map_err(|e| clotho_common::Error::Config(e))?;
+    if secrets_crypto.is_none() {
+        tracing::warn!(
+            "CLOTHO_SECRETS_MASTER_KEY unset — secret write/resolve disabled (docs/adr/0014)"
+        );
+    }
     let state = Arc::new(AppState {
         vcs: VcsClient::new(lazy_channel(&config.vcs_grpc_url, "vcs")?)
             // ExportRepoArchive returns the git object DB; lift the 4 MiB cap.
@@ -170,6 +181,7 @@ pub fn router_with_pool(
         actions,
         pool,
         bootstrap,
+        secrets_crypto,
     });
     Ok(Router::new()
         .route("/healthz", get(healthz))
@@ -268,6 +280,7 @@ pub fn router_with_pool(
         .route("/api/v1/webhooks/forgejo", post(webhooks::forgejo))
         // The read API is public in the prototype; the web app runs on a
         // different origin in dev (Next on :3100, gateway on :8080).
+        .merge(secrets::routes())
         .layer(CorsLayer::permissive())
         .with_state(state))
 }
