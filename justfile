@@ -22,11 +22,14 @@ dev-down:
     docker compose -f docker-compose.dev.yml down -v
 
 # Optional ComputeSDK bridge sidecar (docs/adr/0013).
-# Starts services/compute-sdk-bridge on :8091 via compose profile `compute-bridge`.
+# Starts services/compute-sdk-bridge on :8091 via compose profile `compute-bridge`,
+# and recreates clotho-compute so CLOTHO_COMPUTE_SDK_BRIDGE_URL is applied
+# (compose env is only picked up on create/recreate, not by starting the bridge alone).
 # Upstream keys: Clotho Settings → Compute (any ComputeSDK provider) or env.
 # Image uses pnpm only. Does not tear down volumes.
 dev-compute-bridge:
     docker compose -f docker-compose.dev.yml --profile compute-bridge up -d --build clotho-compute-sdk-bridge
+    docker compose -f docker-compose.dev.yml up -d clotho-compute
 
 # Host-run bridge with pnpm workspace (Node 20+).
 dev-compute-bridge-host:
