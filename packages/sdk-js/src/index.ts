@@ -1,11 +1,12 @@
 /**
  * @clotho/sdk-js — typed client for the Clotho API gateway.
  *
- * Hand-written against the gateway's REST surface (crates/clotho-api-gateway);
- * kept deliberately small and dependency-free. Generating this from an
- * OpenAPI spec is a possible future move once the surface stabilizes
- * (docs/adr/0007) — for the prototype the hand-written client is the source
- * of truth the web app compiles against.
+ * Hand-written against the gateway's REST surface (crates/clotho-api-gateway)
+ * and kept aligned with docs/openapi.yaml (Stage 15 product contract). CI
+ * checks OpenAPI path drift via clotho-api-gateway tests/openapi_drift.rs.
+ * Generating the SDK from OpenAPI remains a future hardening option
+ * (docs/adr/0007); for now the hand-written client is what the web app compiles
+ * against.
  */
 
 // ---------------------------------------------------------------------------
@@ -954,6 +955,12 @@ export class ClothoClient {
           description: options.description ?? "",
         }),
       },
+    );
+  }
+
+  getRepoSecret(repo: string, name: string): Promise<SecretMeta> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(repo)}/secrets/${encodeURIComponent(name)}`,
     );
   }
 

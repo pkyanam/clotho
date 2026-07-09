@@ -162,6 +162,29 @@ describe("ClothoClient", () => {
     );
   });
 
+  it("reads repo secret metadata without a raw value", async () => {
+    const meta = {
+      id: "s2",
+      scope: "repo",
+      name: "CI_TOKEN",
+      value_last4: "zz99",
+      description: "",
+      org_id: null,
+      repo_id: "weave",
+      created_by: "clotho",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const { client, fetchMock } = clientWith(jsonResponse(meta));
+    await expect(client.getRepoSecret("weave", "CI_TOKEN")).resolves.toEqual(
+      meta,
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://gateway.test/api/v1/repos/weave/secrets/CI_TOKEN",
+      undefined,
+    );
+  });
+
   it("connects a provider via the secrets convenience route", async () => {
     const { client, fetchMock } = clientWith(
       jsonResponse({ name: "DAYTONA_API_KEY", value_last4: "abcd" }),

@@ -10,6 +10,7 @@
 pub mod admin;
 pub mod identity;
 pub mod mcp;
+pub mod rest;
 
 use std::sync::Arc;
 
@@ -28,6 +29,7 @@ use tonic::transport::Channel;
 use crate::admin::AdminState;
 use crate::identity::{sha256, IdentityStore};
 use crate::mcp::AgentGateway;
+use crate::rest::RestClient;
 
 /// Path the MCP endpoint is served on.
 pub const MCP_PATH: &str = "/mcp";
@@ -42,6 +44,9 @@ pub struct GatewayConfig {
     pub diff_grpc_url: String,
     /// clotho-merge-queue gRPC endpoint, e.g. `http://clotho-merge-queue:50053`.
     pub merge_queue_grpc_url: String,
+    /// Clotho API gateway REST base URL for Stage 15 collab/Actions tools.
+    /// e.g. `http://clotho-api-gateway:8080` in compose, `http://localhost:8080` locally.
+    pub api_url: String,
     /// Bearer token guarding the admin surface (create agents, mint tokens).
     pub admin_token: String,
 }
@@ -76,10 +81,12 @@ pub fn router(config: &GatewayConfig, pool: sqlx::PgPool) -> Result<Router, clot
             .connect_lazy())
     };
     let identity = IdentityStore::new(pool);
+    let rest = RestClient::new(&config.api_url);
     let gateway = AgentGateway::new(
         lazy_channel(&config.vcs_grpc_url)?,
         lazy_channel(&config.diff_grpc_url)?,
         lazy_channel(&config.merge_queue_grpc_url)?,
+        rest,
         identity.clone(),
     );
 

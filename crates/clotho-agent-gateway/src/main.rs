@@ -35,6 +35,7 @@ async fn main() -> Result<(), Error> {
         vcs_grpc_url: env_or("CLOTHO_VCS_GRPC_URL", "http://localhost:50051"),
         diff_grpc_url: env_or("CLOTHO_DIFF_GRPC_URL", "http://localhost:50055"),
         merge_queue_grpc_url: env_or("CLOTHO_MERGE_QUEUE_GRPC_URL", "http://localhost:50053"),
+        api_url: env_or("CLOTHO_API_URL", "http://localhost:8080"),
         admin_token,
     };
 

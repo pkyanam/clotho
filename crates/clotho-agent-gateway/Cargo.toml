@@ -13,6 +13,7 @@ chrono.workspace = true
 clotho-common.workspace = true
 http.workspace = true
 rand.workspace = true
+reqwest.workspace = true
 rmcp.workspace = true
 schemars.workspace = true
 serde.workspace = true
@@ -27,4 +28,3 @@ uuid.workspace = true
 
 [dev-dependencies]
 rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
-reqwest.workspace = true

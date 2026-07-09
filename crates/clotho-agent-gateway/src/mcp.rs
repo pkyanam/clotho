@@ -1,6 +1,6 @@
-//! The MCP tool surface: `checkpoint`, `restore_to`, `diff_symbol`,
-//! `orient_repo`, `commit`, and `submit_change` — backed by Clotho services
-//! over gRPC, guarded by scoped agent tokens, with every invocation audited.
+//! The MCP tool surface: VCS tools over gRPC plus Stage 15 collab/Actions/
+//! platform tools over the api-gateway REST edge — guarded by scoped agent
+//! tokens, with every invocation audited.
 
 use clotho_common::pb::diff::v1::diff_client::DiffClient;
 use clotho_common::pb::diff::v1::{ChangeStatus, DiffFilesRequest, FileDiffInput};
@@ -21,6 +21,7 @@ use serde_json::{json, Value};
 use tonic::transport::Channel;
 
 use crate::identity::{sha256, AuthedAgent, IdentityStore};
+use crate::rest::RestClient;
 
 /// Errors a tool body can produce: upstream gRPC failures (mapped to plain
 /// MCP internal/invalid-params errors) or already-shaped MCP errors. Local
@@ -128,21 +129,146 @@ pub struct SubmitChangeParams {
     pub commit_id: String,
 }
 
+// ---------------------------------------------------------------------------
+// Stage 15 collab / Actions / platform params (REST-backed)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct ListIssuesParams {
+    pub repo: String,
+    /// open | closed | all (default open)
+    pub state: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct CreateIssueParams {
+    pub repo: String,
+    pub title: String,
+    pub body: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct CommentIssueParams {
+    pub repo: String,
+    pub number: i64,
+    pub body: String,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct ListPullsParams {
+    pub repo: String,
+    /// open | closed | all (default all)
+    pub state: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct CreatePullParams {
+    pub repo: String,
+    pub title: String,
+    pub head: String,
+    pub base: Option<String>,
+    pub body: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct CommentPullParams {
+    pub repo: String,
+    pub number: i64,
+    pub body: String,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct ReviewPullParams {
+    pub repo: String,
+    pub number: i64,
+    /// COMMENT | APPROVE | REQUEST_CHANGES
+    pub event: Option<String>,
+    pub body: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct MergePullParams {
+    pub repo: String,
+    pub number: i64,
+    /// merge | rebase | rebase-merge | squash
+    pub method: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct ListActionRunsParams {
+    pub repo: String,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct StartActionRunParams {
+    pub repo: String,
+    pub commit_id: Option<String>,
+    pub branch: Option<String>,
+    pub actor: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct GetActionLogsParams {
+    pub repo: String,
+    pub run_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct ListProvidersParams {}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct ListReposParams {}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct GetActivityParams {
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct ListSecretsParams {
+    /// org or repo
+    pub scope: String,
+    /// Org name or repo name depending on scope.
+    pub name: String,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct GetTreeParams {
+    pub repo: String,
+    pub commit_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct GetFileParams {
+    pub repo: String,
+    pub path: String,
+    pub commit_id: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct AgentGateway {
     vcs: VcsClient<Channel>,
     diff: DiffClient<Channel>,
     queue: MergeQueueClient<Channel>,
+    rest: RestClient,
     identity: IdentityStore,
 }
 
 #[tool_router]
 impl AgentGateway {
-    pub fn new(vcs: Channel, diff: Channel, queue: Channel, identity: IdentityStore) -> Self {
+    pub fn new(
+        vcs: Channel,
+        diff: Channel,
+        queue: Channel,
+        rest: RestClient,
+        identity: IdentityStore,
+    ) -> Self {
         Self {
             vcs: VcsClient::new(vcs),
             diff: DiffClient::new(diff),
             queue: MergeQueueClient::new(queue),
+            rest,
             identity,
         }
     }
@@ -418,6 +544,390 @@ impl AgentGateway {
         })
         .await
     }
+
+    // -----------------------------------------------------------------------
+    // Stage 15: collab + Actions + platform (via REST edge)
+    // -----------------------------------------------------------------------
+
+    #[tool(description = "List issues on a repository (open|closed|all). Backed by the Clotho REST edge.")]
+    async fn list_issues(
+        &self,
+        Parameters(params): Parameters<ListIssuesParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "list_issues", &repo, args, async move {
+            let state = params.state.as_deref().unwrap_or("open");
+            rest.get(&format!(
+                "/api/v1/repos/{}/issues?state={state}",
+                urlencoding_path(&params.repo)
+            ))
+            .await
+        })
+        .await
+    }
+
+    #[tool(description = "Create an issue on a repository. Backed by the Clotho REST edge.")]
+    async fn create_issue(
+        &self,
+        Parameters(params): Parameters<CreateIssueParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "create_issue", &repo, args, async move {
+            rest.post(
+                &format!("/api/v1/repos/{}/issues", urlencoding_path(&params.repo)),
+                json!({
+                    "title": params.title,
+                    "body": params.body.unwrap_or_default(),
+                }),
+            )
+            .await
+        })
+        .await
+    }
+
+    #[tool(description = "Comment on an issue. Backed by the Clotho REST edge.")]
+    async fn comment_issue(
+        &self,
+        Parameters(params): Parameters<CommentIssueParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "comment_issue", &repo, args, async move {
+            rest.post(
+                &format!(
+                    "/api/v1/repos/{}/issues/{}/comments",
+                    urlencoding_path(&params.repo),
+                    params.number
+                ),
+                json!({ "body": params.body }),
+            )
+            .await
+        })
+        .await
+    }
+
+    #[tool(description = "List pull requests on a repository. Backed by the Clotho REST edge.")]
+    async fn list_pulls(
+        &self,
+        Parameters(params): Parameters<ListPullsParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "list_pulls", &repo, args, async move {
+            let state = params.state.as_deref().unwrap_or("all");
+            rest.get(&format!(
+                "/api/v1/repos/{}/pulls?state={state}",
+                urlencoding_path(&params.repo)
+            ))
+            .await
+        })
+        .await
+    }
+
+    #[tool(description = "Open a pull request. Backed by the Clotho REST edge.")]
+    async fn create_pull(
+        &self,
+        Parameters(params): Parameters<CreatePullParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "create_pull", &repo, args, async move {
+            rest.post(
+                &format!("/api/v1/repos/{}/pulls", urlencoding_path(&params.repo)),
+                json!({
+                    "title": params.title,
+                    "head": params.head,
+                    "base": params.base.unwrap_or_else(|| "main".into()),
+                    "body": params.body.unwrap_or_default(),
+                }),
+            )
+            .await
+        })
+        .await
+    }
+
+    #[tool(description = "Comment on a pull request. Backed by the Clotho REST edge.")]
+    async fn comment_pull(
+        &self,
+        Parameters(params): Parameters<CommentPullParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "comment_pull", &repo, args, async move {
+            rest.post(
+                &format!(
+                    "/api/v1/repos/{}/pulls/{}/comments",
+                    urlencoding_path(&params.repo),
+                    params.number
+                ),
+                json!({ "body": params.body }),
+            )
+            .await
+        })
+        .await
+    }
+
+    #[tool(
+        description = "Submit a PR review (COMMENT, APPROVE, or REQUEST_CHANGES). Backed by the Clotho REST edge."
+    )]
+    async fn review_pull(
+        &self,
+        Parameters(params): Parameters<ReviewPullParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "review_pull", &repo, args, async move {
+            rest.post(
+                &format!(
+                    "/api/v1/repos/{}/pulls/{}/reviews",
+                    urlencoding_path(&params.repo),
+                    params.number
+                ),
+                json!({
+                    "event": params.event.unwrap_or_else(|| "COMMENT".into()),
+                    "body": params.body.unwrap_or_default(),
+                }),
+            )
+            .await
+        })
+        .await
+    }
+
+    #[tool(description = "Merge a pull request. Backed by the Clotho REST edge.")]
+    async fn merge_pull(
+        &self,
+        Parameters(params): Parameters<MergePullParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "merge_pull", &repo, args, async move {
+            rest.post(
+                &format!(
+                    "/api/v1/repos/{}/pulls/{}/merge",
+                    urlencoding_path(&params.repo),
+                    params.number
+                ),
+                json!({
+                    "method": params.method.unwrap_or_else(|| "merge".into()),
+                }),
+            )
+            .await
+        })
+        .await
+    }
+
+    #[tool(description = "List Action runs for a repository. Backed by the Clotho REST edge.")]
+    async fn list_action_runs(
+        &self,
+        Parameters(params): Parameters<ListActionRunsParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "list_action_runs", &repo, args, async move {
+            let mut path = format!(
+                "/api/v1/repos/{}/actions/runs",
+                urlencoding_path(&params.repo)
+            );
+            if let Some(limit) = params.limit {
+                path.push_str(&format!("?limit={limit}"));
+            }
+            rest.get(&path).await
+        })
+        .await
+    }
+
+    #[tool(
+        description = "Start a manual Action run on a repository (uses main head when commit_id is omitted). Backed by the Clotho REST edge."
+    )]
+    async fn start_action_run(
+        &self,
+        Parameters(params): Parameters<StartActionRunParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "start_action_run", &repo, args, async move {
+            rest.post(
+                &format!(
+                    "/api/v1/repos/{}/actions/runs",
+                    urlencoding_path(&params.repo)
+                ),
+                json!({
+                    "commit_id": params.commit_id.unwrap_or_default(),
+                    "branch": params.branch.unwrap_or_else(|| "main".into()),
+                    "actor": params.actor.unwrap_or_else(|| "agent".into()),
+                }),
+            )
+            .await
+        })
+        .await
+    }
+
+    #[tool(description = "Fetch logs for an Action run. Backed by the Clotho REST edge.")]
+    async fn get_action_logs(
+        &self,
+        Parameters(params): Parameters<GetActionLogsParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "get_action_logs", &repo, args, async move {
+            rest.get(&format!(
+                "/api/v1/repos/{}/actions/runs/{}/logs",
+                urlencoding_path(&params.repo),
+                urlencoding_path(&params.run_id)
+            ))
+            .await
+        })
+        .await
+    }
+
+    #[tool(
+        description = "List compute providers and their configured/honest status. Platform tool (no repo scope). Backed by the Clotho REST edge."
+    )]
+    async fn list_providers(
+        &self,
+        Parameters(_params): Parameters<ListProvidersParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "list_providers", "", json!({}), async move {
+            rest.get("/api/v1/providers").await
+        })
+        .await
+    }
+
+    #[tool(
+        description = "List repositories visible on the Clotho control plane. Platform tool. Backed by the Clotho REST edge."
+    )]
+    async fn list_repos(
+        &self,
+        Parameters(_params): Parameters<ListReposParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "list_repos", "", json!({}), async move {
+            rest.get("/api/v1/repos").await
+        })
+        .await
+    }
+
+    #[tool(
+        description = "Read the global activity feed. Platform tool. Backed by the Clotho REST edge."
+    )]
+    async fn get_activity(
+        &self,
+        Parameters(params): Parameters<GetActivityParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "get_activity", "", args, async move {
+            let limit = params.limit.unwrap_or(20);
+            rest.get(&format!("/api/v1/activity?limit={limit}")).await
+        })
+        .await
+    }
+
+    #[tool(
+        description = "List secret metadata (name, last4, description) for an org or repo. Never returns secret values. Scope tool: uses repo name when scope=repo."
+    )]
+    async fn list_secrets(
+        &self,
+        Parameters(params): Parameters<ListSecretsParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let scope_repo = if params.scope == "repo" {
+            params.name.clone()
+        } else {
+            String::new()
+        };
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "list_secrets", &scope_repo, args, async move {
+            let path = match params.scope.as_str() {
+                "org" => format!("/api/v1/orgs/{}/secrets", urlencoding_path(&params.name)),
+                "repo" => format!("/api/v1/repos/{}/secrets", urlencoding_path(&params.name)),
+                other => {
+                    return Err(McpError::invalid_params(
+                        format!("scope must be org or repo, got {other:?}"),
+                        None,
+                    )
+                    .into());
+                }
+            };
+            rest.get(&path).await
+        })
+        .await
+    }
+
+    #[tool(description = "Get the file tree for a repository at a commit (default: main head). REST edge.")]
+    async fn get_tree(
+        &self,
+        Parameters(params): Parameters<GetTreeParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "get_tree", &repo, args, async move {
+            let mut path = format!("/api/v1/repos/{}/tree", urlencoding_path(&params.repo));
+            if let Some(cid) = params.commit_id.as_deref() {
+                if !cid.is_empty() {
+                    path.push_str(&format!("?commit_id={cid}"));
+                }
+            }
+            rest.get(&path).await
+        })
+        .await
+    }
+
+    #[tool(description = "Read a single file from a repository. REST edge.")]
+    async fn get_file(
+        &self,
+        Parameters(params): Parameters<GetFileParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
+        let repo = params.repo.clone();
+        let rest = self.rest.clone();
+        self.run_tool(&ctx, "get_file", &repo, args, async move {
+            let mut path = format!(
+                "/api/v1/repos/{}/file?path={}",
+                urlencoding_path(&params.repo),
+                urlencoding_query(&params.path)
+            );
+            if let Some(cid) = params.commit_id.as_deref() {
+                if !cid.is_empty() {
+                    path.push_str(&format!("&commit_id={cid}"));
+                }
+            }
+            rest.get(&path).await
+        })
+        .await
+    }
 }
 
 impl AgentGateway {
@@ -436,7 +946,10 @@ impl AgentGateway {
         let agent = authed_agent(ctx)?;
         let digest = sha256(args.to_string().as_bytes());
 
-        if !agent.may_use_tool(tool) || !agent.may_touch_repo(repo) {
+        // Empty repo = platform tool (list_providers, get_activity, …): only
+        // tool scope is checked. Non-empty repo still requires repo scope.
+        let repo_ok = repo.is_empty() || agent.may_touch_repo(repo);
+        if !agent.may_use_tool(tool) || !repo_ok {
             let denied = format!(
                 "agent {:?} is not authorized for tool {tool:?} on repo {repo:?}",
                 agent.name
@@ -502,14 +1015,49 @@ fn status_name(status: ChangeStatus) -> &'static str {
     }
 }
 
+/// Percent-encode a single path segment (repo names, run ids).
+fn urlencoding_path(s: &str) -> String {
+    // Minimal encode: keep unreserved; encode everything else.
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+fn urlencoding_query(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            b' ' => out.push_str("%20"),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 #[tool_handler]
 impl ServerHandler for AgentGateway {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Clotho agent gateway: version control tools for AI agents. Use orient_repo \
-             for situational awareness, checkpoint before risky work, restore_to to roll \
-             back, diff_symbol to see what changed at the symbol level, and commit then \
-             submit_change to land authored work through the merge queue.",
+            "Clotho agent gateway — VCS tools (gRPC) plus collab/Actions/platform tools \
+             (REST edge, same contract as humans and the web app).\n\
+             VCS: orient_repo, checkpoint, restore_to, diff_symbol, commit, submit_change.\n\
+             Collab: list_issues, create_issue, comment_issue, list_pulls, create_pull, \
+             comment_pull, review_pull, merge_pull.\n\
+             Actions: list_action_runs, start_action_run, get_action_logs.\n\
+             Platform: list_providers, list_repos, get_activity, list_secrets (metadata only).\n\
+             Read helpers: get_tree, get_file.\n\
+             Every tool is scoped by allowed_tools and (when repo-bound) allowed_repos; \
+             all invocations are audited.",
         )
     }
 }

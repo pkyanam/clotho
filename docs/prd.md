@@ -368,14 +368,14 @@ are first-class for every advertised provider — not only Daytona.
 Make REST the single product contract; every stable web capability must be
 reachable by humans (CLI) and agents (MCP) with the same semantics as the SDK.
 
-#### Current surface audit (2026-07-09) — start here
+#### Current surface audit (2026-07-09, updated Stage 15 slice) — start here
 
 | Surface | What exists today | Gaps |
 |---|---|---|
-| **REST** (`clotho-api-gateway`) | health; users/orgs/activity; repos CRUD-ish + tree/file/commits/oplog/submit; issues/PRs/comments/reviews/merge/diff; branches; statuses; Actions runs/logs/config; providers; agent-sessions; secrets (org/repo); provider connect; Forgejo webhook | No OpenAPI; no public `/sandboxes` session API; no agent admin via edge; no labels/milestones/assignees; no notifications; no signals; limited settings write; clone URL may still need a Clotho-public git endpoint |
-| **SDK** (`@clotho/sdk-js`) | Hand-written client covering most REST above + secrets/connect | Drift risk without OpenAPI; no sandbox session types; no agent mint/list; incomplete when new routes land |
-| **CLI** (`clotho`) | `init`, `status`, `log`, `commit`, `submit`, `pr` (list only) | Missing: issues, PR create/review/merge, Actions run/logs, providers, secrets, orgs, activity, agents, config; no JSON output mode; no auth story |
-| **MCP** (`clotho-agent-gateway`) | `orient_repo`, `checkpoint`, `restore_to`, `diff_symbol`, `commit`, `submit_change` | Missing: issues/PRs, Actions, logs, providers, secrets (scoped), activity/provenance query, list repos, tree/file read convenience, sandbox sessions; tools talk gRPC not REST (parity risk) |
+| **REST** (`clotho-api-gateway`) | health; users/orgs/activity; repos CRUD-ish + tree/file/commits/oplog/submit; issues/PRs/comments/reviews/merge/diff; branches; statuses; Actions runs/logs/config; providers; agent-sessions; secrets (org/repo); provider connect; Forgejo webhook; **OpenAPI at `/openapi.yaml` + `docs/openapi.yaml`** | No public `/sandboxes` session API; no agent admin via edge; no labels/milestones/assignees; no notifications; no signals; limited settings write; clone URL may still need a Clotho-public git endpoint |
+| **SDK** (`@clotho/sdk-js`) | Hand-written client covering most REST above + secrets/connect + getRepoSecret | No OpenAPI→TS codegen yet (path drift CI exists); no sandbox session types; no agent mint/list |
+| **CLI** (`clotho`) | Grouped `repo|issue|pr|actions|provider|secret|org|activity` + `--json`; Stage 8 aliases retained | No auth story yet; no agent mint CLI; recursive working-tree commit still later product work |
+| **MCP** (`clotho-agent-gateway`) | VCS tools (gRPC) + collab/Actions/platform/read helpers **via REST edge** | No sandbox sessions; secrets are list/metadata only (no write tools by design for agents in this slice); agent admin still separate REST |
 
 #### Stage 15 workstreams
 
@@ -427,6 +427,26 @@ reachable by humans (CLI) and agents (MCP) with the same semantics as the SDK.
    - An AI agent with a scoped token can perform the same loop via **MCP only**.
    - SDK tests cover every public method; OpenAPI (or equivalent) exists and is
      CI-checked; no feature is marked mature if it is web-only.
+
+#### Stage 15 implementation notes (2026-07-08)
+
+- **OpenAPI:** hand-maintained [`docs/openapi.yaml`](openapi.yaml) covers stable
+  `/api/v1/*` routes + error envelope; served at `GET /openapi.yaml`; path drift
+  checked by `crates/clotho-api-gateway/tests/openapi_drift.rs`.
+- **CLI:** regrouped into `repo|issue|pr|actions|provider|secret|org|activity`
+  with `--json` and Stage 8 aliases (`init`, `status`, `log`, `commit`, `submit`,
+  `pr <repo>`). Still REST-only (ADR-0010). Docs: [`docs/cli.md`](cli.md).
+- **MCP:** collab (`list_issues`, `create_issue`, `comment_issue`, `list_pulls`,
+  `create_pull`, `comment_pull`, `review_pull`, `merge_pull`), Actions
+  (`list_action_runs`, `start_action_run`, `get_action_logs`), platform
+  (`list_providers`, `list_repos`, `get_activity`, `list_secrets` metadata), and
+  read helpers (`get_tree`, `get_file`) call the **REST edge** via
+  `CLOTHO_API_URL`. VCS tools remain gRPC. Platform tools use empty repo scope.
+  Docs: [`docs/mcp.md`](mcp.md).
+- **SDK:** already covered the REST surface; added `getRepoSecret`; comments
+  point at OpenAPI as the contract. Docs: [`docs/api.md`](api.md).
+- **Not in this slice:** sandbox session API, agent admin via edge, OpenAPI→SDK
+  codegen, full Box/ComputeSDK honesty (Stage 14).
 
 ### Stage 16 — Discovery, Social, and Competitive UX *(was Stage 15)*
 - Add Clotho's GitHub Stars competitor as `Signals`: users/orgs can signal

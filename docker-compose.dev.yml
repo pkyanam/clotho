@@ -194,6 +194,8 @@ services:
       CLOTHO_VCS_GRPC_URL: http://clotho-vcs:50051
       CLOTHO_DIFF_GRPC_URL: http://clotho-diff:50055
       CLOTHO_MERGE_QUEUE_GRPC_URL: http://clotho-merge-queue:50053
+      # Stage 15: collab/Actions MCP tools call the REST edge (not gRPC).
+      CLOTHO_API_URL: http://clotho-api-gateway:8080
       CLOTHO_AGENT_HTTP_ADDR: 0.0.0.0:8090
       CLOTHO_AGENT_ADMIN_TOKEN: clotho-agent-admin-dev # dev-only credentials
     ports:
@@ -206,6 +208,8 @@ services:
         condition: service_started
       clotho-diff:
         condition: service_started
+      # No hard depends_on clotho-api-gateway: Stage 15 REST tools use a lazy
+      # HTTP client, and api-gateway already depends on this service (presence).
 
   clotho-diff:
     <<: *clotho-service
