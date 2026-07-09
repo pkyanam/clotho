@@ -53,7 +53,12 @@ pub async fn init_db(database_url: &str) -> Result<sqlx::PgPool, clotho_common::
         .connect(database_url)
         .await
         .map_err(|e| clotho_common::Error::Config(format!("postgres connect: {e}")))?;
-    sqlx::migrate!("./migrations")
+    // Share the `clotho` DB with clotho-api-gateway (Actions + control-plane
+    // migrations 1001/1002). Ignore versions we don't own so the shared
+    // `_sqlx_migrations` table does not break startup.
+    let mut migrator = sqlx::migrate!("./migrations");
+    migrator.set_ignore_missing(true);
+    migrator
         .run(&pool)
         .await
         .map_err(|e| clotho_common::Error::Config(format!("postgres migrate: {e}")))?;
