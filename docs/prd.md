@@ -306,6 +306,29 @@ Each stage lists a goal, key tasks, and an exit condition. Stages 1–2 can star
 - **Acceptance:** normal GitHub/GitLab repo workflows are possible from
   Clotho's web UI without Forgejo.
 
+#### Stage 13 implementation notes (2026-07-08)
+
+Shipped a console-quality web redesign plus first-class secrets:
+
+- **IA / shell:** `AppShell` global nav (dashboard, repos, agents, activity,
+  settings), mobile drawer, ⌘K command palette, settings hub.
+- **Craft:** larger body type (~15px), `PageFrame` / `PageTitle` / `EmptyState` /
+  `SettingsSection`, redesigned dashboard and repo overview; product copy only
+  (no Forgejo/internal host advertising); clone URLs sanitized to public hosts.
+- **Routes:** `/`, `/repos`, `/repos/new`, `/settings`, `/settings/compute`,
+  `/settings/secrets`, `/agents`, `/activity`, `/orgs`, `/orgs/[org]`; modular
+  repo settings (general, collaborators, secrets, actions, compute, danger).
+- **Secrets (docs/adr/0014):** Postgres table + AES-256-GCM seal
+  (`CLOTHO_SECRETS_MASTER_KEY`); REST at `/api/v1/orgs/{org}/secrets`,
+  `/api/v1/repos/{repo}/secrets`, `POST /api/v1/providers/{id}/connect`;
+  metadata-only responses; activity audit events; SDK parity.
+- **Compute wiring:** gateway resolves provider keys from secrets into CCI
+  `RunJob.provider_credentials`; Daytona accepts per-job keys when env empty;
+  provider list overlays Clotho-secret configured state. `.env.example`
+  documents bootstrap secrets; provider keys are secondary escape hatches.
+- **Deferred within Stage 13:** full issue/PR upgrade (labels/milestones/…),
+  notifications, branches/commits/releases pages, OpenAPI generation.
+
 ### Stage 14 — World-Class API / CLI / SDK / MCP Parity
 - Make REST the canonical public API first; every stable web feature must have
   an SDK method.

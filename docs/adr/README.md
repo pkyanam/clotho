@@ -18,3 +18,4 @@ Context → Decision → Consequences. Supersede rather than edit.
 | [0011](0011-clotho-collaboration-facade.md) | Clotho owns the collaboration facade | Accepted |
 | [0012](0012-actions-compute-control-plane.md) | Clotho owns Actions and the compute control plane | Accepted |
 | [0013](0013-compute-provider-registry.md) | Capability-aware provider registry; ComputeSDK TS sidecar behind CCI | Accepted |
+| [0014](0014-secrets-storage-and-resolution.md) | Secrets storage (encrypted Postgres) and compute credential resolution | Accepted |
