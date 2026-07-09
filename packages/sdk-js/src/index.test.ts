@@ -197,8 +197,26 @@ describe("ClothoClient", () => {
       "http://gateway.test/api/v1/providers/daytona/connect",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ api_key: "key-abcd", org: "clotho" }),
+        body: JSON.stringify({
+          api_key: "key-abcd",
+          org: "clotho",
+          upstream: "",
+          modal_token_id: "",
+          modal_token_secret: "",
+        }),
       }),
+    );
+  });
+
+  it("disconnects a provider via DELETE connect", async () => {
+    const { client, fetchMock } = clientWith(
+      jsonResponse({ provider: "daytona", deleted_secrets: ["DAYTONA_API_KEY"] }),
+    );
+    const res = await client.disconnectProvider("daytona", { org: "clotho" });
+    expect(res.deleted_secrets).toEqual(["DAYTONA_API_KEY"]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://gateway.test/api/v1/providers/daytona/connect?org=clotho",
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 

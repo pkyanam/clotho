@@ -52,7 +52,7 @@ curl -s http://localhost:8080/api/v1/providers | jq
 | Issues | `…/issues`, `…/issues/{n}/comments` |
 | Pulls | `…/pulls`, comments, reviews, merge, diff |
 | Actions | `…/actions/runs`, `…/logs`, `…/config` |
-| Providers | `/api/v1/providers`, `…/connect` |
+| Providers | `/api/v1/providers`, `…/connect` (POST connect / DELETE disconnect) |
 | Secrets | `/api/v1/orgs/{org}/secrets`, `/api/v1/repos/{repo}/secrets` |
 | Agents (presence) | `…/agent-sessions` |
 | Webhooks | `/api/v1/webhooks/forgejo` (internal) |

@@ -731,8 +731,61 @@ pub async fn list_providers_for(state: &AppState) -> ComputeProviderListResponse
 }
 
 /// Mark providers as configured when a Clotho secret is present (docs/adr/0014).
+///
+/// **Honest rule:** only mark configured when the secret path can actually run
+/// jobs. For ComputeSDK that also requires a bridge URL (env) so clotho-compute
+/// can reach the sidecar; secrets alone are not enough.
 async fn overlay_secret_configured(state: &AppState, list: &mut ComputeProviderListResponse) {
+    let bridge_url_set = std::env::var("CLOTHO_COMPUTE_SDK_BRIDGE_URL")
+        .map(|u| !u.trim().is_empty())
+        .unwrap_or(false);
+
     for p in &mut list.providers {
+        if p.id == "computesdk" {
+            let secrets_ready = crate::secrets::computesdk_secrets_ready(state).await;
+            if p.configured {
+                // Live bridge health already said ready (env keys on sidecar).
+                continue;
+            }
+            let bridge_down = p.configured_reason.to_lowercase().contains("unreachable")
+                || p.configured_reason.to_lowercase().contains("not running");
+            if bridge_down {
+                // Do not claim configured when the sidecar is down.
+                if secrets_ready {
+                    p.configured_reason = format!(
+                        "{}; upstream keys are stored in Clotho",
+                        p.configured_reason
+                    );
+                }
+                continue;
+            }
+            if secrets_ready && bridge_url_set {
+                // Bridge may report "no upstream" from process env while Clotho
+                // secrets will be injected per job — that is enough to run.
+                p.configured = true;
+                if let Some(meta) =
+                    crate::secrets::provider_secret_configured(state, "computesdk").await
+                {
+                    p.configured_reason = if meta.value_last4.is_empty() {
+                        "connected via Clotho secret".into()
+                    } else {
+                        format!("connected · ···{}", meta.value_last4)
+                    };
+                } else {
+                    p.configured_reason = "connected via Clotho secret".into();
+                }
+            } else if secrets_ready && !bridge_url_set {
+                p.configured = false;
+                p.configured_reason =
+                    "upstream keys stored; start the ComputeSDK bridge (`just dev-compute-bridge`)"
+                        .into();
+            } else if p.configured_reason.is_empty() {
+                p.configured_reason =
+                    "connect E2B or Modal keys in Clotho settings (and run the bridge)".into();
+            }
+            continue;
+        }
+
         if p.configured {
             continue;
         }
@@ -859,7 +912,7 @@ fn fallback_providers(state: &AppState) -> ComputeProviderListResponse {
             "bridge",
             &default,
             state.actions.defaults.is_configured("computesdk"),
-            "bridge URL not configured",
+            "bridge not ready — start with `just dev-compute-bridge` and connect upstream keys",
             ProviderCapabilitiesJson {
                 one_shot_jobs: true,
                 persistent_workspaces: false,
@@ -874,15 +927,15 @@ fn fallback_providers(state: &AppState) -> ComputeProviderListResponse {
                 cost_hints: "depends on upstream ComputeSDK provider".into(),
             },
             String::new(),
-            "optional TypeScript sidecar (env fallback)".into(),
+            "optional TypeScript sidecar (env fallback; clotho-compute unreachable)".into(),
         ),
         env_provider(
             "box",
             "Box",
-            "stub",
+            "direct",
             &default,
-            false,
-            "Box adapter is a Stage 12 stub",
+            state.actions.defaults.is_configured("box"),
+            "not connected — add credentials in Clotho settings",
             ProviderCapabilitiesJson {
                 one_shot_jobs: true,
                 persistent_workspaces: true,
@@ -897,7 +950,7 @@ fn fallback_providers(state: &AppState) -> ComputeProviderListResponse {
                 cost_hints: "persistent Ubuntu VM; TTL / pay-per-use (see Box dashboard)".into(),
             },
             String::new(),
-            "stub for ascii Box API v1 (https://ascii.dev/api/box/v1); BOX_API_KEY".into(),
+            "ascii Box API v1 (https://ascii.dev/api/box/v1); credentials from Clotho secrets or env".into(),
         ),
     ];
     // Mark enabled only on the default id.

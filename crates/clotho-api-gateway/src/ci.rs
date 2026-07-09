@@ -182,13 +182,22 @@ async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<CiOutput, St
     // Resolve provider credentials from Clotho secrets (docs/adr/0014).
     // Env-backed keys on clotho-compute remain a dev escape hatch.
     let mut provider_credentials = std::collections::HashMap::new();
-    match crate::secrets::resolve_provider_api_key(state, repo, &provider_id).await {
-        Ok(Some(api_key)) => {
-            provider_credentials.insert("api_key".into(), api_key);
+    if provider_id.eq_ignore_ascii_case("computesdk") {
+        match crate::secrets::resolve_computesdk_credentials(state, repo).await {
+            Ok(creds) => provider_credentials.extend(creds),
+            Err(e) => {
+                tracing::warn!(%repo, error = %e, "computesdk secret resolve failed");
+            }
         }
-        Ok(None) => {}
-        Err(e) => {
-            tracing::warn!(%repo, error = %e, "secret resolve failed; relying on compute env");
+    } else {
+        match crate::secrets::resolve_provider_api_key(state, repo, &provider_id).await {
+            Ok(Some(api_key)) => {
+                provider_credentials.insert("api_key".into(), api_key);
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(%repo, error = %e, "secret resolve failed; relying on compute env");
+            }
         }
     }
 

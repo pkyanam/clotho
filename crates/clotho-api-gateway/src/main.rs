@@ -64,17 +64,23 @@ async fn main() -> Result<(), Error> {
         compute_default_image: env_or("CLOTHO_COMPUTE_SNAPSHOT", "ubuntu:22.04"),
         actions_timeout_seconds: env_u32_or("CLOTHO_ACTIONS_TIMEOUT_SECONDS", 900),
         configured_providers: {
+            // Env-only hints for fallback when clotho-compute is unreachable.
+            // Live ListProviders + Clotho secret overlay are authoritative.
+            // "Configured" must mean jobs can run — URL alone is not enough.
             let mut m = std::collections::HashMap::new();
             let daytona = env_truthy("CLOTHO_DAYTONA_CONFIGURED")
                 || std::env::var("DAYTONA_API_KEY")
                     .map(|key| !key.trim().is_empty())
                     .unwrap_or(false);
             m.insert("daytona".into(), daytona);
-            let bridge = std::env::var("CLOTHO_COMPUTE_SDK_BRIDGE_URL")
-                .map(|u| !u.trim().is_empty())
-                .unwrap_or(false);
-            m.insert("computesdk".into(), bridge);
-            m.insert("box".into(), false);
+            // Bridge URL does not imply upstream keys; leave false here so
+            // overlay/live health own honesty for computesdk.
+            m.insert("computesdk".into(), false);
+            let box_cfg = env_truthy("CLOTHO_BOX_CONFIGURED")
+                || std::env::var("BOX_API_KEY")
+                    .map(|key| !key.trim().is_empty())
+                    .unwrap_or(false);
+            m.insert("box".into(), box_cfg);
             m
         },
         bootstrap_user_name: env_or("CLOTHO_BOOTSTRAP_USER_NAME", "clotho"),

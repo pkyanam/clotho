@@ -9,7 +9,7 @@ import {
   PageFrame,
   PageTitle,
 } from "src/components/ui/page-frame";
-import { connectProvider } from "./actions";
+import { connectProvider, disconnectProvider } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -152,6 +152,72 @@ export default async function ComputeSettingsPage() {
                       {p.configured ? "rotate" : "connect"}
                     </Button>
                   </form>
+                  {p.configured && (
+                    <form
+                      action={disconnectProvider.bind(null, p.id)}
+                      className="mt-3"
+                    >
+                      <input type="hidden" name="org" value={primaryOrg} />
+                      <Button type="submit" variant="outline">
+                        disconnect
+                      </Button>
+                    </form>
+                  )}
+                </div>
+              )}
+
+              {p.id === "computesdk" && (
+                <div className="mt-5 border-t border-kumo-hairline pt-5">
+                  <h3 className="text-[0.875rem]">
+                    {p.configured
+                      ? "rotate ComputeSDK upstream key"
+                      : "connect ComputeSDK upstream"}
+                  </h3>
+                  <p className="mt-1 text-[0.8125rem] text-kumo-inactive">
+                    store an E2B (or Modal) key in Clotho. start the optional
+                    bridge with{" "}
+                    <code className="text-kumo-default">
+                      just dev-compute-bridge
+                    </code>{" "}
+                    — no host env file required for keys. values are never shown
+                    again.
+                  </p>
+                  <form
+                    action={connectProvider.bind(null, p.id)}
+                    className="mt-3 flex flex-wrap items-end gap-3"
+                  >
+                    <input type="hidden" name="org" value={primaryOrg} />
+                    <input type="hidden" name="upstream" value="e2b" />
+                    <label className="min-w-[220px] grow text-[0.8125rem] text-kumo-inactive">
+                      E2B api key
+                      <input
+                        name="api_key"
+                        type="password"
+                        required
+                        autoComplete="off"
+                        placeholder={
+                          p.configured
+                            ? "enter new key to rotate"
+                            : "paste E2B key"
+                        }
+                        className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-canvas px-3 py-2 text-[0.875rem] text-kumo-default outline-none focus:border-kumo-contrast"
+                      />
+                    </label>
+                    <Button type="submit">
+                      {p.configured ? "rotate" : "connect E2B"}
+                    </Button>
+                  </form>
+                  {p.configured && (
+                    <form
+                      action={disconnectProvider.bind(null, p.id)}
+                      className="mt-3"
+                    >
+                      <input type="hidden" name="org" value={primaryOrg} />
+                      <Button type="submit" variant="outline">
+                        disconnect
+                      </Button>
+                    </form>
+                  )}
                 </div>
               )}
             </li>
@@ -167,7 +233,9 @@ export default async function ComputeSettingsPage() {
         >
           settings → secrets
         </Link>
-        . process environment keys remain a local-dev escape hatch only.
+        . advanced bootstrap (master key, compose profiles) is documented in{" "}
+        <code className="text-kumo-default">.env.example</code> and the repo
+        docs — not required for day-to-day provider connect.
       </p>
     </PageFrame>
   );

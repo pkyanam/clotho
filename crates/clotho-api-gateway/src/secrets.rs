@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -26,6 +26,9 @@ const NONCE_LEN: usize = 12;
 /// Well-known secret names that bind to compute providers.
 pub const SECRET_DAYTONA_API_KEY: &str = "DAYTONA_API_KEY";
 pub const SECRET_BOX_API_KEY: &str = "BOX_API_KEY";
+pub const SECRET_E2B_API_KEY: &str = "E2B_API_KEY";
+pub const SECRET_MODAL_TOKEN_ID: &str = "MODAL_TOKEN_ID";
+pub const SECRET_MODAL_TOKEN_SECRET: &str = "MODAL_TOKEN_SECRET";
 
 /// Master key for sealing secret values. Loaded from CLOTHO_SECRETS_MASTER_KEY.
 #[derive(Clone)]
@@ -158,10 +161,27 @@ pub struct PatchSecretRequest {
 #[derive(Deserialize)]
 pub struct ConnectProviderRequest {
     /// Provider API key (write-once). Stored as a well-known org secret.
+    /// For `computesdk`, this is the E2B key unless `upstream` says otherwise.
+    #[serde(default)]
     pub api_key: String,
     /// Org that owns the secret; defaults to bootstrap org.
     #[serde(default)]
     pub org: String,
+    /// Upstream for ComputeSDK bridge: `e2b` (default) or `modal`.
+    #[serde(default)]
+    pub upstream: String,
+    /// Modal token id (when connecting computesdk with upstream=modal).
+    #[serde(default)]
+    pub modal_token_id: String,
+    /// Modal token secret (when connecting computesdk with upstream=modal).
+    #[serde(default)]
+    pub modal_token_secret: String,
+}
+
+#[derive(Serialize)]
+pub struct DisconnectProviderResponse {
+    pub provider: String,
+    pub deleted_secrets: Vec<String>,
 }
 
 fn last4(value: &str) -> String {
@@ -217,7 +237,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         )
         .route(
             "/api/v1/providers/{provider}/connect",
-            post(connect_provider),
+            post(connect_provider).delete(disconnect_provider),
         )
 }
 
@@ -501,7 +521,7 @@ async fn delete_repo_secret(
 }
 
 // ---------------------------------------------------------------------------
-// provider connect convenience
+// provider connect / disconnect convenience
 // ---------------------------------------------------------------------------
 
 async fn connect_provider(
@@ -511,27 +531,100 @@ async fn connect_provider(
 ) -> Result<Json<SecretMeta>, ApiError> {
     let pool = require_pool(&state)?;
     let crypto = require_crypto(&state)?;
-    if body.api_key.trim().is_empty() {
-        return Err(ApiError::InvalidRequest("api_key is required".into()));
-    }
-    let (secret_name, description) = match provider.to_lowercase().as_str() {
-        "daytona" => (
-            SECRET_DAYTONA_API_KEY,
-            "Daytona API key for Actions and sandboxes",
-        ),
-        "box" => (SECRET_BOX_API_KEY, "Box API key for persistent workspaces"),
-        other => {
-            return Err(ApiError::InvalidRequest(format!(
-                "provider {other:?} does not support in-app connect yet"
-            )))
-        }
-    };
+    let provider_id = provider.to_lowercase();
     let org_name = if body.org.trim().is_empty() {
         state.bootstrap.org_name.clone()
     } else {
         body.org.trim().to_string()
     };
     let org_row = control::get_org(pool, &org_name).await?;
+
+    // ComputeSDK may store E2B or Modal credentials (possibly two secrets).
+    if provider_id == "computesdk" {
+        let upstream = body.upstream.trim().to_lowercase();
+        let meta = if upstream == "modal"
+            || (!body.modal_token_id.trim().is_empty()
+                && !body.modal_token_secret.trim().is_empty())
+        {
+            if body.modal_token_id.trim().is_empty() || body.modal_token_secret.trim().is_empty() {
+                return Err(ApiError::InvalidRequest(
+                    "modal_token_id and modal_token_secret are required for Modal".into(),
+                ));
+            }
+            upsert_org_secret(
+                pool,
+                crypto,
+                &org_row.id,
+                SECRET_MODAL_TOKEN_ID,
+                body.modal_token_id.trim(),
+                "Modal token id for ComputeSDK bridge",
+                &state.bootstrap.user_id,
+                false,
+            )
+            .await?;
+            upsert_org_secret(
+                pool,
+                crypto,
+                &org_row.id,
+                SECRET_MODAL_TOKEN_SECRET,
+                body.modal_token_secret.trim(),
+                "Modal token secret for ComputeSDK bridge",
+                &state.bootstrap.user_id,
+                false,
+            )
+            .await?
+        } else {
+            let key = if !body.api_key.trim().is_empty() {
+                body.api_key.trim()
+            } else {
+                return Err(ApiError::InvalidRequest(
+                    "api_key is required (E2B API key for ComputeSDK)".into(),
+                ));
+            };
+            upsert_org_secret(
+                pool,
+                crypto,
+                &org_row.id,
+                SECRET_E2B_API_KEY,
+                key,
+                "E2B API key for ComputeSDK bridge",
+                &state.bootstrap.user_id,
+                false,
+            )
+            .await?
+        };
+        control::log_activity(
+            pool,
+            ActivityEventInput {
+                actor_id: state.bootstrap.user_id.clone(),
+                org_id: Some(org_row.id),
+                repo_id: None,
+                event_type: "provider.connected".into(),
+                payload: serde_json::json!({
+                    "provider": provider_id,
+                    "secret_name": meta.name,
+                }),
+            },
+        )
+        .await?;
+        return Ok(Json(meta));
+    }
+
+    if body.api_key.trim().is_empty() {
+        return Err(ApiError::InvalidRequest("api_key is required".into()));
+    }
+    let (secret_name, description) = match provider_id.as_str() {
+        "daytona" => (
+            SECRET_DAYTONA_API_KEY,
+            "Daytona API key for Actions and sandboxes",
+        ),
+        "box" => (SECRET_BOX_API_KEY, "Box API key for Actions and sandboxes"),
+        other => {
+            return Err(ApiError::InvalidRequest(format!(
+                "provider {other:?} does not support in-app connect"
+            )))
+        }
+    };
     let meta = upsert_org_secret(
         pool,
         crypto,
@@ -551,7 +644,7 @@ async fn connect_provider(
             repo_id: None,
             event_type: "provider.connected".into(),
             payload: serde_json::json!({
-                "provider": provider.to_lowercase(),
+                "provider": provider_id,
                 "secret_name": secret_name,
             }),
         },
@@ -560,16 +653,88 @@ async fn connect_provider(
     Ok(Json(meta))
 }
 
+/// Remove Clotho-stored credentials for a provider (metadata only; no values).
+async fn disconnect_provider(
+    State(state): State<Arc<AppState>>,
+    Path(provider): Path<String>,
+    Query(query): Query<DisconnectQuery>,
+) -> Result<Json<DisconnectProviderResponse>, ApiError> {
+    let pool = require_pool(&state)?;
+    let provider_id = provider.to_lowercase();
+    let names = provider_secret_names(&provider_id);
+    if names.is_empty() {
+        return Err(ApiError::InvalidRequest(format!(
+            "provider {provider_id:?} has no disconnectable credentials"
+        )));
+    }
+    let org_name = if query.org.trim().is_empty() {
+        state.bootstrap.org_name.clone()
+    } else {
+        query.org.trim().to_string()
+    };
+    let org_row = control::get_org(pool, &org_name).await?;
+    let mut deleted_secrets = Vec::new();
+    for name in names {
+        if delete_by_org_name(pool, &org_row.id, name).await? {
+            deleted_secrets.push(name.to_string());
+        }
+    }
+    if deleted_secrets.is_empty() {
+        return Err(ApiError::NotFound(format!(
+            "no Clotho secrets stored for provider {provider_id}"
+        )));
+    }
+    control::log_activity(
+        pool,
+        ActivityEventInput {
+            actor_id: state.bootstrap.user_id.clone(),
+            org_id: Some(org_row.id),
+            repo_id: None,
+            event_type: "provider.disconnected".into(),
+            payload: serde_json::json!({
+                "provider": provider_id,
+                "deleted_secrets": deleted_secrets,
+            }),
+        },
+    )
+    .await?;
+    Ok(Json(DisconnectProviderResponse {
+        provider: provider_id,
+        deleted_secrets,
+    }))
+}
+
+#[derive(Deserialize)]
+struct DisconnectQuery {
+    #[serde(default)]
+    org: String,
+}
+
 // ---------------------------------------------------------------------------
 // resolution helpers (used by Actions / provider overlay)
 // ---------------------------------------------------------------------------
 
-/// Map provider id → well-known secret name.
+/// Map provider id → primary well-known secret name (single-key providers).
 pub fn provider_secret_name(provider_id: &str) -> Option<&'static str> {
     match provider_id.to_lowercase().as_str() {
         "daytona" => Some(SECRET_DAYTONA_API_KEY),
         "box" => Some(SECRET_BOX_API_KEY),
+        "computesdk" => Some(SECRET_E2B_API_KEY),
         _ => None,
+    }
+}
+
+/// All secret names that bind to a provider (for disconnect / multi-key).
+pub fn provider_secret_names(provider_id: &str) -> Vec<&'static str> {
+    match provider_id.to_lowercase().as_str() {
+        "daytona" => vec![SECRET_DAYTONA_API_KEY],
+        "box" => vec![SECRET_BOX_API_KEY],
+        "computesdk" => vec![
+            SECRET_E2B_API_KEY,
+            SECRET_MODAL_TOKEN_ID,
+            SECRET_MODAL_TOKEN_SECRET,
+        ],
+        _ => vec![],
     }
 }
 
@@ -583,6 +748,32 @@ pub async fn resolve_provider_api_key(
     let Some(secret_name) = provider_secret_name(provider_id) else {
         return Ok(None);
     };
+    resolve_named_secret(state, repo_name, secret_name).await
+}
+
+/// Resolve all ComputeSDK upstream credentials for injection into CCI jobs.
+pub async fn resolve_computesdk_credentials(
+    state: &AppState,
+    repo_name: &str,
+) -> Result<std::collections::HashMap<String, String>, ApiError> {
+    let mut out = std::collections::HashMap::new();
+    if let Some(v) = resolve_named_secret(state, repo_name, SECRET_E2B_API_KEY).await? {
+        out.insert("e2b_api_key".into(), v);
+    }
+    if let Some(v) = resolve_named_secret(state, repo_name, SECRET_MODAL_TOKEN_ID).await? {
+        out.insert("modal_token_id".into(), v);
+    }
+    if let Some(v) = resolve_named_secret(state, repo_name, SECRET_MODAL_TOKEN_SECRET).await? {
+        out.insert("modal_token_secret".into(), v);
+    }
+    Ok(out)
+}
+
+async fn resolve_named_secret(
+    state: &AppState,
+    repo_name: &str,
+    secret_name: &str,
+) -> Result<Option<String>, ApiError> {
     let Some(pool) = state.pool.as_ref() else {
         return Ok(None);
     };
@@ -610,9 +801,7 @@ pub async fn resolve_provider_api_key(
     }
 
     // Fall back to bootstrap org when repo isn't in control plane.
-    if let Ok(Some(ct)) =
-        load_ciphertext_org(pool, &state.bootstrap.org_id, secret_name).await
-    {
+    if let Ok(Some(ct)) = load_ciphertext_org(pool, &state.bootstrap.org_id, secret_name).await {
         let plain = crypto.open(&ct)?;
         return Ok(Some(
             String::from_utf8(plain)
@@ -622,21 +811,44 @@ pub async fn resolve_provider_api_key(
     Ok(None)
 }
 
-/// Whether a provider has a Clotho-stored credential (any org, for settings overlay).
+/// Whether a provider has a Clotho-stored credential (settings overlay).
 pub async fn provider_secret_configured(
     state: &AppState,
     provider_id: &str,
 ) -> Option<SecretMeta> {
-    let secret_name = provider_secret_name(provider_id)?;
     let pool = state.pool.as_ref()?;
-    // Prefer bootstrap org secret for the settings surface.
-    get_by_org_name(pool, &state.bootstrap.org_id, secret_name)
+    let names = provider_secret_names(provider_id);
+    if names.is_empty() {
+        return None;
+    }
+    // Prefer bootstrap org; return first matching secret for mask display.
+    for name in names {
+        if let Ok(meta) = get_by_org_name(pool, &state.bootstrap.org_id, name).await {
+            return Some(meta);
+        }
+    }
+    None
+}
+
+/// Whether ComputeSDK has enough Clotho secrets to accept a job (with bridge up).
+pub async fn computesdk_secrets_ready(state: &AppState) -> bool {
+    let pool = match state.pool.as_ref() {
+        Some(p) => p,
+        None => return false,
+    };
+    if get_by_org_name(pool, &state.bootstrap.org_id, SECRET_E2B_API_KEY)
         .await
-        .ok()
-        .or_else(|| {
-            // Any org secret with this name (first match) for multi-org later.
-            None
-        })
+        .is_ok()
+    {
+        return true;
+    }
+    let has_id = get_by_org_name(pool, &state.bootstrap.org_id, SECRET_MODAL_TOKEN_ID)
+        .await
+        .is_ok();
+    let has_secret = get_by_org_name(pool, &state.bootstrap.org_id, SECRET_MODAL_TOKEN_SECRET)
+        .await
+        .is_ok();
+    has_id && has_secret
 }
 
 // ---------------------------------------------------------------------------

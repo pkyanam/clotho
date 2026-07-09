@@ -908,6 +908,9 @@ paths:
       tags: [providers, secrets]
       operationId: connectProvider
       summary: Store a provider API key as an org secret (metadata-only response)
+      description: |
+        daytona/box: `api_key`. computesdk: E2B via `api_key` (or Modal via
+        `modal_token_id` + `modal_token_secret`). Never returns the raw value.
       parameters:
         - $ref: "#/components/parameters/provider"
       requestBody:
@@ -916,19 +919,53 @@ paths:
           application/json:
             schema:
               type: object
-              required: [api_key]
               properties:
                 api_key:
                   type: string
                 org:
                   type: string
+                upstream:
+                  type: string
+                  description: "e2b (default) or modal for computesdk"
+                modal_token_id:
+                  type: string
+                modal_token_secret:
+                  type: string
       responses:
-        "201":
+        "200":
           description: Secret metadata (never raw value)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SecretMeta"
+    delete:
+      tags: [providers, secrets]
+      operationId: disconnectProvider
+      summary: Remove Clotho-stored credentials for a provider
+      description: Deletes well-known org secrets for the provider. Never returns values.
+      parameters:
+        - $ref: "#/components/parameters/provider"
+        - name: org
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Which secret names were deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [provider, deleted_secrets]
+                properties:
+                  provider:
+                    type: string
+                  deleted_secrets:
+                    type: array
+                    items:
+                      type: string
+        "404":
+          $ref: "#/components/responses/Error"
 
   /api/v1/compute/providers:
     get:

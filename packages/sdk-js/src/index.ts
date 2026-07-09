@@ -989,10 +989,17 @@ export class ClothoClient {
   /**
    * Store a provider API key as an org secret (write-once to the browser).
    * Response is metadata only (masked last4).
+   * For `computesdk`, pass `upstream: "e2b"` (default) or modal fields.
    */
   connectProvider(
     provider: string,
-    options: { apiKey: string; org?: string },
+    options: {
+      apiKey?: string;
+      org?: string;
+      upstream?: string;
+      modalTokenId?: string;
+      modalTokenSecret?: string;
+    },
   ): Promise<SecretMeta> {
     return this.request(
       `/api/v1/providers/${encodeURIComponent(provider)}/connect`,
@@ -1000,10 +1007,28 @@ export class ClothoClient {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          api_key: options.apiKey,
+          api_key: options.apiKey ?? "",
           org: options.org ?? "",
+          upstream: options.upstream ?? "",
+          modal_token_id: options.modalTokenId ?? "",
+          modal_token_secret: options.modalTokenSecret ?? "",
         }),
       },
+    );
+  }
+
+  /**
+   * Remove Clotho-stored credentials for a provider (metadata only).
+   * Does not return secret values.
+   */
+  disconnectProvider(
+    provider: string,
+    options?: { org?: string },
+  ): Promise<{ provider: string; deleted_secrets: string[] }> {
+    const q = qs({ org: options?.org });
+    return this.request(
+      `/api/v1/providers/${encodeURIComponent(provider)}/connect${q}`,
+      { method: "DELETE" },
     );
   }
 }
