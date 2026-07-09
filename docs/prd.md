@@ -290,7 +290,8 @@ Each stage lists a goal, key tasks, and an exit condition. Stages 1–2 can star
   and routes Actions CI with `provider_id` from repo Actions config — no
   Daytona hard-coding. **Web:** `/settings/compute` + repo settings provider
   list (masked/configured only). **SDK:** `computeProviders` /
-  `computeProviderList` / richer `ComputeProvider`. Secrets remain env-backed.
+  `computeProviderList` / richer `ComputeProvider`. Stage 12 secrets were
+  env-backed; Stage 13 moved primary credentials to Clotho secrets (ADR-0014).
   PRD §11 #4 resolved (TS sidecar).
 
 ### Stage 13 — Web Product Expansion
@@ -328,20 +329,106 @@ Shipped a console-quality web redesign plus first-class secrets:
   documents bootstrap secrets; provider keys are secondary escape hatches.
 - **Deferred within Stage 13:** full issue/PR upgrade (labels/milestones/…),
   notifications, branches/commits/releases pages, OpenAPI generation.
+  **Intentionally deferred to Stage 14+:** finishing Box HTTP client and
+  ComputeSDK in-app secret wiring (stubs must not block the console redesign).
 
-### Stage 14 — World-Class API / CLI / SDK / MCP Parity
-- Make REST the canonical public API first; every stable web feature must have
-  an SDK method.
-- Add OpenAPI generation or a single typed contract source so SDK drift stops.
-- Expand CLI to cover repos, issues, PRs, Actions, agents, provider status,
-  settings read/write, logs, and activity.
-- Expand MCP tools for agents: list/create issues, comment/review PRs, run
-  actions, fetch logs, inspect settings, list providers, create sandbox
-  sessions, and query activity/provenance.
-- **Acceptance:** an AI agent can operate Clotho through MCP with the same core
-  capabilities a human has in the web app.
+### Stage 14 — Platform Hardening & Honest Compute *(inject — recommended next for ops honesty; can run in parallel with Stage 15 start)*
+Short housekeeping stage so the multi-provider story is truthful and secrets
+are first-class for every advertised provider — not only Daytona.
 
-### Stage 15 — Discovery, Social, and Competitive UX
+- **Box (Ascii) completion:** replace the Stage 12 stub with a real CCI
+  provider against `https://ascii.dev/api/box/v1` (create → files/commands →
+  tear down for one-shot; design hooks for persistent workspace lifecycle).
+  Accept per-job `provider_credentials.api_key` from the gateway secrets path
+  (same pattern as Daytona, docs/adr/0014). Do not claim “configured” unless
+  jobs can actually run.
+- **ComputeSDK bridge maturity:**
+  - Document and ship a compose profile / `just` target that runs
+    `services/compute-sdk-bridge`.
+  - Allow Clotho-stored secrets for bridge config and common upstream keys
+    (e.g. `E2B_API_KEY`, `MODAL_TOKEN_*`) with gateway → sidecar injection or
+    documented sync — never return raw values to the browser.
+  - Settings UI: connect/configure bridge (URL optional if in-cluster default)
+    without requiring host `.env` as the only path.
+- **Honest provider state:** unify env, Clotho secrets, and stub/disabled
+  reasons across compute gRPC, REST, web, and SDK. “Configured” always means
+  “can accept a job with current credentials.”
+- **Product leaks sweep:** audit remaining operator-facing copy for Forgejo,
+  docker hostnames, raw env-only instructions; keep advanced env notes in
+  docs only.
+- **Bootstrap ops:** document/generate `CLOTHO_SECRETS_MASTER_KEY` safely
+  (never paste shell command literals into `.env`).
+- **Optional light REST gaps:** if needed for Stage 15, add thin routes for
+  provider disconnect and secret rotation metadata only — no discovery work.
+- **Acceptance:** Daytona, Box, and ComputeSDK each have a clear path from
+  “not connected” → “connected via Clotho secret or documented bootstrap” →
+  “job fails only for real provider errors.” No provider card lies.
+
+### Stage 15 — World-Class API / CLI / SDK / MCP Parity *(was Stage 14; elevated priority for agent-native thesis)*
+Make REST the single product contract; every stable web capability must be
+reachable by humans (CLI) and agents (MCP) with the same semantics as the SDK.
+
+#### Current surface audit (2026-07-09) — start here
+
+| Surface | What exists today | Gaps |
+|---|---|---|
+| **REST** (`clotho-api-gateway`) | health; users/orgs/activity; repos CRUD-ish + tree/file/commits/oplog/submit; issues/PRs/comments/reviews/merge/diff; branches; statuses; Actions runs/logs/config; providers; agent-sessions; secrets (org/repo); provider connect; Forgejo webhook | No OpenAPI; no public `/sandboxes` session API; no agent admin via edge; no labels/milestones/assignees; no notifications; no signals; limited settings write; clone URL may still need a Clotho-public git endpoint |
+| **SDK** (`@clotho/sdk-js`) | Hand-written client covering most REST above + secrets/connect | Drift risk without OpenAPI; no sandbox session types; no agent mint/list; incomplete when new routes land |
+| **CLI** (`clotho`) | `init`, `status`, `log`, `commit`, `submit`, `pr` (list only) | Missing: issues, PR create/review/merge, Actions run/logs, providers, secrets, orgs, activity, agents, config; no JSON output mode; no auth story |
+| **MCP** (`clotho-agent-gateway`) | `orient_repo`, `checkpoint`, `restore_to`, `diff_symbol`, `commit`, `submit_change` | Missing: issues/PRs, Actions, logs, providers, secrets (scoped), activity/provenance query, list repos, tree/file read convenience, sandbox sessions; tools talk gRPC not REST (parity risk) |
+
+#### Stage 15 workstreams
+
+1. **Contract-first REST**
+   - Publish OpenAPI 3 for `/api/v1/*` (generated from Axum routes or a single
+     hand-maintained `openapi.yaml` that CI checks against).
+   - Generate or validate `@clotho/sdk-js` against that contract; fail CI on drift.
+   - Document auth model (bootstrap → real tokens later) and error envelope
+     (`{ "error": "..." }` + status codes).
+   - Fill REST gaps needed for CLI/MCP parity before inventing CLI-only behavior:
+     at minimum stable list/get/create for issues, PRs, Actions, providers,
+     secrets metadata, activity; optional `/api/v1/sandboxes` only if CCI
+     session APIs exist (else defer sandbox sessions to post-Box Stage 14).
+
+2. **CLI maturity (`clotho`)**
+   - Group commands: `clotho repo|issue|pr|actions|provider|secret|org|agent|activity`.
+   - Every command is a thin REST client (same as today: no git/jj shell-out).
+   - `--json` machine output; `--api` / `CLOTHO_API_URL`; exit codes for scripts.
+   - Cover the human “daily path”: create repo, open issue, open/review/merge PR,
+     start Action + tail logs, list providers, set/list secrets (write-only value),
+     show activity.
+   - Ship `clotho help` / man-page quality usage; add `crates/clotho-cli` tests
+     against a mock or gateway fixture.
+
+3. **MCP maturity (agent-native)**
+   - Expand tools so an agent can operate a repo end-to-end without raw REST:
+     - Collab: `list_issues`, `create_issue`, `comment_issue`, `list_pulls`,
+       `create_pull`, `comment_pull`, `review_pull`, `merge_pull`
+     - Actions: `list_action_runs`, `start_action_run`, `get_action_logs`
+     - Platform: `list_providers`, `list_repos`, `get_activity` (and optionally
+       `list_secrets` metadata-only — never secret values)
+     - Read helpers: `get_tree`, `get_file` if not already covered by orient
+   - Prefer implementing new tools **through the REST edge** (or a shared Rust
+     client crate) so MCP cannot drift from the public API.
+   - Keep token scopes (`allowed_tools`, `allowed_repos`) and audit log for every
+     new tool; document the tool list in MCP server instructions.
+   - Tests: permission denied paths + happy path for each new tool family.
+
+4. **SDK parity & docs**
+   - SDK method for every stable REST route used by web or CLI.
+   - Short `docs/api.md` + `docs/cli.md` + `docs/mcp.md` (or one “Developer
+     surfaces” doc) with copy-paste examples for human, script, and agent.
+   - Versioning policy: additive REST for minor; breaking changes only with
+     explicit major bump once out of prototype.
+
+5. **Acceptance (strict)**
+   - A human can perform the “demo loop” (create repo → issue → PR → Action →
+     inspect logs → list providers) via **CLI only**.
+   - An AI agent with a scoped token can perform the same loop via **MCP only**.
+   - SDK tests cover every public method; OpenAPI (or equivalent) exists and is
+     CI-checked; no feature is marked mature if it is web-only.
+
+### Stage 16 — Discovery, Social, and Competitive UX *(was Stage 15)*
 - Add Clotho's GitHub Stars competitor as `Signals`: users/orgs can signal
   repos, optionally categorize them, and use signals for discovery/ranking.
 - Add repo/user/org profiles, public/private visibility, trending repos,
@@ -351,6 +438,8 @@ Shipped a console-quality web redesign plus first-class secrets:
   data, not scraped UI state.
 - **Acceptance:** Clotho has a credible discovery/community layer while
   preserving enterprise/self-host privacy controls.
+- **Prerequisite:** Stage 15 developer surfaces stable enough that discovery
+  APIs (`/signals`, profiles) land with SDK/CLI/MCP stubs from day one.
 
 ---
 
@@ -381,15 +470,19 @@ Shipped a console-quality web redesign plus first-class secrets:
 
 ## 7. Public interfaces
 
-- **REST:** add `/api/v1/orgs`, `/api/v1/users`, `/api/v1/settings`,
-  `/api/v1/activity`, `/api/v1/providers`, `/api/v1/sandboxes`,
-  `/api/v1/repos/{repo}/signals`, and expanded repo issue/PR/settings routes.
-- **Compute:** evolve CCI into provider lifecycle plus job/session APIs; keep
-  one-shot Actions compatible.
-- **Web:** prioritize settings and creation flows before social/discovery
-  polish.
+- **REST:** canonical public contract under `/api/v1/*`. Present today: orgs,
+  users, activity, repos (tree/file/commits/oplog/submit), issues/PRs, branches,
+  statuses, Actions, providers, secrets, agent-sessions. **Stage 15:** OpenAPI +
+  fill gaps required for CLI/MCP parity. **Stage 16:** `/signals`, profiles.
+  `/sandboxes` only after CCI session APIs (Stage 14 Box / persistent path).
+- **Compute:** CCI multi-provider registry (Stage 12); secrets-bound credentials
+  (Stage 13); honest Box + ComputeSDK completion (Stage 14). Keep one-shot
+  Actions compatible; persistent workspaces via Box/CCI sessions later.
+- **Web:** settings and creation before social/discovery polish (Stage 13
+  largely done; issue/PR depth still open).
 - **CLI/MCP:** API-backed wrappers only; no shelling out to `git`/`jj` from
-  Clotho services.
+  Clotho services. Stage 15 raises CLI/MCP to parity with stable REST (see
+  Stage 15 audit table).
 
 ---
 
@@ -416,8 +509,10 @@ Shipped a console-quality web redesign plus first-class secrets:
 | `xet-core` designed around HF's CAS service | Our S3/MinIO backend needs a compatible content-addressed-store shim; budget real time for this even though the chunking/xorb logic is reusable as-is. |
 | Multi-agent merge-queue is genuinely unsolved territory | Stage 5's "naive-but-real" framing is deliberate — do not let this stage's scope creep into solving it perfectly; the prototype needs *a* working answer, not *the* answer. |
 | Third-party "agentic-jujutsu"-style crates | Treat marketing claims (e.g., unverified performance multipliers) skeptically; fine as design inspiration, not as a dependency for the core engine. |
-| SDK/API drift | Stage 14 must add OpenAPI generation or another single typed contract source before the surface area grows too large to manually keep aligned. |
-| Secret handling expectations | Provider settings may show configured/masked state, but secrets remain environment-backed until encryption and key-management are explicitly designed. |
+| SDK/API drift | Stage 15 must add OpenAPI generation or another single typed contract source before the surface area grows too large to manually keep aligned. |
+| Secret handling expectations | Stage 13 shipped encrypted org/repo secrets (ADR-0014). Remaining risk: master-key bootstrap, rotation tooling, and provider-specific inject paths (Box/ComputeSDK in Stage 14). |
+| CLI/MCP lag | CLI and MCP still cover a fraction of REST; agent-native thesis fails if web-only features accumulate. Stage 15 is mandatory before discovery (Stage 16). |
+| Stub honesty | Box and ComputeSDK must not stay “configured-looking” without runnable jobs (Stage 14). |
 
 ---
 
@@ -426,12 +521,12 @@ Shipped a console-quality web redesign plus first-class secrets:
 - Forgejo remains unmodified and internal.
 - Clotho-owned identity becomes the v2 source of truth; Forgejo identity is an
   internal/provider mapping only.
-- Provider secrets stay environment-backed until explicit encryption/key
-  management is designed.
+- Provider secrets: primary path is Clotho secrets store (ADR-0014); process
+  env remains a local-dev escape hatch only.
 - ComputeSDK is adopted through a bridge behind CCI, not by replacing the Rust
   compute boundary.
 - API/SDK stability comes before CLI/MCP wrappers, but no feature is considered
-  mature until web, SDK, CLI, and MCP coverage exists.
+  mature until web, SDK, CLI, and MCP coverage exists (Stage 15 acceptance).
 
 ---
 
@@ -451,6 +546,11 @@ Shipped a console-quality web redesign plus first-class secrets:
    Before Actions become product history, choose Postgres-in-gateway vs. a
    separate `clotho-actions` service. (Stage 11 already persists runs in
    gateway Postgres migrations; product-history design remains open.)
+6. **Stage order after 13** — Recommended default: **Stage 15 (developer
+   surfaces) in parallel with or immediately after Stage 14 (honest compute)**.
+   Do **not** start Stage 16 discovery until Stage 15 acceptance is met.
+   Stage 13 remaining web polish (issue/PR depth) can interleave but must not
+   ship web-only APIs without SDK methods.
 
 ---
 
