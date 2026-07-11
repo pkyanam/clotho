@@ -118,6 +118,7 @@ jobs:
           # Keep CI fast; run bigger files locally via CLOTHO_STORAGE_TEST_FILE_MB.
           CLOTHO_STORAGE_TEST_FILE_MB: "64"
           CLOTHO_COLLAB_TEST_GATEWAY_URL: http://localhost:8080
+          CLOTHO_COLLAB_TEST_FORGEJO_URL: http://localhost:3000
           CLOTHO_STAGE11_TEST_DATABASE_URL: postgres://clotho:clotho-dev@localhost:5432/clotho
           CLOTHO_STAGE11_TEST_FORGEJO_URL: http://localhost:3000
           CLOTHO_AGENT_TEST_MCP_URL: http://localhost:8090
