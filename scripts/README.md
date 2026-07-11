@@ -9,3 +9,6 @@ or in production belongs in a service, not here.
   dedup, a PR to review at :3100, and a push-triggered CI job on the real
   Daytona sandbox reporting status back. Thin wrapper over the `clotho-demo`
   driver (`crates/clotho-demo`).
+- `verify-api-contract.mjs` — deterministic Stage 22 OpenAPI/Axum/SDK
+  structural verification. `pnpm test:contract -- --json` emits the complete
+  machine-readable operation inventory for release diffs.

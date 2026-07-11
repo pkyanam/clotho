@@ -26,6 +26,15 @@ info:
   license:
     name: Apache-2.0
 
+# Defaults inherited by every operation unless an operation overrides the
+# corresponding x-clotho-* field. These extensions make alpha stability,
+# authentication posture, and the versioned error contract machine-readable
+# without duplicating policy across more than one hundred operations.
+x-clotho-contract:
+  stability: alpha
+  auth: bootstrap-or-bearer
+  errorResponse: "#/components/responses/Error"
+
 servers:
   - url: http://localhost:8080
     description: Local dev stack (`just dev`)
@@ -47,6 +56,7 @@ tags:
 paths:
   /healthz:
     get:
+      x-clotho-auth: public
       tags: [health]
       operationId: healthz
       summary: Liveness probe
@@ -60,6 +70,7 @@ paths:
 
   /openapi.yaml:
     get:
+      x-clotho-auth: public
       tags: [health]
       operationId: openapiYaml
       summary: This OpenAPI document (YAML)
@@ -735,7 +746,11 @@ paths:
         - {name: revision, in: query, schema: {type: string, default: main}}
         - {name: files_metadata, in: query, schema: {type: boolean, default: false}}
       responses:
-        "200": {description: Hugging Face ModelInfo-compatible object}
+        "200":
+          description: Hugging Face ModelInfo-compatible object
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/HuggingFaceObject"}
         "404": {$ref: "#/components/responses/Error"}
 
   /api/models/{owner}/{name}/tree/{revision}:
@@ -766,7 +781,11 @@ paths:
         - {name: name, in: path, required: true, schema: {type: string}}
         - {name: include_prs, in: query, schema: {type: integer, enum: [0, 1]}}
       responses:
-        "200": {description: Hugging Face GitRefs-compatible object}
+        "200":
+          description: Hugging Face GitRefs-compatible object
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/HuggingFaceObject"}
 
   /api/models/{owner}/{name}/commits/{revision}:
     get:
@@ -778,7 +797,11 @@ paths:
         - {name: name, in: path, required: true, schema: {type: string}}
         - {name: revision, in: path, required: true, schema: {type: string}}
       responses:
-        "200": {description: Hugging Face GitCommitInfo-compatible array}
+        "200":
+          description: Hugging Face GitCommitInfo-compatible array
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/HuggingFaceObjectList"}
 
   /api/models/{owner}/{name}/revision/{revision}:
     get:
@@ -791,7 +814,11 @@ paths:
         - {name: revision, in: path, required: true, schema: {type: string}}
         - {name: blobs, in: query, schema: {type: boolean, default: false}}
       responses:
-        "200": {description: Hugging Face ModelInfo-compatible object}
+        "200":
+          description: Hugging Face ModelInfo-compatible object
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/HuggingFaceObject"}
 
   /{owner}/{name}/resolve/{revision}/{path}:
     get:
@@ -804,7 +831,11 @@ paths:
         - {name: revision, in: path, required: true, schema: {type: string}}
         - {name: path, in: path, required: true, schema: {type: string}}
       responses:
-        "200": {description: Immutable model release bytes}
+        "200":
+          description: Immutable model release bytes
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
     head:
       tags: [repos, providers]
       operationId: huggingFaceHeadModelFile
@@ -846,7 +877,11 @@ paths:
         - {name: revision, in: query, schema: {type: string, default: main}}
         - {name: files_metadata, in: query, schema: {type: boolean, default: false}}
       responses:
-        "200": {description: Hugging Face DatasetInfo-compatible object}
+        "200":
+          description: Hugging Face DatasetInfo-compatible object
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/HuggingFaceObject"}
 
   /api/datasets/{owner}/{name}/tree/{revision}:
     get:
@@ -860,7 +895,11 @@ paths:
         - {name: recursive, in: query, schema: {type: boolean, default: false}}
         - {name: expand, in: query, schema: {type: boolean, default: false}}
       responses:
-        "200": {description: RepoFile and RepoFolder-compatible entries}
+        "200":
+          description: RepoFile and RepoFolder-compatible entries
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/HuggingFaceObjectList"}
 
   /api/datasets/{owner}/{name}/refs:
     get:
@@ -872,7 +911,11 @@ paths:
         - {name: name, in: path, required: true, schema: {type: string}}
         - {name: include_prs, in: query, schema: {type: integer, enum: [0, 1]}}
       responses:
-        "200": {description: Hugging Face GitRefs-compatible object}
+        "200":
+          description: Hugging Face GitRefs-compatible object
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/HuggingFaceObject"}
 
   /api/datasets/{owner}/{name}/commits/{revision}:
     get:
@@ -884,7 +927,11 @@ paths:
         - {name: name, in: path, required: true, schema: {type: string}}
         - {name: revision, in: path, required: true, schema: {type: string}}
       responses:
-        "200": {description: Hugging Face GitCommitInfo-compatible array}
+        "200":
+          description: Hugging Face GitCommitInfo-compatible array
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/HuggingFaceObjectList"}
 
   /api/datasets/{owner}/{name}/revision/{revision}:
     get:
@@ -897,7 +944,11 @@ paths:
         - {name: revision, in: path, required: true, schema: {type: string}}
         - {name: blobs, in: query, schema: {type: boolean, default: false}}
       responses:
-        "200": {description: Hugging Face DatasetInfo-compatible object}
+        "200":
+          description: Hugging Face DatasetInfo-compatible object
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/HuggingFaceObject"}
 
   /datasets/{owner}/{name}/resolve/{revision}/{path}:
     get:
@@ -910,7 +961,11 @@ paths:
         - {name: revision, in: path, required: true, schema: {type: string}}
         - {name: path, in: path, required: true, schema: {type: string}}
       responses:
-        "200": {description: Immutable dataset release bytes}
+        "200":
+          description: Immutable dataset release bytes
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
     head:
       tags: [repos, providers]
       operationId: huggingFaceHeadDatasetFile
@@ -2590,12 +2645,26 @@ paths:
 
   /api/v1/webhooks/forgejo:
     post:
+      x-clotho-auth: webhook-hmac
       tags: [webhooks]
       operationId: forgejoWebhook
       summary: Internal Forgejo push webhook (HMAC-verified)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/WebhookPushRequest"}
       responses:
         "200":
-          description: Accepted
+          description: Ignored delivery
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/WebhookResponse"}
+        "202":
+          description: Accepted delivery
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/WebhookResponse"}
         "401":
           $ref: "#/components/responses/Error"
 
@@ -2685,6 +2754,32 @@ components:
         maxLength: 128
 
   schemas:
+    HuggingFaceObject:
+      type: object
+      description: Hugging Face-compatible projection; fields follow the upstream client contract
+      additionalProperties: true
+    HuggingFaceObjectList:
+      type: array
+      items:
+        $ref: "#/components/schemas/HuggingFaceObject"
+    WebhookPushRequest:
+      type: object
+      required: [after, repository]
+      properties:
+        after: {type: string}
+        repository:
+          type: object
+          required: [name]
+          properties:
+            name: {type: string}
+    WebhookResponse:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [accepted, ignored]}
+        repo: {type: string}
+        sha: {type: string}
+        reason: {type: string}
     Error:
       type: object
       required: [version, code, message, request_id, retryable]
@@ -2724,6 +2819,7 @@ components:
           description: Optional safe structured context such as field-level validation errors
     HealthStatus:
       type: object
+      required: [service, version, status]
       properties:
         service:
           type: string
@@ -2733,6 +2829,7 @@ components:
           type: string
     User:
       type: object
+      required: [id, name, email, display_name, created_at]
       properties:
         id:
           type: string
@@ -2746,6 +2843,7 @@ components:
           type: string
     Org:
       type: object
+      required: [id, name, display_name, created_by, created_at]
       properties:
         id:
           type: string
@@ -2759,6 +2857,7 @@ components:
           type: string
     MeResponse:
       type: object
+      required: [user, token_id]
       properties:
         user:
           $ref: "#/components/schemas/User"
@@ -2767,6 +2866,7 @@ components:
           nullable: true
     ApiTokenMeta:
       type: object
+      required: [id, name, token_prefix, scopes, created_at, last_used_at, expires_at]
       properties:
         id:
           type: string
@@ -2797,6 +2897,7 @@ components:
               description: Plaintext token — shown once at creation
     OrgMembership:
       type: object
+      required: [org_id, user_id, role, user_name, user_display_name]
       properties:
         org_id:
           type: string
@@ -2810,6 +2911,7 @@ components:
           type: string
     OrgDetail:
       type: object
+      required: [org, members]
       properties:
         org:
           $ref: "#/components/schemas/Org"
@@ -2819,6 +2921,7 @@ components:
             $ref: "#/components/schemas/OrgMembership"
     ActivityEvent:
       type: object
+      required: [id, actor_id, org_id, repo_id, event_type, payload, created_at]
       properties:
         id:
           type: integer
@@ -2837,6 +2940,7 @@ components:
           type: string
     RepoInfo:
       type: object
+      required: [id, clotho_id, name, full_name, owner, html_url, clone_url, default_branch, description, visibility, kind, large_file_threshold_bytes, network_mode, network_tags, has_issues, has_pull_requests, open_issues_count, open_pr_counter, updated_at, provider, configured]
       properties:
         id:
           type: integer
@@ -2887,6 +2991,7 @@ components:
           type: boolean
     CreatedRepo:
       type: object
+      required: [name, owner, owner_org, description, visibility, kind, large_file_threshold_bytes, network_mode, network_tags, default_branch, clone_url, provider, configured, operation_id, initial_commit_id, info]
       properties:
         name:
           type: string
@@ -2927,6 +3032,7 @@ components:
           $ref: "#/components/schemas/RepoInfo"
     Commit:
       type: object
+      required: [commit_id, change_id, description, author_name, author_email, timestamp_millis, parent_commit_ids]
       properties:
         commit_id:
           type: string
@@ -2947,6 +3053,7 @@ components:
             type: string
     RepoDetail:
       type: object
+      required: [name, owner, owner_org, description, visibility, kind, large_file_threshold_bytes, network_mode, network_tags, default_branch, clone_url, provider, configured, info, main_commit_id, heads]
       properties:
         name:
           type: string
@@ -2989,6 +3096,7 @@ components:
             $ref: "#/components/schemas/Commit"
     CreatedCommit:
       type: object
+      required: [commit_id, change_id, operation_id]
       properties:
         commit_id:
           type: string
@@ -3015,6 +3123,7 @@ components:
             type: string
     TreeEntry:
       type: object
+      required: [path, size_bytes, executable, conflicted]
       properties:
         path:
           type: string
@@ -3026,6 +3135,7 @@ components:
           type: boolean
     Tree:
       type: object
+      required: [commit_id, files]
       properties:
         commit_id:
           type: string
@@ -3262,7 +3372,7 @@ components:
             type: string
     HubImportJob:
       type: object
-      required: [id, repo_id, provider, source_repo_id, source_revision, status, files_total, files_imported, logical_bytes, bytes_imported, arachne_files, security_counts, commit_id, operation_id, error, created_by, created_at]
+      required: [id, repo_id, provider, source_repo_id, source_revision, status, files_total, files_imported, logical_bytes, bytes_imported, arachne_files, security_counts, commit_id, operation_id, error, created_by, created_at, started_at, completed_at]
       properties:
         id:
           type: string
@@ -3318,6 +3428,7 @@ components:
           nullable: true
     FileContent:
       type: object
+      required: [commit_id, path, executable, conflicted, size_bytes, content, binary]
       properties:
         commit_id:
           type: string
@@ -3395,6 +3506,7 @@ components:
           format: int64
     OpLogEntry:
       type: object
+      required: [operation_id, description, start_time_millis, end_time_millis, parent_operation_ids]
       properties:
         operation_id:
           type: string
@@ -3412,6 +3524,7 @@ components:
             type: string
     IssueLabel:
       type: object
+      required: [name, color]
       properties:
         name:
           type: string
@@ -3419,6 +3532,7 @@ components:
           type: string
     Label:
       type: object
+      required: [id, name, color, description]
       properties:
         id:
           type: integer
@@ -3431,6 +3545,7 @@ components:
           type: string
     Milestone:
       type: object
+      required: [id, title, state, description, due_on]
       properties:
         id:
           type: integer
@@ -3508,6 +3623,7 @@ components:
           nullable: true
     Notification:
       type: object
+      required: [id, user_id, repo_name, kind, title, body, href, read_at, created_at]
       properties:
         id:
           type: integer
@@ -3555,6 +3671,7 @@ components:
           type: boolean
     Issue:
       type: object
+      required: [number, title, body, state, user, labels, assignees, milestone, comments, html_url, created_at, updated_at]
       properties:
         number:
           type: integer
@@ -3594,6 +3711,7 @@ components:
           type: string
     Comment:
       type: object
+      required: [id, body, user, html_url, created_at, updated_at]
       properties:
         id:
           type: integer
@@ -3619,6 +3737,7 @@ components:
           nullable: true
     Review:
       type: object
+      required: [id, body, user, state, html_url, submitted_at]
       properties:
         id:
           type: integer
@@ -3638,6 +3757,7 @@ components:
           type: string
     MergePolicy:
       type: object
+      required: [require_passing_actions, block_merge_when_conflicted, require_review_approvals, protect_default_branch, updated_at]
       properties:
         require_passing_actions:
           type: boolean
@@ -3664,6 +3784,7 @@ components:
           type: boolean
     IssueDetail:
       type: object
+      required: [issue, comments]
       properties:
         issue:
           $ref: "#/components/schemas/Issue"
@@ -3673,6 +3794,7 @@ components:
             $ref: "#/components/schemas/Comment"
     PullRef:
       type: object
+      required: [ref, sha]
       properties:
         ref:
           type: string
@@ -3680,6 +3802,7 @@ components:
           type: string
     Pull:
       type: object
+      required: [number, title, body, state, user, head, base, merge_base, merged, mergeable, html_url, created_at, updated_at, comments]
       properties:
         number:
           type: integer
@@ -3715,6 +3838,7 @@ components:
           type: integer
     PullDiff:
       type: object
+      required: [from_commit_id, to_commit_id, conflicted, files]
       properties:
         from_commit_id:
           type: string
@@ -3728,6 +3852,7 @@ components:
             type: object
     Branch:
       type: object
+      required: [name, commit, protected]
       properties:
         name:
           type: string
@@ -3744,6 +3869,7 @@ components:
           type: boolean
     CommitStatus:
       type: object
+      required: [id, state, context, description, target_url, created_at, updated_at]
       properties:
         id:
           type: integer
@@ -3761,6 +3887,7 @@ components:
           type: string
     ActionJob:
       type: object
+      required: [id, run_id, name, status, exit_code]
       properties:
         id:
           type: string
@@ -3775,6 +3902,7 @@ components:
           nullable: true
     ActionRun:
       type: object
+      required: [id, repo, commit_id, branch, status, conclusion, trigger, actor, workflow, release_version, release_manifest_sha256, provider, sandbox_id, created_at_millis, started_at_millis, finished_at_millis, duration_ms, attempt, jobs]
       properties:
         id:
           type: string
@@ -3824,6 +3952,7 @@ components:
             $ref: "#/components/schemas/ActionJob"
     ActionRunList:
       type: object
+      required: [runs, next_cursor]
       properties:
         runs:
           type: array
@@ -3835,6 +3964,7 @@ components:
           nullable: true
     ActionLog:
       type: object
+      required: [run_id, text]
       properties:
         run_id:
           type: string
@@ -3842,6 +3972,7 @@ components:
           type: string
     ActionsConfig:
       type: object
+      required: [enabled, provider, default_image, timeout_seconds, accelerator, gpu_types]
       properties:
         enabled:
           type: boolean
@@ -3861,6 +3992,7 @@ components:
             type: string
     ProviderCapabilities:
       type: object
+      required: [one_shot_jobs, persistent_workspaces, snapshots, templates, regions, ssh, desktop, public_url, file_api, terminal_streaming, gpu, gpu_types, cost_hints]
       properties:
         one_shot_jobs:
           type: boolean
@@ -3928,6 +4060,7 @@ components:
           type: string
     FabricProvider:
       type: object
+      required: [id, name, layer, kind, enabled, configured, capabilities]
       description: Shared Provider Fabric metadata (ADR-0019); never includes secrets
       properties:
         id:
@@ -3953,6 +4086,7 @@ components:
           type: string
     FabricProviderList:
       type: object
+      required: [providers, default_provider_id]
       properties:
         providers:
           type: array
@@ -3965,6 +4099,7 @@ components:
           nullable: true
     SecretMeta:
       type: object
+      required: [id, scope, org_id, repo_id, name, description, value_last4, created_by, created_at, updated_at]
       description: Metadata only — never includes plaintext secret values
       properties:
         id:
@@ -3991,6 +4126,7 @@ components:
           type: string
     AgentSession:
       type: object
+      required: [agent, agent_id, token_id, last_tool, last_status, last_seen, first_seen, tool_calls]
       properties:
         agent:
           type: string
@@ -4010,6 +4146,7 @@ components:
           type: integer
     Agent:
       type: object
+      required: [id, name, description, created_at]
       properties:
         id:
           type: string
@@ -4037,6 +4174,7 @@ components:
             $ref: "#/components/schemas/AgentTokenMeta"
     AgentTokenMeta:
       type: object
+      required: [id, token_prefix, allowed_repos, allowed_tools, created_at, expires_at, revoked_at]
       description: Metadata only — never includes plaintext bearer tokens
       properties:
         id:
@@ -4079,6 +4217,7 @@ components:
               type: string
     AgentAuditEntry:
       type: object
+      required: [id, agent_id, token_id, tool, repo, args_digest, status, error, occurred_at]
       properties:
         id:
           type: integer

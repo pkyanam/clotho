@@ -286,7 +286,7 @@ pub fn routes() -> Router<Arc<AppState>> {
             get(list_org_secrets).post(create_org_secret),
         )
         .route(
-            "/api/v1/orgs/{org}/secrets/{name}",
+            "/api/v1/orgs/{org}/secrets/{secretName}",
             get(get_org_secret)
                 .patch(patch_org_secret)
                 .delete(delete_org_secret),
@@ -296,7 +296,7 @@ pub fn routes() -> Router<Arc<AppState>> {
             get(list_repo_secrets).post(create_repo_secret),
         )
         .route(
-            "/api/v1/repos/{repo}/secrets/{name}",
+            "/api/v1/repos/{repo}/secrets/{secretName}",
             get(get_repo_secret)
                 .patch(patch_repo_secret)
                 .delete(delete_repo_secret),

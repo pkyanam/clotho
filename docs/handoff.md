@@ -35,6 +35,12 @@ not_found` and added a live MCP↔REST error-equivalence assertion.
   shared shell/dashboard with explicit active navigation, raised panels,
   section markers, metric hierarchy, non-color row cues, and a bounded
   long-name-safe organization rail.
+- Added `pnpm test:contract`: parsed 108-operation Axum/OpenAPI method-path
+  equality, reference/operation/request/success/path metadata checks, canonical
+  SDK endpoint coverage, and shared schema property/requiredness/type parity.
+- Corrected secret-detail parameter naming and missing Hugging Face, binary,
+  and webhook OpenAPI schemas; added deterministic JSON inventory and API diff
+  evidence under `docs/evidence/stage22-api-contract.md`.
 
 ## Baseline state
 
@@ -73,24 +79,20 @@ navigation, semantic tiers resolved to distinct computed colors, desktop had
 no horizontal overflow, and the mobile overflow exposed by long generated
 repository names was corrected in the source before final verification.
 
+For the API-structure slice, the full Rust and JavaScript host baselines passed
+with the contract verifier reporting 108 OpenAPI/Axum operations, 92 SDK calls,
+and 70 SDK interfaces. The API gateway image was rebuilt and restarted without
+removing volumes; its served OpenAPI SHA-256 matched the checked-in file, the
+renamed secret-detail route returned the stable `404 not_found` envelope, and
+`just doctor --json --stack` remained ready.
+
 No live Daytona, Box, ComputeSDK upstream, managed Clerk, private/gated Hub,
 or Tailscale credential test has been run in this slice.
 
 ## Next bounded acceptance test
 
-After the console slice is green and pushed, implement complete OpenAPI
-operation and SDK structural verification as the next Stage 22 blocker.
-Acceptance:
-
-1. The checked-in OpenAPI parses in CI and every operation has an
-   `operationId`, explicit security/stability metadata, request schema, success
-   schema, common error references, and bounded collection behavior.
-2. CI compares Axum method/path inventory—not paths alone—and verifies every
-   SDK method's request and response structures against the contract.
-3. The malformed indentation/unresolved-reference class found in the first
-   Stage 22 slice has a deterministic regression test.
-4. An API diff report identifies additive, breaking, and documentation-only
-   changes for release evidence.
-
-Do not broaden that slice into pagination semantics, idempotency, or
-speculative Stage 23 work until structural contract verification is complete.
+After the API-structure slice is green and pushed, implement bounded cursor
+pagination for canonical collections as the next Stage 22 blocker. Define one
+envelope and maximum-limit policy in REST/OpenAPI/SDK, migrate the smallest
+high-volume list family first, and preserve a documented compatibility path
+for existing SDK callers. Do not broaden into speculative Stage 23 work.

@@ -1,6 +1,6 @@
 # Stage 22 release gap matrix
 
-**Audited:** July 11, 2026 through the active Stage 22 web-quality slice. This
+**Audited:** July 11, 2026 through the active Stage 22 API-contract slice. This
 matrix records implementation and evidence separately; “partial” does not
 satisfy the public-alpha gate.
 
@@ -8,17 +8,17 @@ Status: **implemented**, **partial**, **missing**, or **evidence gap**.
 
 ## REST and OpenAPI
 
-| Gate                           | Status      | Current evidence / precise gap                                                                                                                                                                                                                                   |
-| ------------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Complete operation inventory   | Partial     | Axum↔path presence test exists in `openapi_drift.rs`; YAML now parses, but operations lack consistent auth, examples, stability labels, complete error responses, pagination, and several response schemas are generic objects.                                  |
-| Versioned stable errors        | Implemented | Envelope version `1` has stable `code`, safe `message`, `request_id`, optional `details`, and `retryable`; catch-all middleware normalizes Axum errors and redacts internal provider/gRPC topology. SDK, CLI, MCP, OpenAPI, tests, and docs preserve the fields. |
-| Cursor pagination and bounds   | Partial     | Actions has `before`/`next_cursor`; several lists expose only `limit` or unbounded arrays. No shared cursor envelope or maximum for every collection.                                                                                                            |
-| Idempotency keys               | Missing     | Create/start/import/submit routes do not accept or persist a common idempotency key.                                                                                                                                                                             |
-| Request and audit correlation  | Partial     | Every response carries `X-Request-Id`; valid caller IDs are accepted, generated IDs replace invalid values, and structured gateway spans include the same ID. Durable activity/agent-audit schema links are still missing.                                       |
-| Conditional reads/writes       | Partial     | Release downloads emit an ETag, but `If-None-Match` and policy `If-Match` behavior are absent.                                                                                                                                                                   |
-| Transfer/async conventions     | Partial     | Release byte ranges and bounded previews exist; durable imports/Actions exist. Common operation handles, cancellation, log paging, timeouts, and limit documentation do not.                                                                                     |
-| Compatibility/deprecation rule | Partial     | Prose exists in `docs/api.md`; no deprecation headers, API-diff report, or enforced compatibility check.                                                                                                                                                         |
-| Structural SDK parity          | Missing     | SDK is hand-written with method tests; CI checks route paths only, not request/response schema equivalence.                                                                                                                                                      |
+| Gate                           | Status      | Current evidence / precise gap                                                                                                                                                                                                                                          |
+| ------------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Complete operation inventory   | Implemented | `pnpm test:contract` parses OpenAPI, resolves refs, and compares all 108 Axum HTTP method/path registrations. It requires unique IDs, mutation request schemas, success schemas, path parameters, and effective alpha auth/error metadata. Pagination remains separate. |
+| Versioned stable errors        | Implemented | Envelope version `1` has stable `code`, safe `message`, `request_id`, optional `details`, and `retryable`; catch-all middleware normalizes Axum errors and redacts internal provider/gRPC topology. SDK, CLI, MCP, OpenAPI, tests, and docs preserve the fields.        |
+| Cursor pagination and bounds   | Partial     | Actions has `before`/`next_cursor`; several lists expose only `limit` or unbounded arrays. No shared cursor envelope or maximum for every collection.                                                                                                                   |
+| Idempotency keys               | Missing     | Create/start/import/submit routes do not accept or persist a common idempotency key.                                                                                                                                                                                    |
+| Request and audit correlation  | Partial     | Every response carries `X-Request-Id`; valid caller IDs are accepted, generated IDs replace invalid values, and structured gateway spans include the same ID. Durable activity/agent-audit schema links are still missing.                                              |
+| Conditional reads/writes       | Partial     | Release downloads emit an ETag, but `If-None-Match` and policy `If-Match` behavior are absent.                                                                                                                                                                          |
+| Transfer/async conventions     | Partial     | Release byte ranges and bounded previews exist; durable imports/Actions exist. Common operation handles, cancellation, log paging, timeouts, and limit documentation do not.                                                                                            |
+| Compatibility/deprecation rule | Partial     | Prose exists in `docs/api.md`; no deprecation headers, API-diff report, or enforced compatibility check.                                                                                                                                                                |
+| Structural SDK parity          | Implemented | The verifier inspects 92 SDK REST calls and 70 interfaces, requires canonical endpoint coverage, and compares shared-schema property names, requiredness, and base types. Binary release GET/HEAD maps explicitly to `downloadReleaseFile`.                             |
 
 ## CLI
 
