@@ -72,7 +72,7 @@ clotho --json actions list demo-loop
 | Group | Subcommands |
 |---|---|
 | `auth` | `whoami`, `token create\|list\|revoke` |
-| `repo` | `init`, `list`, `status`, `log`, `tree`, `artifacts`, `preview`, `commit`, `submit`, `update`, `delete`, `merge-policy get\|set` |
+| `repo` | `init`, `list`, `status`, `log`, `tree`, `artifacts`, `preview`, `import-hf`, `commit`, `submit`, `update`, `delete`, `merge-policy get\|set` |
 | `issue` | `list`, `create`, `get`, `comment`, `update` |
 | `label` | `list`, `create` |
 | `milestone` | `list`, `create` |
@@ -104,6 +104,7 @@ clotho provider list                          # compute (default)
 clotho provider list --layer auth
 clotho provider list --layer storage          # live Arachne + StorageSDK state
 clotho provider list --layer network          # live Tailscale connection state
+clotho provider list --layer hub              # Hugging Face import path
 clotho provider list --all
 ```
 
@@ -165,7 +166,14 @@ metadata / primary-artifact readiness directly from the Clotho control plane:
 clotho repo artifacts my-model
 clotho --json repo artifacts my-dataset
 clotho repo preview my-dataset data/train.jsonl --limit 25
+clotho repo import-hf my-model hf-internal-testing/tiny-random-gpt2 --revision main
 ```
+
+Use repeated `--path` flags for a selective snapshot. Imports default to 200
+files / 10 GiB, block unsafe Hub scanner results, stream large files directly
+to Arachne, and land through the merge queue. `--allow-unsafe` is an explicit
+CLI-only override. Private/gated repositories use a Clotho-stored
+`HUGGINGFACE_TOKEN`; public repositories need no credential.
 
 ## Secrets
 

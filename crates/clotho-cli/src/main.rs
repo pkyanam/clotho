@@ -151,7 +151,7 @@ async fn cmd_auth(config: &Config, mut args: Vec<String>) -> Result<()> {
 
 async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
     let Some(sub) = args.first().cloned() else {
-        bail!("usage: clotho repo <init|list|status|log|commit|submit|tree|artifacts|preview|get> ...");
+        bail!("usage: clotho repo <init|list|status|log|commit|submit|tree|artifacts|preview|import-hf|get> ...");
     };
     args.remove(0);
     match sub.as_str() {
@@ -394,6 +394,70 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
                 for row in body["rows"].as_array().into_iter().flatten() {
                     println!("{row}");
                 }
+            })
+        }
+        "import-hf" | "import-huggingface" => {
+            if args.len() < 2 {
+                bail!("usage: clotho repo import-hf <target-repo> <namespace/name> [--revision <rev>] [--path <path>]... [--max-files N] [--max-bytes N] [--allow-unsafe]");
+            }
+            let repo = args.remove(0);
+            let source = args.remove(0);
+            let revision = take_option(&mut args, "--revision").unwrap_or_else(|| "main".into());
+            let paths = take_repeated(&mut args, "--path");
+            let max_files = take_option(&mut args, "--max-files")
+                .map(|value| {
+                    value
+                        .parse::<u64>()
+                        .context("--max-files must be an integer")
+                })
+                .transpose()?
+                .unwrap_or(200);
+            let max_total_bytes = take_option(&mut args, "--max-bytes")
+                .map(|value| {
+                    value
+                        .parse::<u64>()
+                        .context("--max-bytes must be an integer")
+                })
+                .transpose()?
+                .unwrap_or(10 * 1024 * 1024 * 1024);
+            let allow_unsafe = take_flag(&mut args, "--allow-unsafe");
+            if !args.is_empty() {
+                bail!("unrecognized repo import-hf arguments: {}", args.join(" "));
+            }
+            let body = request_value(
+                config,
+                reqwest::Method::POST,
+                &format!("/api/v1/repos/{repo}/imports/huggingface"),
+                Some(json!({
+                    "repo_id": source,
+                    "revision": revision,
+                    "paths": paths,
+                    "max_files": max_files,
+                    "max_total_bytes": max_total_bytes,
+                    "allow_unsafe": allow_unsafe,
+                })),
+            )
+            .await?;
+            emit(config, &body, || {
+                println!(
+                    "imported {} files / {} bytes from {}/{} into {} at {}",
+                    body["files_imported"].as_u64().unwrap_or(0),
+                    body["logical_bytes"].as_u64().unwrap_or(0),
+                    body["source_repo_id"].as_str().unwrap_or(&source),
+                    body["source_revision"].as_str().unwrap_or(&revision),
+                    repo,
+                    short(body["commit_id"].as_str().unwrap_or("")),
+                );
+                println!(
+                    "Arachne files {} · security {}{}",
+                    body["arachne_files"].as_u64().unwrap_or(0),
+                    body["security_counts"],
+                    if body["conflicted"].as_bool().unwrap_or(false) {
+                        " · conflicted"
+                    } else {
+                        ""
+                    }
+                );
             })
         }
         "commit" => repo_commit(config, args).await,
@@ -1951,6 +2015,7 @@ fn usage() {
     clotho repo tree <repo>
     clotho repo artifacts <repo>
     clotho repo preview <repo> <csv|tsv|jsonl-path> [--limit 1..100]
+    clotho repo import-hf <target> <namespace/name> [--revision <rev>] [--path <path>]... [--max-files N] [--max-bytes N]
     clotho repo commit <repo> -m <msg> --file <path> [...] [--submit]
     clotho repo submit <repo> <commit-id>
 
@@ -1990,7 +2055,7 @@ fn usage() {
     clotho actions config <repo> [--provider <id>] [--enabled true|false] [--accelerator cpu|gpu] [--gpu-type <id>]...
 
   provider
-    clotho provider list [--layer compute|storage|network|auth] [--all]
+    clotho provider list [--layer compute|storage|network|hub|auth] [--all]
     clotho provider get <id>
     clotho provider connect <id> (--api-key <key> | --client-id <id> --client-secret <secret>) [--org <org>]
     clotho provider disconnect <id> [--org <org>]

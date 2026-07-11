@@ -118,6 +118,32 @@ describe("ClothoClient", () => {
     );
   });
 
+  it("imports a pinned Hugging Face snapshot through Clotho", async () => {
+    const { client, fetchMock } = clientWith(
+      jsonResponse({ provider: "huggingface", commit_id: "c1" }),
+    );
+    await client.importHuggingFace("weave", "openai/gpt-oss", {
+      revision: "abc123",
+      paths: ["README.md", "model.safetensors"],
+      maxFiles: 10,
+      maxTotalBytes: 1_000_000,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://gateway.test/api/v1/repos/weave/imports/huggingface",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          repo_id: "openai/gpt-oss",
+          revision: "abc123",
+          paths: ["README.md", "model.safetensors"],
+          max_files: 10,
+          max_total_bytes: 1_000_000,
+          allow_unsafe: false,
+        }),
+      }),
+    );
+  });
+
   it("surfaces gateway error bodies as ClothoApiError", async () => {
     const { client } = clientWith(
       jsonResponse({ error: 'repo "weave" already exists' }, 409),

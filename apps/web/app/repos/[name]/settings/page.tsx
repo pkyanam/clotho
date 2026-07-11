@@ -21,6 +21,7 @@ import { MergePolicyForm } from "./merge-policy-form";
 import {
   createRepoSecret,
   deleteRepoSecret,
+  importHuggingFace,
   updateActionsPolicy,
 } from "./actions";
 
@@ -82,6 +83,9 @@ export default async function SettingsPage({
       <nav className="mt-6 flex flex-wrap gap-2 text-[0.8125rem]">
         {[
           ["#general", "general"],
+          ...(detail.kind === "model" || detail.kind === "dataset"
+            ? [["#hub", "hub import"]]
+            : []),
           ["#merge", "merge"],
           ["#collaborators", "collaborators"],
           ["#secrets", "secrets"],
@@ -133,6 +137,68 @@ export default async function SettingsPage({
             </dl>
           </SettingsSection>
         </div>
+
+        {(detail.kind === "model" || detail.kind === "dataset") && (
+          <div id="hub">
+            <SettingsSection
+              title="Hub import"
+              description="stream a pinned Hugging Face model or dataset snapshot into Clotho VCS and Arachne."
+              badge={<Badge variant="outline">Hugging Face</Badge>}
+            >
+              <p className="mb-5 text-[0.8125rem] leading-relaxed text-kumo-inactive">
+                public repositories need no credential. For private or gated sources, save
+                <code className="mx-1 text-kumo-default">HUGGINGFACE_TOKEN</code>
+                as a repository or organization secret. Suspicious Hub scan results fail closed.
+              </p>
+              <form
+                action={importHuggingFace.bind(null, name)}
+                className="grid gap-4 sm:grid-cols-2"
+              >
+                <label className="text-[0.8125rem] text-kumo-inactive sm:col-span-2">
+                  source repository
+                  <input
+                    name="repo_id"
+                    required
+                    placeholder="namespace/model-or-dataset"
+                    className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 text-kumo-default"
+                  />
+                </label>
+                <label className="text-[0.8125rem] text-kumo-inactive">
+                  revision
+                  <input
+                    name="revision"
+                    defaultValue="main"
+                    className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 text-kumo-default"
+                  />
+                </label>
+                <label className="text-[0.8125rem] text-kumo-inactive">
+                  max files
+                  <input
+                    name="max_files"
+                    type="number"
+                    min="1"
+                    max="1000"
+                    defaultValue="200"
+                    className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 text-kumo-default"
+                  />
+                </label>
+                <label className="text-[0.8125rem] text-kumo-inactive sm:col-span-2">
+                  exact paths (optional, comma or newline separated)
+                  <textarea
+                    name="paths"
+                    rows={3}
+                    placeholder={"README.md\nconfig.json\nmodel.safetensors"}
+                    className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 font-mono text-[0.8125rem] text-kumo-default"
+                  />
+                </label>
+                <input type="hidden" name="max_total_bytes" value="10737418240" />
+                <div className="sm:col-span-2">
+                  <Button type="submit">import into Clotho</Button>
+                </div>
+              </form>
+            </SettingsSection>
+          </div>
+        )}
 
         <div id="merge">
           <SettingsSection

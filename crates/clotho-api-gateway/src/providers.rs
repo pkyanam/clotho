@@ -1,6 +1,6 @@
 //! Provider Fabric skeleton (ADR-0019 / Stage 17).
 //!
-//! Shared list metadata across layers: compute | storage | network | auth.
+//! Shared list metadata across layers: compute | storage | network | hub | auth.
 //! Compute is real (CCI registry). Storage probes the live Arachne service;
 //! network probes the Tailscale OAuth connection. Auth reports the active
 //! AuthProvider.
@@ -22,6 +22,7 @@ pub enum ProviderLayer {
     Compute,
     Storage,
     Network,
+    Hub,
     Auth,
 }
 
@@ -31,6 +32,7 @@ impl ProviderLayer {
             Self::Compute => "compute",
             Self::Storage => "storage",
             Self::Network => "network",
+            Self::Hub => "hub",
             Self::Auth => "auth",
         }
     }
@@ -40,6 +42,7 @@ impl ProviderLayer {
             "compute" => Some(Self::Compute),
             "storage" => Some(Self::Storage),
             "network" => Some(Self::Network),
+            "hub" => Some(Self::Hub),
             "auth" => Some(Self::Auth),
             _ => None,
         }
@@ -308,6 +311,37 @@ fn auth_providers(state: &AppState) -> Vec<FabricProvider> {
     ]
 }
 
+async fn hub_providers(state: &AppState, org: Option<&str>) -> Vec<FabricProvider> {
+    let token =
+        crate::secrets::resolve_org_secret(state, org, crate::secrets::SECRET_HUGGINGFACE_TOKEN)
+            .await
+            .ok()
+            .flatten();
+    vec![FabricProvider {
+        id: "huggingface".into(),
+        name: "Hugging Face Hub".into(),
+        layer: ProviderLayer::Hub.as_str().into(),
+        kind: "direct".into(),
+        enabled: true,
+        // Public imports work without credentials; a token expands access to
+        // private and gated repositories without becoming an env requirement.
+        configured: true,
+        configured_reason: if token.is_some() {
+            "Public + private/gated imports ready · token stored in Clotho".into()
+        } else {
+            "Public imports ready · connect a token for private/gated repos".into()
+        },
+        capabilities: vec![
+            "models".into(),
+            "datasets".into(),
+            "revision-pinning".into(),
+            "security-scan-policy".into(),
+            "stream-to-arachne".into(),
+        ],
+        notes: "Hub bytes become Clotho commits and Arachne objects; Hugging Face is an import provider, not the source of truth".into(),
+    }]
+}
+
 /// `GET /api/v1/providers` — compute by default; `?layer=` for fabric filter;
 /// `?all=true` returns every layer.
 pub async fn list_fabric_providers(
@@ -317,7 +351,7 @@ pub async fn list_fabric_providers(
     if let Some(raw) = query.layer.as_deref() {
         let layer = ProviderLayer::parse(raw).ok_or_else(|| {
             ApiError::InvalidRequest(format!(
-                "unknown layer {raw:?}; expected compute|storage|network|auth"
+                "unknown layer {raw:?}; expected compute|storage|network|hub|auth"
             ))
         })?;
         let list = fabric_for_layer(&state, layer, query.org.as_deref()).await;
@@ -331,6 +365,7 @@ pub async fn list_fabric_providers(
         providers.extend(compute.providers.into_iter().map(FabricProvider::from));
         providers.extend(storage_providers(&state).await);
         providers.extend(network_providers(&state, query.org.as_deref()).await);
+        providers.extend(hub_providers(&state, query.org.as_deref()).await);
         providers.extend(auth_providers(&state));
         let list = FabricProviderListResponse {
             providers,
@@ -373,6 +408,11 @@ async fn fabric_for_layer(
             default_provider_id: "public".into(),
             layer: Some(layer.as_str().into()),
         },
+        ProviderLayer::Hub => FabricProviderListResponse {
+            providers: hub_providers(state, org).await,
+            default_provider_id: "huggingface".into(),
+            layer: Some(layer.as_str().into()),
+        },
         ProviderLayer::Auth => {
             let providers = auth_providers(state);
             let default = state.auth_provider.id().as_str().to_string();
@@ -393,7 +433,7 @@ pub async fn get_fabric_provider(
     if let Some(raw) = query.layer.as_deref() {
         let layer = ProviderLayer::parse(raw).ok_or_else(|| {
             ApiError::InvalidRequest(format!(
-                "unknown layer {raw:?}; expected compute|storage|network|auth"
+                "unknown layer {raw:?}; expected compute|storage|network|hub|auth"
             ))
         })?;
         let list = fabric_for_layer(&state, layer, query.org.as_deref()).await;
@@ -407,6 +447,7 @@ pub async fn get_fabric_provider(
 
     let mut non_compute = storage_providers(&state).await;
     non_compute.extend(network_providers(&state, query.org.as_deref()).await);
+    non_compute.extend(hub_providers(&state, query.org.as_deref()).await);
     non_compute.extend(auth_providers(&state));
     for p in non_compute {
         if p.id.eq_ignore_ascii_case(&provider) {

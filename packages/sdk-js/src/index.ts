@@ -176,6 +176,21 @@ export interface ArtifactPreview {
   truncated: boolean;
 }
 
+export interface HubImportResult {
+  provider: string;
+  source_repo_id: string;
+  source_revision: string;
+  commit_id: string;
+  operation_id: string;
+  files_imported: number;
+  logical_bytes: number;
+  arachne_files: number;
+  security_counts: Record<string, number>;
+  fast_forwarded: boolean;
+  conflicted: boolean;
+  conflicted_paths: string[];
+}
+
 export interface FileContent {
   commit_id: string;
   path: string;
@@ -442,7 +457,7 @@ export interface ComputeProviderList {
 }
 
 /** Provider Fabric layer (ADR-0019 / Stage 17). */
-export type ProviderLayer = "compute" | "storage" | "network" | "auth";
+export type ProviderLayer = "compute" | "storage" | "network" | "hub" | "auth";
 
 export interface FabricProvider {
   id: string;
@@ -841,6 +856,34 @@ export class ClothoClient {
         commit_id: options?.commitId,
         limit: options?.limit,
       })}`,
+    );
+  }
+
+  importHuggingFace(
+    name: string,
+    repoId: string,
+    options?: {
+      revision?: string;
+      paths?: string[];
+      maxFiles?: number;
+      maxTotalBytes?: number;
+      allowUnsafe?: boolean;
+    },
+  ): Promise<HubImportResult> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/imports/huggingface`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          repo_id: repoId,
+          revision: options?.revision ?? "main",
+          paths: options?.paths ?? [],
+          max_files: options?.maxFiles ?? 200,
+          max_total_bytes: options?.maxTotalBytes ?? 10 * 1024 * 1024 * 1024,
+          allow_unsafe: options?.allowUnsafe ?? false,
+        }),
+      },
     );
   }
 

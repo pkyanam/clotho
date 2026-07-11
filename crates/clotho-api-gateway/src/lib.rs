@@ -23,6 +23,7 @@ pub mod computesdk_catalog;
 pub mod control;
 pub mod error;
 pub mod forgejo;
+mod hub;
 mod issues;
 mod labels;
 mod merge_policy;
@@ -299,6 +300,10 @@ pub fn router_with_pool(
         )
         .route("/api/v1/repos/{name}/oplog", get(repos::op_log))
         .route("/api/v1/repos/{name}/submit", post(submit_change))
+        .route(
+            "/api/v1/repos/{name}/imports/huggingface",
+            post(hub::import_huggingface),
+        )
         .route(
             "/api/v1/repos/{name}/merge-policy",
             get(merge_policy::get_merge_policy_handler).put(merge_policy::put_merge_policy_handler),

@@ -129,6 +129,12 @@ Hugging Face-style card frontmatter and portable model/dataset configs become
 structured discovery metadata with source provenance, not presentation-only
 tags trapped in a README renderer.
 
+The Hub provider fabric can import a pinned Hugging Face model or dataset
+snapshot into an existing Clotho repository. Imports validate the fixed source
+host, preserve scanner status, fail closed on unsafe artifacts, stream large
+files into Arachne, and land as ordinary Clotho commits. Public imports need no
+configuration; private/gated access uses an encrypted in-app token.
+
 Tailscale is a first-class NetworkProvider: connect an org OAuth client from
 Clotho settings, verify it live, and mark repositories `public` or `tailscale`
 with scoped tags. Private repos fail closed when network attachment is not

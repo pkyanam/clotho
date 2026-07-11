@@ -16,7 +16,7 @@ info:
     human-only `/api/v1/agents/*` (ADR-0016). Secrets master key is server-side
     only (`CLOTHO_SECRETS_MASTER_KEY`).
 
-    **Provider Fabric (Stage 17):** `GET /api/v1/providers?layer=compute|storage|network|auth`
+    **Provider Fabric (Stage 17):** `GET /api/v1/providers?layer=compute|storage|network|hub|auth`
     (omit `layer` for compute-only backward compatibility; `?all=true` for every
     layer). Arachne and StorageSDK back the storage layer; networking remains
     unconfigured until a provider is connected.
@@ -513,6 +513,35 @@ paths:
               schema:
                 $ref: "#/components/schemas/ArtifactPreview"
         "400":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/repos/{name}/imports/huggingface:
+    post:
+      tags: [repos, providers]
+      operationId: importHuggingFaceRepository
+      summary: Stream a pinned Hugging Face model/dataset snapshot into Clotho VCS and Arachne
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HubImportRequest"
+      responses:
+        "200":
+          description: Imported snapshot committed and submitted through Clotho
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HubImportResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
           $ref: "#/components/responses/Error"
 
   /api/v1/repos/{name}/file:
@@ -1378,7 +1407,7 @@ paths:
       summary: Provider Fabric registry (compute by default)
       description: |
         Without `layer`, returns the compute provider registry (Stage 12 shape).
-        With `layer=compute|storage|network|auth`, returns fabric metadata for
+        With `layer=compute|storage|network|hub|auth`, returns fabric metadata for
         that layer. With `all=true`, returns every layer. Storage probes
         Arachne/StorageSDK and network live-probes stored Tailscale OAuth.
       parameters:
@@ -1387,7 +1416,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [compute, storage, network, auth]
+            enum: [compute, storage, network, hub, auth]
           description: Fabric layer filter
         - name: all
           in: query
@@ -1426,7 +1455,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [compute, storage, network, auth]
+            enum: [compute, storage, network, hub, auth]
         - name: org
           in: query
           required: false
@@ -2603,6 +2632,71 @@ components:
           format: int64
         truncated:
           type: boolean
+    HubImportRequest:
+      type: object
+      required: [repo_id]
+      properties:
+        repo_id:
+          type: string
+          pattern: "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        revision:
+          type: string
+          default: main
+        paths:
+          type: array
+          description: Exact paths; empty imports the complete bounded snapshot
+          items:
+            type: string
+        max_files:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 200
+        max_total_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1099511627776
+          default: 10737418240
+        allow_unsafe:
+          type: boolean
+          default: false
+          description: Explicitly allow caution/suspicious/unsafe Hub scanner results
+    HubImportResult:
+      type: object
+      required: [provider, source_repo_id, source_revision, commit_id, operation_id, files_imported, logical_bytes, arachne_files, security_counts, fast_forwarded, conflicted, conflicted_paths]
+      properties:
+        provider:
+          type: string
+        source_repo_id:
+          type: string
+        source_revision:
+          type: string
+        commit_id:
+          type: string
+        operation_id:
+          type: string
+        files_imported:
+          type: integer
+          format: int64
+        logical_bytes:
+          type: integer
+          format: int64
+        arachne_files:
+          type: integer
+          format: int64
+        security_counts:
+          type: object
+          additionalProperties:
+            type: integer
+        fast_forwarded:
+          type: boolean
+        conflicted:
+          type: boolean
+        conflicted_paths:
+          type: array
+          items:
+            type: string
     FileContent:
       type: object
       properties:
@@ -3212,7 +3306,7 @@ components:
           type: string
         layer:
           type: string
-          enum: [compute, storage, network, auth]
+          enum: [compute, storage, network, hub, auth]
         kind:
           type: string
         enabled:

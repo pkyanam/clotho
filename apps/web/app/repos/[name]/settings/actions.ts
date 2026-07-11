@@ -91,3 +91,24 @@ export async function deleteRepoSecret(repo: string, name: string) {
   revalidatePath(`/repos/${repo}/settings`);
   redirect(`/repos/${repo}/settings#secrets`);
 }
+
+export async function importHuggingFace(repo: string, formData: FormData) {
+  const repoId = String(formData.get("repo_id") ?? "").trim();
+  const revision = String(formData.get("revision") ?? "main").trim() || "main";
+  const paths = String(formData.get("paths") ?? "")
+    .split(/[\n,]/)
+    .map((path) => path.trim())
+    .filter(Boolean);
+  const maxFiles = Number(formData.get("max_files") ?? 200);
+  const maxTotalBytes = Number(formData.get("max_total_bytes") ?? 10_737_418_240);
+  if (!repoId) throw new Error("Hugging Face namespace/name is required");
+  await (await api()).importHuggingFace(repo, repoId, {
+    revision,
+    paths,
+    maxFiles,
+    maxTotalBytes,
+  });
+  revalidatePath(`/repos/${repo}`);
+  revalidatePath(`/repos/${repo}/settings`);
+  redirect(`/repos/${repo}`);
+}

@@ -27,6 +27,7 @@ const NONCE_LEN: usize = 12;
 /// Well-known secret names that bind to direct CCI providers.
 pub const SECRET_DAYTONA_API_KEY: &str = "DAYTONA_API_KEY";
 pub const SECRET_BOX_API_KEY: &str = "BOX_API_KEY";
+pub const SECRET_HUGGINGFACE_TOKEN: &str = "HUGGINGFACE_TOKEN";
 pub const SECRET_TAILSCALE_CLIENT_ID: &str = "TAILSCALE_OAUTH_CLIENT_ID";
 pub const SECRET_TAILSCALE_CLIENT_SECRET: &str = "TAILSCALE_OAUTH_CLIENT_SECRET";
 
@@ -707,12 +708,34 @@ async fn connect_provider(
     if body.api_key.trim().is_empty() {
         return Err(ApiError::InvalidRequest("api_key is required".into()));
     }
+    if provider_id == "huggingface" {
+        let probe = state
+            .http
+            .get("https://huggingface.co/api/whoami-v2")
+            .bearer_auth(body.api_key.trim())
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|err| {
+                ApiError::InvalidRequest(format!("Hugging Face token probe failed: {err}"))
+            })?;
+        if !probe.status().is_success() {
+            return Err(ApiError::InvalidRequest(format!(
+                "Hugging Face rejected the token ({})",
+                probe.status()
+            )));
+        }
+    }
     let (secret_name, description) = match provider_id.as_str() {
         "daytona" => (
             SECRET_DAYTONA_API_KEY,
             "Daytona API key for Actions and sandboxes",
         ),
         "box" => (SECRET_BOX_API_KEY, "Box API key for Actions and sandboxes"),
+        "huggingface" => (
+            SECRET_HUGGINGFACE_TOKEN,
+            "Hugging Face token for private or gated repository imports",
+        ),
         other => {
             return Err(ApiError::InvalidRequest(format!(
                 "provider {other:?} does not support in-app connect"
@@ -819,6 +842,7 @@ pub fn provider_secret_name(provider_id: &str) -> Option<&'static str> {
         // Any connected ComputeSDK secret indicates overlay readiness.
         "computesdk" => computesdk_catalog::all_secret_names().into_iter().next(),
         "tailscale" => Some(SECRET_TAILSCALE_CLIENT_SECRET),
+        "huggingface" => Some(SECRET_HUGGINGFACE_TOKEN),
         _ => None,
     }
 }
@@ -830,6 +854,7 @@ pub fn provider_secret_names(provider_id: &str) -> Vec<&'static str> {
         "box" => vec![SECRET_BOX_API_KEY],
         "computesdk" => computesdk_catalog::all_secret_names(),
         "tailscale" => vec![SECRET_TAILSCALE_CLIENT_ID, SECRET_TAILSCALE_CLIENT_SECRET],
+        "huggingface" => vec![SECRET_HUGGINGFACE_TOKEN],
         _ => vec![],
     }
 }

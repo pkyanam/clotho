@@ -59,6 +59,7 @@ Filter by fabric layer:
 curl -s 'http://localhost:8080/api/v1/providers?layer=auth'
 curl -s 'http://localhost:8080/api/v1/providers?layer=storage'   # live Arachne + StorageSDK state
 curl -s 'http://localhost:8080/api/v1/providers?layer=network'   # live Tailscale probe
+curl -s 'http://localhost:8080/api/v1/providers?layer=hub'       # Hub import providers
 curl -s 'http://localhost:8080/api/v1/providers?all=true'
 ```
 
@@ -116,6 +117,21 @@ model, metrics, and version links). Selected portable fields from `config.json`
 and `dataset_info.json` are composed into the same manifest, with
 `metadata_sources` preserving provenance. Parsing is bounded and ignores
 unknown or nested YAML rather than executing a general-purpose YAML runtime.
+
+Import a public Hugging Face snapshot directly into an existing Clotho model
+or dataset repository. The source host and paths are validated, Hub scanner
+results fail closed, large responses stream directly to Arachne, and the
+result is committed/submitted through Clotho VCS:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/repos/tiny-gpt/imports/huggingface \
+  -H 'content-type: application/json' \
+  -d '{"repo_id":"hf-internal-testing/tiny-random-gpt2","revision":"main"}' | jq
+```
+
+Public imports need no credential. For private/gated sources, connect a token
+in Clotho (`provider connect huggingface`) or store `HUGGINGFACE_TOKEN` as an
+org/repo secret; environment configuration is not required.
 
 CSV, TSV, and JSONL previews are deliberately bounded: the gateway streams at
 most 256 KiB from Arachne and returns at most 100 rows. Large datasets never
@@ -182,7 +198,7 @@ curl -s http://localhost:8080/api/v1/providers | jq
 | Pulls | `…/pulls`, comments, reviews, merge, diff |
 | Merge policy | `GET/PUT …/merge-policy` (Slice E, ADR-0017) |
 | Actions | `…/actions/runs`, `…/logs`, `…/config` |
-| Providers | `/api/v1/providers`, `…/connect` (POST connect / DELETE disconnect) |
+| Providers | `/api/v1/providers`, `…/connect` (POST connect / DELETE disconnect), repo `…/imports/huggingface` |
 | Secrets | `/api/v1/orgs/{org}/secrets`, `/api/v1/repos/{repo}/secrets` |
 | Agents (presence) | `…/agent-sessions` |
 | Agents (admin) | `/api/v1/agents`, `…/tokens`, `…/audit` |
