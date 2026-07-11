@@ -168,15 +168,14 @@ async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<CiOutput, St
     // pick a configured one-shot provider.
     let config = state.actions.config_for(repo).await;
     let provider_id = config.provider.trim().to_string();
-    let snapshot = if config.default_image.trim().is_empty()
-        || config.default_image == "ubuntu:22.04"
-    {
-        // Leave empty so the provider uses its own default snapshot when the
-        // repo still has the generic gateway fallback image.
-        String::new()
-    } else {
-        config.default_image.clone()
-    };
+    let snapshot =
+        if config.default_image.trim().is_empty() || config.default_image == "ubuntu:22.04" {
+            // Leave empty so the provider uses its own default snapshot when the
+            // repo still has the generic gateway fallback image.
+            String::new()
+        } else {
+            config.default_image.clone()
+        };
     let timeout_secs = config.timeout_seconds;
 
     // Resolve provider credentials from Clotho secrets (docs/adr/0014).

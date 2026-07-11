@@ -1,6 +1,6 @@
 # Clotho — Product Requirements
-### Prototype record and v2 modular-platform roadmap
-**v0.2 — July 2026**
+### Prototype record, v2 modular-platform roadmap, and v3 dream roadmap
+**v0.3 — July 2026**
 
 ---
 
@@ -15,6 +15,8 @@ PRD v2 shifts the product from "prove the stack works" to "make Clotho a mature 
 - Add ComputeSDK as an optional bridge/adapter behind CCI, not as the core product boundary.
 - Add Box later as a richer persistent VM / agent-workspace provider, not as a replacement for short-lived CI sandboxes.
 - Treat web, REST, SDK, CLI, and MCP parity as part of feature maturity, not separate polish.
+
+**PRD v3 (Dream Roadmap)** turns the vision's idealism into sequenced product work: Clerk human auth, a Provider Fabric (compute + BYO storage + Tailscale network), Arachne on the real VCS path (code *and* model/dataset repos), and an agent runtime that does not feel bolted on (durable merge-queue, sandboxes, provenance). See §5 Stages 17–21 and ADRs 0018–0022. Discovery (Stage 16) stays after those foundations.
 
 ---
 
@@ -396,14 +398,14 @@ are first-class for every advertised provider — not only Daytona.
 Make REST the single product contract; every stable web capability must be
 reachable by humans (CLI) and agents (MCP) with the same semantics as the SDK.
 
-#### Current surface audit (2026-07-09, updated Stage 15 slice) — start here
+#### Current surface audit (2026-07-09, Slice F) — start here
 
 | Surface | What exists today | Gaps |
 |---|---|---|
-| **REST** (`clotho-api-gateway`) | health; users/orgs/activity; repos CRUD-ish + tree/file/commits/oplog/submit; issues/PRs/comments/reviews/merge/diff; branches; statuses; Actions runs/logs/config; providers; agent-sessions; secrets (org/repo); provider connect; Forgejo webhook; **OpenAPI at `/openapi.yaml` + `docs/openapi.yaml`** | No public `/sandboxes` session API; no agent admin via edge; no labels/milestones/assignees; no notifications; no signals; limited settings write; clone URL may still need a Clotho-public git endpoint |
-| **SDK** (`@clotho/sdk-js`) | Hand-written client covering most REST above + secrets/connect + getRepoSecret | No OpenAPI→TS codegen yet (path drift CI exists); no sandbox session types; no agent mint/list |
-| **CLI** (`clotho`) | Grouped `repo|issue|pr|actions|provider|secret|org|activity` + `--json`; Stage 8 aliases retained | No auth story yet; no agent mint CLI; recursive working-tree commit still later product work |
-| **MCP** (`clotho-agent-gateway`) | VCS tools (gRPC) + collab/Actions/platform/read helpers **via REST edge** | No sandbox sessions; secrets are list/metadata only (no write tools by design for agents in this slice); agent admin still separate REST |
+| **REST** (`clotho-api-gateway`) | health; auth (`/me`, `/tokens`); users/orgs/activity; repos CRUD + PATCH/DELETE + merge-policy; tree/file/commits/oplog/submit; issues/PRs/comments/reviews/merge/diff; labels/milestones/assignees; notifications; branches; statuses; Actions runs/logs/config; providers + connect; agent-sessions; secrets (org/repo); **agent admin via edge** (`/agents`, tokens, audit); **OpenAPI at `/openapi.yaml` + `docs/openapi.yaml`** | No public `/sandboxes` session API; no signals; clone URL may still need a Clotho-public git endpoint; internal collab webhook only |
+| **SDK** (`@clotho/sdk-js`) | Hand-written client covering REST above incl. auth, agents, labels, notifications, merge-policy, secrets, connect | No OpenAPI→TS codegen yet (path drift CI exists); no sandbox session types |
+| **CLI** (`clotho`) | Grouped `auth|repo|issue|label|milestone|notification|pr|actions|provider|secret|org|activity|agent` + `--json`; Stage 8 aliases; demo loop documented | Recursive working-tree commit still later product work |
+| **MCP** (`clotho-agent-gateway`) | VCS tools (gRPC) + collab/Actions/platform/read helpers **via REST edge**; `create_issue` supports labels/assignees/milestone | No sandbox sessions; secrets are list/metadata only (no write tools by design); **no agent-admin mint tools** (by design) |
 
 #### Stage 15 workstreams
 
@@ -456,25 +458,28 @@ reachable by humans (CLI) and agents (MCP) with the same semantics as the SDK.
    - SDK tests cover every public method; OpenAPI (or equivalent) exists and is
      CI-checked; no feature is marked mature if it is web-only.
 
-#### Stage 15 implementation notes (2026-07-08)
+#### Stage 15 implementation notes (2026-07-09, Slices A–F)
 
 - **OpenAPI:** hand-maintained [`docs/openapi.yaml`](openapi.yaml) covers stable
   `/api/v1/*` routes + error envelope; served at `GET /openapi.yaml`; path drift
-  checked by `crates/clotho-api-gateway/tests/openapi_drift.rs`.
-- **CLI:** regrouped into `repo|issue|pr|actions|provider|secret|org|activity`
-  with `--json` and Stage 8 aliases (`init`, `status`, `log`, `commit`, `submit`,
-  `pr <repo>`). Still REST-only (ADR-0010). Docs: [`docs/cli.md`](cli.md).
-- **MCP:** collab (`list_issues`, `create_issue`, `comment_issue`, `list_pulls`,
-  `create_pull`, `comment_pull`, `review_pull`, `merge_pull`), Actions
-  (`list_action_runs`, `start_action_run`, `get_action_logs`), platform
-  (`list_providers`, `list_repos`, `get_activity`, `list_secrets` metadata), and
-  read helpers (`get_tree`, `get_file`) call the **REST edge** via
-  `CLOTHO_API_URL`. VCS tools remain gRPC. Platform tools use empty repo scope.
-  Docs: [`docs/mcp.md`](mcp.md).
-- **SDK:** already covered the REST surface; added `getRepoSecret`; comments
-  point at OpenAPI as the contract. Docs: [`docs/api.md`](api.md).
-- **Not in this slice:** sandbox session API, agent admin via edge, OpenAPI→SDK
-  codegen, full Box/ComputeSDK honesty (Stage 14).
+  checked by `crates/clotho-api-gateway/tests/openapi_drift.rs`. Auth blurb
+  documents `CLOTHO_AUTH_REQUIRED` + Bearer tokens + agent admin on edge.
+- **Auth (A):** human API tokens, `/me`, `/tokens`, repo PATCH/DELETE,
+  Clotho-only `info` field on repo detail.
+- **CLI:** regrouped into `auth|repo|issue|label|milestone|notification|pr|
+  actions|provider|secret|org|activity|agent` with `--json` and Stage 8 aliases.
+  Demo loop in [`docs/cli.md`](cli.md). Still REST-only (ADR-0010).
+- **Agent admin (C):** edge-proxied `/api/v1/agents/*`; CLI + web; MCP has no
+  mint tools (ADR-0016).
+- **Collab depth (D):** labels, milestones, assignees on issues; notifications.
+- **Merge policy (E):** `GET/PUT …/merge-policy`; honest review threads;
+  merge 409 envelope.
+- **MCP:** collab, Actions, platform, and read helpers call the **REST edge**
+  via `CLOTHO_API_URL`. VCS tools remain gRPC. Docs: [`docs/mcp.md`](mcp.md).
+- **SDK:** covers the REST surface including agents, notifications, merge-policy;
+  22 tests in `packages/sdk-js`. Docs: [`docs/api.md`](api.md).
+- **Not in Stage 15:** sandbox session API, OpenAPI→SDK codegen, signals/discovery
+  (Stage 16), full Box/ComputeSDK honesty (Stage 14).
 
 ### Stage 16 — Discovery, Social, and Competitive UX *(was Stage 15)*
 - Add Clotho's GitHub Stars competitor as `Signals`: users/orgs can signal
@@ -488,6 +493,79 @@ reachable by humans (CLI) and agents (MCP) with the same semantics as the SDK.
   preserving enterprise/self-host privacy controls.
 - **Prerequisite:** Stage 15 developer surfaces stable enough that discovery
   APIs (`/signals`, profiles) land with SDK/CLI/MCP stubs from day one.
+  **PRD v3:** also prefer Stages 17–20 (trust, storage, network, agent runtime)
+  far enough along that public discovery does not advertise empty model hosting
+  or bolted-on compute.
+
+### Stage 17 — Trust foundation (AuthProvider + Provider Fabric skeleton) *(PRD v3 Phase A)*
+- Introduce `AuthProvider` (docs/adr/0018): `bootstrap` for local/dev;
+  **Clerk** for managed human SSO, orgs, and human API keys.
+- Keep agent identity Clotho-owned (ADR-0005); map `clerk_org_id` /
+  `clerk_user_id` into Clotho orgs/users; never model agents as Clerk users.
+- Production/managed profiles: auth required by default
+  (`CLOTHO_AUTH_REQUIRED=true`, `CLOTHO_AUTH_PROVIDER=clerk`).
+- Introduce **Provider Fabric** skeleton (docs/adr/0019): shared connect /
+  disconnect / configured / capabilities pattern across compute (exists),
+  storage, and network layers — stubs acceptable for storage/network until
+  Stages 18–19.
+- **Acceptance:** a human can sign in via Clerk on web, act with org context,
+  and call REST with a human credential; agents still authenticate only with
+  `clotho_agt_…` tokens; OpenAPI/SDK/CLI document the auth model.
+- *Implementation note (2026-07-09):* `AuthProvider` lands in
+  `clotho-api-gateway` (`auth_provider::{bootstrap,clerk}`) with
+  `CLOTHO_AUTH_PROVIDER` + link tables (`clerk_user_links`, `clerk_org_links`).
+  §11 #7 default: keep minting Clotho `clotho_tok_…` under both providers;
+  Clerk sessions/keys also resolve. Fabric: `GET /api/v1/providers?layer=` +
+  `?all=true`; storage/network honest stubs. Web: optional `@clerk/nextjs`
+  when publishable key set. Tests: `auth_slice_a` + `auth_clerk` mocks.
+
+### Stage 18 — Arachne on the VCS path + BYO object store *(PRD v3 Phase B)*
+- Ship `ObjectStoreProvider`: org (optional repo) BYO S3/R2/GCS-compatible
+  bucket via secrets (ADR-0014/0019); MinIO remains the managed default.
+- Wire Arachne into commit/fetch for large files; git-LFS pointer bridge at
+  the edges (docs/adr/0020).
+- Add repo `kind`: `code` | `model` | `dataset` with kind-tuned attributes
+  and storage UI (dedup metrics, not only VCS tree).
+- **Acceptance:** multi-GB model committed twice (near-duplicate) through
+  normal API shows Stage-2-class chunk dedup; clone/fetch reconstructs
+  byte-identical files; storage settings show honest configured state for
+  BYO buckets.
+
+### Stage 19 — Tailscale NetworkProvider + BYOC runner *(PRD v3 Phase C)*
+- Org **Connect Tailscale**: OAuth client in secrets; suggested tags + ACL
+  snippet; repo network policy (docs/adr/0021).
+- **Private reach:** Actions/sandbox jobs join the customer tailnet as
+  ephemeral tagged nodes when `private-net` is required.
+- Ship `clotho-runner` binary: customer devices register as CCI providers
+  (`byoc:…`) with capability ads; jobs route through CCI only.
+- Private-cloud mode remains documented intent (control plane orchestrates;
+  data/compute in-tailnet) — full packaging may follow.
+- **Acceptance:** with Tailscale connected, a CI job reaches a private
+  service only via the tailnet; a BYOC runner appears in provider list as
+  configured and can run a job; disconnect clears credentials; demo path
+  still works without Tailscale.
+
+### Stage 20 — Agent runtime v2 *(PRD v3 Phase D)*
+- Durable merge-queue (Postgres): survive restarts; queue visibility via
+  REST; speculative CI before advancing `main` (docs/adr/0022).
+- Public `/api/v1/sandboxes` session API backed by CCI persistent providers
+  (Box first); MCP tools via REST edge; checkpoint/restore linked to sessions.
+- Provenance trailers on agent commits (`Clotho-Agent`, run/session ids,
+  optional prompt hash); merge policy may require human review for
+  machine-authored commits.
+- Symbol-aware merge explicitly deferred after this stage.
+- **Acceptance:** two agents submit concurrently across a gateway restart
+  and reconcile; failed speculative CI blocks land; sandbox checkpoint →
+  restore round-trip works; MCP `commit` writes provenance trailers
+  visible in web/CLI.
+
+### Stage 21 — Discovery after foundations *(PRD v3 Phase E)*
+- Execute Stage 16 Signals/profiles/leaderboards only when Stages 17–20
+  acceptance is largely met (or explicitly waived per surface).
+- Publish open performance benchmarks (clone/push vs git+LFS and HF Hub)
+  once Arachne-on-VCS is real — performance-as-marketing.
+- **Acceptance:** same as Stage 16, plus model/code public browsing does
+  not lie about storage or compute capabilities.
 
 ---
 
@@ -514,6 +592,24 @@ reachable by humans (CLI) and agents (MCP) with the same semantics as the SDK.
   share its typed contract instead of drifting into separate behavior.
 - No Clotho service shells out to `git` or `jj` for product behavior.
 
+### PRD v3 (Dream Roadmap)
+
+- **Provider Fabric:** auth, compute, storage, and network follow one
+  connect/configured/capabilities pattern (ADR-0019). Humans never need
+  vendor names for the common path — they declare capabilities.
+- **Auth:** Clerk (or later OIDC) for humans via AuthProvider; agents remain
+  Clotho-native (ADR-0018). Managed deployments require auth by default.
+- **Storage:** Arachne is on the commit/fetch path; BYO object store works;
+  `code` | `model` | `dataset` repo kinds are first-class (ADR-0020).
+- **Network:** Tailscale org connect enables private-reach CI and BYOC
+  runners behind CCI (ADR-0021) without making Tailscale mandatory for demos.
+- **Agent runtime:** durable merge-queue, sandbox sessions, and commit
+  provenance exist as product surfaces — not demo-only gRPC scripts
+  (ADR-0022). Failure mode B (agents fight the queue; compute feels bolted
+  on) is treated as a release blocker for "platform" claims.
+- Stage 16 discovery does not ship ahead of Stages 17–20 without an
+  explicit waiver.
+
 ---
 
 ## 7. Public interfaces
@@ -522,15 +618,22 @@ reachable by humans (CLI) and agents (MCP) with the same semantics as the SDK.
   users, activity, repos (tree/file/commits/oplog/submit), issues/PRs, branches,
   statuses, Actions, providers, secrets, agent-sessions. **Stage 15:** OpenAPI +
   fill gaps required for CLI/MCP parity. **Stage 16:** `/signals`, profiles.
-  `/sandboxes` only after CCI session APIs (Stage 14 Box / persistent path).
+  **Stages 17–20:** AuthProvider session/API-key verification; storage
+  provider connect; repo `kind` + storage stats; Tailscale network connect +
+  repo network policy; `/merge-queue` visibility; `/sandboxes` sessions;
+  provenance on commits. `/sandboxes` only when CCI session APIs are honest.
 - **Compute:** CCI multi-provider registry (Stage 12); secrets-bound credentials
-  (Stage 13); honest Box + ComputeSDK completion (Stage 14). Keep one-shot
-  Actions compatible; persistent workspaces via Box/CCI sessions later.
+  (Stage 13); honest Box + ComputeSDK completion (Stage 14); BYOC
+  `clotho-runner` as a CCI provider (Stage 19).
+- **Storage / network:** ObjectStoreProvider + NetworkProvider under the
+  fabric (Stages 18–19); Arachne↔VCS pointer protocol (Stage 18).
 - **Web:** settings and creation before social/discovery polish (Stage 13
-  largely done; issue/PR depth still open).
+  largely done; issue/PR depth still open). Add Clerk sign-in, provider
+  fabric settings (storage/network), model/dataset overview, merge-queue and
+  sandbox UX in Stages 17–20.
 - **CLI/MCP:** API-backed wrappers only; no shelling out to `git`/`jj` from
-  Clotho services. Stage 15 raises CLI/MCP to parity with stable REST (see
-  Stage 15 audit table).
+  Clotho services. Stage 15 raises CLI/MCP to parity with stable REST; Stages
+  17–20 extend the same rule to new routes.
 
 ---
 
@@ -545,6 +648,11 @@ reachable by humans (CLI) and agents (MCP) with the same semantics as the SDK.
 - Compute provider contract tests using disabled/fake providers by default;
   env-gated live tests for Daytona, ComputeSDK bridge providers, and Box.
 - MCP end-to-end tests for scoped agent permissions and parity workflows.
+- **v3 additions:** Clerk (or mock AuthProvider) session + API-key paths;
+  ObjectStoreProvider probe/configured honesty; Arachne commit/fetch
+  round-trip + dedup measurement; Tailscale connect mocked + env-gated live
+  ephemeral join; merge-queue durability across restart; sandbox
+  checkpoint/restore; provenance trailer assertions on agent commits.
 
 ---
 
@@ -554,13 +662,16 @@ reachable by humans (CLI) and agents (MCP) with the same semantics as the SDK.
 |---|---|
 | `jj-lib` is explicitly experimental/pre-1.0 | API churn is likely; pin a specific version and track upstream changes deliberately rather than auto-upgrading. |
 | Forgejo GPLv3 boundary | Keep `collab/forgejo` strictly submoduled with patches tracked separately, not merged into Clotho's own crates/packages, to keep licensing clean until the org makes a deliberate decision (§11). |
-| `xet-core` designed around HF's CAS service | Our S3/MinIO backend needs a compatible content-addressed-store shim; budget real time for this even though the chunking/xorb logic is reusable as-is. |
-| Multi-agent merge-queue is genuinely unsolved territory | Stage 5's "naive-but-real" framing is deliberate — do not let this stage's scope creep into solving it perfectly; the prototype needs *a* working answer, not *the* answer. |
+| `xet-core` designed around HF's CAS service | Our S3/MinIO backend needs a compatible content-addressed-store shim; budget real time for this even though the chunking/xorb logic is reusable as-is. Stage 18 increases coupling: VCS pointer protocol must stay compatible. |
+| Multi-agent merge-queue is genuinely unsolved territory | Stage 5's "naive-but-real" framing was deliberate. Stage 20 (ADR-0022) raises the bar to durable + speculative CI without claiming semantic merge yet. |
 | Third-party "agentic-jujutsu"-style crates | Treat marketing claims (e.g., unverified performance multipliers) skeptically; fine as design inspiration, not as a dependency for the core engine. |
 | SDK/API drift | Stage 15 must add OpenAPI generation or another single typed contract source before the surface area grows too large to manually keep aligned. |
-| Secret handling expectations | Stage 13 shipped encrypted org/repo secrets (ADR-0014). Remaining risk: master-key bootstrap, rotation tooling, and provider-specific inject paths (Box/ComputeSDK in Stage 14). |
+| Secret handling expectations | Stage 13 shipped encrypted org/repo secrets (ADR-0014). Remaining risk: master-key bootstrap, rotation tooling, and provider-specific inject paths (Box/ComputeSDK in Stage 14; Tailscale OAuth + BYO S3 in Stages 18–19). |
 | CLI/MCP lag | CLI and MCP still cover a fraction of REST; agent-native thesis fails if web-only features accumulate. Stage 15 is mandatory before discovery (Stage 16). |
-| Stub honesty | Box and ComputeSDK must not stay “configured-looking” without runnable jobs (Stage 14). |
+| Stub honesty | Box and ComputeSDK must not stay “configured-looking” without runnable jobs (Stage 14). Same rule for Tailscale and BYO storage. |
+| Clerk vs self-host purity | Managed Clerk must not block self-host: AuthProvider + later OIDC (ADR-0018). Document clearly what `just demo` needs vs managed deploy. |
+| Tailscale customer ACL burden | v1 generates ACL snippets rather than mutating customer tailnets — UX must make copy-paste fail-safe. |
+| Semantic merge competitors | Grit/dkod race on AST merge; Clotho defers symbol-aware merge until after Stage 20 runtime (ADR-0022 §4). |
 
 ---
 
@@ -575,6 +686,12 @@ reachable by humans (CLI) and agents (MCP) with the same semantics as the SDK.
   compute boundary.
 - API/SDK stability comes before CLI/MCP wrappers, but no feature is considered
   mature until web, SDK, CLI, and MCP coverage exists (Stage 15 acceptance).
+- **v3:** Clerk is the default *managed* human AuthProvider; `bootstrap`
+  remains valid for local/dev; agents never go through Clerk.
+- **v3:** Capability-oriented scheduling is the UX default; explicit
+  `provider_id` remains an escape hatch.
+- **v3:** Tailscale is optional; public compute/storage demos must keep working
+  without a customer tailnet.
 
 ---
 
@@ -594,11 +711,20 @@ reachable by humans (CLI) and agents (MCP) with the same semantics as the SDK.
    Before Actions become product history, choose Postgres-in-gateway vs. a
    separate `clotho-actions` service. (Stage 11 already persists runs in
    gateway Postgres migrations; product-history design remains open.)
-6. **Stage order after 13** — Recommended default: **Stage 15 (developer
+6. **Stage order after 13** — ~~Recommended default: **Stage 15 (developer
    surfaces) in parallel with or immediately after Stage 14 (honest compute)**.
    Do **not** start Stage 16 discovery until Stage 15 acceptance is met.
    Stage 13 remaining web polish (issue/PR depth) can interleave but must not
-   ship web-only APIs without SDK methods.
+   ship web-only APIs without SDK methods.~~ **Amended (2026-07-09, PRD v3):**
+   finish Stage 14/15 honesty and parity, then prefer **Stages 17→20** (auth
+   fabric, Arachne↔VCS, Tailscale/BYOC, agent runtime) before Stage 16/21
+   discovery. Issue/PR web depth may interleave but must not ship web-only.
+7. **Human API keys under Clerk** — Keep minting Clotho `clotho_tok_…` human
+   tokens alongside Clerk org API keys, or fully delegate human machine auth
+   to Clerk? (ADR-0018 leaves this open at implementation time.)
+8. **CI large-file materialization** — When Arachne pointers land in trees,
+   should ExportRepoArchive resolve blobs into the sandbox tarball, or should
+   sandboxes fetch pointers with Clotho credentials? (ADR-0020.)
 
 ---
 

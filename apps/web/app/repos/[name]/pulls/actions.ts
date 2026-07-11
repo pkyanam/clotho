@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ClothoApiError } from "@clotho/sdk-js";
 
 import { api } from "src/lib/api";
 
@@ -11,7 +12,7 @@ export async function commentOnPull(
 ): Promise<void> {
   const body = String(formData.get("body") ?? "").trim();
   if (!body) throw new Error("comment body is required");
-  await api().commentOnPull(name, number, body);
+  await (await api()).commentOnPull(name, number, body);
   revalidatePath(`/repos/${name}/pulls/${number}`);
 }
 
@@ -22,7 +23,7 @@ export async function reviewPull(
   formData: FormData,
 ): Promise<void> {
   const body = String(formData.get("body") ?? "").trim();
-  await api().reviewPull(name, number, { event, body });
+  await (await api()).reviewPull(name, number, { event, body });
   revalidatePath(`/repos/${name}/pulls/${number}`);
 }
 
@@ -30,7 +31,14 @@ export async function mergePull(
   name: string,
   number: number,
 ): Promise<void> {
-  await api().mergePull(name, number, { method: "merge" });
+  try {
+    await (await api()).mergePull(name, number, { method: "merge" });
+  } catch (e) {
+    if (e instanceof ClothoApiError && e.status === 409) {
+      throw new Error(e.message);
+    }
+    throw e;
+  }
   revalidatePath(`/repos/${name}/pulls/${number}`);
   revalidatePath(`/repos/${name}/pulls`);
 }

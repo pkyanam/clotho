@@ -1,11 +1,14 @@
 /**
  * Clotho design tokens.
  *
- * The design language: a precision instrument photographed in a dark room.
- * Pure black & white — no grey fills, no accent color. Geist Pixel as the one
- * typeface. All copy lowercase (via CSS transform; semantics preserved).
- * Hairline white borders are the only structural lines; surfaces are flat.
- * Hierarchy comes from size, weight, and spacing — never from color.
+ * The design language: a precision instrument. Pure black & white — no grey
+ * fills, no accent color. Geist Pixel as the one typeface. All copy lowercase
+ * (via CSS transform; semantics preserved). Hairline borders are the only
+ * structural lines; surfaces are flat. Hierarchy comes from size, weight, and
+ * spacing — never from color.
+ *
+ * Dark is the default product look. Light is the exact invert (see
+ * packages/ui/styles/tokens.css `[data-mode="light"]`).
  */
 
 export const colors = {
@@ -19,6 +22,19 @@ export const colors = {
   panel: "#0a0a0a",
   border: "rgba(255, 255, 255, 0.16)",
   borderStrong: "rgba(255, 255, 255, 0.32)",
+} as const;
+
+/** Inverted belweave palette for light mode (mirrors CSS tokens). */
+export const colorsLight = {
+  background: "#ffffff",
+  foreground: "#000000",
+  muted: "#000000",
+  faint: "#000000",
+  surface: "#f8f8f8",
+  surfaceHover: "#f3f3f3",
+  panel: "#f5f5f5",
+  border: "rgba(0, 0, 0, 0.16)",
+  borderStrong: "rgba(0, 0, 0, 0.32)",
 } as const;
 
 export const typography = {

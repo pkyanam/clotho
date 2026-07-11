@@ -348,6 +348,26 @@ services:
       forgejo-init:
         condition: service_completed_successfully
 
+  # Clotho is the product surface. Forgejo remains an internal/debug provider;
+  # a clean `just dev` must therefore bring up this UI without extra host env.
+  clotho-web:
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+    restart: unless-stopped
+    environment:
+      CLOTHO_API_URL: http://clotho-api-gateway:8080
+      NEXT_PUBLIC_CLOTHO_API_URL: ${NEXT_PUBLIC_CLOTHO_API_URL:-http://localhost:8080}
+      NEXT_PUBLIC_CLOTHO_GIT_URL: ${NEXT_PUBLIC_CLOTHO_GIT_URL:-http://localhost:13000}
+      CLOTHO_TOKEN: ${CLOTHO_TOKEN:-}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+    ports:
+      - "3100:3100"
+    depends_on:
+      clotho-api-gateway:
+        condition: service_started
+
 volumes:
   postgres-data:
   minio-data:

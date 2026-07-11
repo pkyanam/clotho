@@ -304,7 +304,9 @@ pub fn registry_from_env() -> ProviderRegistry {
 
     // Always register Daytona so per-job credentials from Clotho secrets work
     // even when process env is empty (docs/adr/0014).
-    providers.push(std::sync::Arc::new(DaytonaProvider::from_env_or_unconfigured()));
+    providers.push(std::sync::Arc::new(
+        DaytonaProvider::from_env_or_unconfigured(),
+    ));
 
     // Optional ComputeSDK bridge (docs/adr/0013): always listed; configured
     // only when the bridge URL is set *and* upstream providers can accept jobs.

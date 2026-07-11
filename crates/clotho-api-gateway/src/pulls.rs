@@ -9,15 +9,20 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use clotho_common::pb::diff::v1::{ChangeStatus, DiffFilesRequest, FileDiffInput, SymbolChange};
 use clotho_common::pb::vcs::v1::changed_file::ChangeKind;
 use clotho_common::pb::vcs::v1::DiffCommitsRequest;
 use serde::{Deserialize, Serialize};
 
+use crate::auth;
+use crate::control;
 use crate::error::ApiError;
-use crate::forgejo::{CommentInfo, PullInfo};
+use crate::forgejo::{CommentInfo, PullInfo, ReviewInfo};
+use crate::merge_policy::{
+    count_approving_reviews, evaluate_merge_policy, load_merge_policy, MergePolicy,
+};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -52,6 +57,8 @@ fn default_base_branch() -> String {
 #[derive(Deserialize)]
 pub struct PullCommentRequest {
     pub body: String,
+    #[serde(default)]
+    pub in_reply_to: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -97,9 +104,14 @@ pub async fn list_pulls(
 
 pub async fn create_pull(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Json(req): Json<CreatePullRequest>,
 ) -> Result<(StatusCode, Json<PullInfo>), ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
+    if let Some(pool) = &state.pool {
+        control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
+    }
     if req.title.trim().is_empty() {
         return Err(ApiError::InvalidRequest("title is required".into()));
     }
@@ -126,26 +138,81 @@ pub async fn get_pull(
     Ok(Json(state.forgejo.get_pull(&name, number).await?))
 }
 
+#[derive(Serialize)]
+pub struct PullCommentListResponse {
+    pub comments: Vec<CommentInfo>,
+}
+
+/// List pull comments — prefers inline review comments with threading metadata,
+/// and includes flat issue-style discussion comments when present.
+pub async fn list_pull_comments(
+    State(state): State<Arc<AppState>>,
+    Path((name, number)): Path<(String, i64)>,
+) -> Result<Json<PullCommentListResponse>, ApiError> {
+    let mut comments = state
+        .forgejo
+        .list_pull_review_comments(&name, number)
+        .await
+        .unwrap_or_default();
+    let issue_comments = state.forgejo.list_issue_comments(&name, number).await?;
+    for comment in issue_comments {
+        if !comments.iter().any(|c| c.id == comment.id) {
+            comments.push(comment);
+        }
+    }
+    Ok(Json(PullCommentListResponse { comments }))
+}
+
+#[derive(Serialize)]
+pub struct PullReviewListResponse {
+    pub reviews: Vec<ReviewInfo>,
+}
+
+pub async fn list_pull_reviews(
+    State(state): State<Arc<AppState>>,
+    Path((name, number)): Path<(String, i64)>,
+) -> Result<Json<PullReviewListResponse>, ApiError> {
+    let reviews = state.forgejo.list_pull_reviews(&name, number).await?;
+    Ok(Json(PullReviewListResponse { reviews }))
+}
+
 pub async fn comment_on_pull(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((name, number)): Path<(String, i64)>,
     Json(req): Json<PullCommentRequest>,
 ) -> Result<(StatusCode, Json<CommentInfo>), ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
+    if let Some(pool) = &state.pool {
+        control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
+    }
     if req.body.trim().is_empty() {
         return Err(ApiError::InvalidRequest("body is required".into()));
     }
-    let comment = state
-        .forgejo
-        .comment_on_pull(&name, number, req.body.trim())
-        .await?;
+    let comment = if let Some(reply_to) = req.in_reply_to.filter(|id| *id > 0) {
+        state
+            .forgejo
+            .reply_on_pull_comment(&name, number, req.body.trim(), reply_to)
+            .await?
+    } else {
+        state
+            .forgejo
+            .comment_on_pull(&name, number, req.body.trim())
+            .await?
+    };
     Ok((StatusCode::CREATED, Json(comment)))
 }
 
 pub async fn review_pull(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((name, number)): Path<(String, i64)>,
     Json(req): Json<PullReviewRequest>,
 ) -> Result<(StatusCode, Json<CommentInfo>), ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
+    if let Some(pool) = &state.pool {
+        control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
+    }
     let event = req.event.trim().to_ascii_uppercase();
     if !matches!(event.as_str(), "COMMENT" | "APPROVE" | "REQUEST_CHANGES") {
         return Err(ApiError::InvalidRequest(
@@ -161,15 +228,38 @@ pub async fn review_pull(
 
 pub async fn merge_pull(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((name, number)): Path<(String, i64)>,
     Json(req): Json<PullMergeRequest>,
 ) -> Result<Json<PullInfo>, ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
+    if let Some(pool) = &state.pool {
+        control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
+    }
     let method = req.method.trim();
     if !matches!(method, "merge" | "rebase" | "rebase-merge" | "squash") {
         return Err(ApiError::InvalidRequest(
             "method must be merge, rebase, rebase-merge, or squash".into(),
         ));
     }
+
+    let pull = state.forgejo.get_pull(&name, number).await?;
+    let policy = merge_policy_for_repo(&state, &name).await?;
+    let statuses = state
+        .forgejo
+        .commit_statuses(&name, &pull.head.sha)
+        .await
+        .unwrap_or_default();
+    let reviews = state
+        .forgejo
+        .list_pull_reviews(&name, number)
+        .await
+        .unwrap_or_default();
+    let approvals = count_approving_reviews(&reviews);
+    if let Err(reason) = evaluate_merge_policy(&policy, pull.mergeable, &statuses, approvals) {
+        return Err(ApiError::Conflict(reason));
+    }
+
     let pull = state
         .forgejo
         .merge_pull(
@@ -181,6 +271,16 @@ pub async fn merge_pull(
         )
         .await?;
     Ok(Json(pull))
+}
+
+async fn merge_policy_for_repo(state: &AppState, name: &str) -> Result<MergePolicy, ApiError> {
+    match &state.pool {
+        Some(pool) => {
+            let repo = control::get_repo_by_name(pool, name).await?;
+            load_merge_policy(pool, &repo.id).await
+        }
+        None => Ok(MergePolicy::default()),
+    }
 }
 
 /// One line of a diff hunk. Line numbers are 1-based; absent on the side a

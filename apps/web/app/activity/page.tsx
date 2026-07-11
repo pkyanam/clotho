@@ -1,77 +1,99 @@
+import Link from "next/link";
+import type { ActivityEvent } from "@clotho/sdk-js";
+
 import { api, timeAgo } from "src/lib/api";
+import { formatEvent, isoToMillis } from "src/lib/events";
 import {
   EmptyState,
   PageFrame,
   PageTitle,
+  SectionHeader,
 } from "src/components/ui/page-frame";
-import type { ActivityEvent } from "@clotho/sdk-js";
 
 export const dynamic = "force-dynamic";
 
-function isoToMillis(iso: string): number {
-  const t = Date.parse(iso);
-  return Number.isFinite(t) ? t : 0;
-}
-
 export default async function ActivityPage() {
-  const events = await api()
-    .activity({ limit: 50 })
+  const events = await (await api())
+    .activity({ limit: 100 })
     .catch(() => [] as ActivityEvent[]);
+
+  const byDay = groupByDay(events);
 
   return (
     <PageFrame>
       <PageTitle
         title="activity"
-        description="cross-repository events from the control plane."
+        description="cross-repository events from the control plane — repositories, organizations, secrets, and providers."
       />
 
       {events.length === 0 ? (
         <div className="mt-10">
           <EmptyState
             title="no activity yet"
-            description="repository creates, secret changes, and provider connections will show up here."
+            description="repository creates, secret changes, and provider connections show up here as they happen."
           />
         </div>
       ) : (
-        <ul className="mt-8 divide-y divide-kumo-hairline border border-kumo-hairline">
-          {events.map((ev) => (
-            <li
-              key={ev.id}
-              className="flex flex-wrap items-baseline justify-between gap-3 px-4 py-3.5"
-            >
-              <div>
-                <p className="text-[0.9375rem]">{formatEvent(ev)}</p>
-                <p className="mt-1 text-[0.8125rem] text-kumo-inactive">
-                  {ev.event_type}
-                </p>
-              </div>
-              <span className="text-[0.8125rem] text-kumo-inactive">
-                {timeAgo(isoToMillis(ev.created_at))}
-              </span>
-            </li>
+        <div className="mt-8 space-y-8">
+          {byDay.map(({ day, items }) => (
+            <section key={day}>
+              <SectionHeader title={day} meta={`${items.length} events`} />
+              <ul className="mt-3 divide-y divide-kumo-hairline border border-kumo-hairline">
+                {items.map((ev) => {
+                  const formatted = formatEvent(ev);
+                  const row = (
+                    <>
+                      <span className="min-w-0">
+                        <span className="block truncate text-[0.9375rem] text-kumo-default">
+                          {formatted.text}
+                        </span>
+                        <span className="mt-0.5 block text-[0.8125rem] text-kumo-inactive">
+                          {ev.event_type}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-[0.8125rem] text-kumo-inactive">
+                        {timeAgo(isoToMillis(ev.created_at))}
+                      </span>
+                    </>
+                  );
+                  return (
+                    <li key={ev.id}>
+                      {formatted.href ? (
+                        <Link
+                          href={formatted.href}
+                          className="flex items-baseline justify-between gap-3 px-4 py-3 transition-colors hover:bg-kumo-elevated"
+                        >
+                          {row}
+                        </Link>
+                      ) : (
+                        <div className="flex items-baseline justify-between gap-3 px-4 py-3">
+                          {row}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </div>
       )}
     </PageFrame>
   );
 }
 
-function formatEvent(ev: ActivityEvent): string {
-  const payload = (ev.payload ?? {}) as Record<string, unknown>;
-  switch (ev.event_type) {
-    case "repo.created":
-      return `repository ${String(payload.repo_name ?? "")} created`;
-    case "org.created":
-      return `organization ${String(payload.org_name ?? "")} created`;
-    case "secret.created":
-      return `secret ${String(payload.name ?? "")} created`;
-    case "secret.updated":
-      return `secret ${String(payload.name ?? "")} rotated`;
-    case "secret.deleted":
-      return `secret ${String(payload.name ?? "")} deleted`;
-    case "provider.connected":
-      return `provider ${String(payload.provider ?? "")} connected`;
-    default:
-      return ev.event_type.replace(/\./g, " ");
+function groupByDay(
+  events: ActivityEvent[],
+): Array<{ day: string; items: ActivityEvent[] }> {
+  const groups: Array<{ day: string; items: ActivityEvent[] }> = [];
+  for (const ev of events) {
+    const day = new Date(isoToMillis(ev.created_at)).toLocaleDateString(
+      "en-US",
+      { year: "numeric", month: "short", day: "numeric" },
+    );
+    const last = groups[groups.length - 1];
+    if (last && last.day === day) last.items.push(ev);
+    else groups.push({ day, items: [ev] });
   }
+  return groups;
 }

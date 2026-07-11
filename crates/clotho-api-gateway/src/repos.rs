@@ -1,15 +1,16 @@
 //! Repo-browser read endpoints: repo list/detail, tree, file contents,
-//! commit log, and the jj operation log — clotho-vcs (and Forgejo, for the
-//! project entry) aggregated into the JSON the web app renders (ADR-0007).
+//! commit log, and the jj operation log — clotho-vcs aggregated into the
+//! JSON the web app renders (ADR-0007).
 //!
 //! Stage 11 makes the repo list/detail query Clotho's control-plane tables
-//! first, then overlays Forgejo collaboration metadata. Without a database,
-//! the handlers fall back to the Stage 3/6 Forgejo behavior.
+//! first, then overlays collaboration metadata. Slice A adds PATCH/DELETE for
+//! repo settings.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use clotho_common::pb::vcs::v1::{
     CommitSummary, GetFileRequest, GetHeadsRequest, ListFilesRequest, LogCommitsRequest,
@@ -17,7 +18,8 @@ use clotho_common::pb::vcs::v1::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::control;
+use crate::auth;
+use crate::control::{self, ActivityEventInput, UpdateRepoRequest};
 use crate::error::ApiError;
 use crate::forgejo::RepoInfo;
 use crate::AppState;
@@ -32,7 +34,7 @@ pub async fn list_repos(
 ) -> Result<Json<RepoListResponse>, ApiError> {
     let provider = state.actions.default_provider();
     let configured = state.actions.provider_configured(&provider);
-    let base_url = state.forgejo.config().base_url.clone();
+    let base_url = state.public_git_url.clone();
 
     let mut repos = if let Some(pool) = &state.pool {
         let clotho = control::list_repos_with_orgs(pool).await?;
@@ -61,8 +63,6 @@ pub async fn list_repos(
     };
 
     if repos.is_empty() {
-        // Fallback to Forgejo when the control-plane table is empty or the
-        // gateway is running without a database.
         repos = state
             .forgejo
             .list_repos()
@@ -107,16 +107,17 @@ impl From<CommitSummary> for CommitJson {
 #[derive(Serialize)]
 pub struct RepoDetailResponse {
     pub name: String,
-    /// Forgejo/clone-path owner.
+    /// Git clone-path owner.
     pub owner: String,
     /// Clotho org that owns this repo.
     pub owner_org: String,
+    pub description: String,
     pub visibility: String,
     pub default_branch: String,
     pub clone_url: String,
     pub provider: String,
     pub configured: bool,
-    pub forgejo: RepoInfo,
+    pub info: RepoInfo,
     /// Commit the `main` bookmark points at; empty while main is unborn.
     pub main_commit_id: String,
     /// All current head commits — jj keeps concurrent agents' anonymous
@@ -124,76 +125,85 @@ pub struct RepoDetailResponse {
     pub heads: Vec<CommitJson>,
 }
 
+fn public_clone_url(state: &AppState, git_owner: &str, name: &str) -> String {
+    let base = state.public_git_url.trim_end_matches('/');
+    format!("{base}/{git_owner}/{name}.git")
+}
+
+async fn load_repo_detail(
+    state: &AppState,
+    name: &str,
+) -> Result<(RepoInfo, String, String, String, String, String, String), ApiError> {
+    let provider = state.actions.default_provider();
+    let configured = state.actions.provider_configured(&provider);
+    let base_url = state.public_git_url.clone();
+
+    if let Some(pool) = &state.pool {
+        match control::get_repo_with_org(pool, name).await? {
+            Some(clotho) => {
+                let forgejo = state.forgejo.get_repo(name).await.ok();
+                let mut info = control::build_repo_info(
+                    &clotho,
+                    forgejo.as_ref(),
+                    &base_url,
+                    &provider,
+                    configured,
+                );
+                info.owner = clotho.repo.forgejo_owner.clone();
+                let clone = public_clone_url(state, &clotho.repo.forgejo_owner, name);
+                Ok((
+                    info,
+                    clotho.repo.forgejo_owner.clone(),
+                    clotho.org_name,
+                    clotho.repo.description.clone(),
+                    clotho.repo.visibility.clone(),
+                    clotho.repo.default_branch.clone(),
+                    clone,
+                ))
+            }
+            None => {
+                let forgejo_repo = state.forgejo.get_repo(name).await?;
+                let mut info = forgejo_repo;
+                info.provider = provider.clone();
+                info.configured = configured;
+                let owner = state.forgejo.owner().to_string();
+                let clone = public_clone_url(state, &owner, name);
+                Ok((
+                    info.clone(),
+                    owner.clone(),
+                    owner,
+                    info.description.clone(),
+                    info.visibility.clone(),
+                    info.default_branch.clone(),
+                    clone,
+                ))
+            }
+        }
+    } else {
+        let forgejo_repo = state.forgejo.get_repo(name).await?;
+        let mut info = forgejo_repo;
+        info.provider = provider.clone();
+        info.configured = configured;
+        let owner = state.forgejo.owner().to_string();
+        let clone = public_clone_url(state, &owner, name);
+        Ok((
+            info.clone(),
+            owner.clone(),
+            owner,
+            info.description.clone(),
+            info.visibility.clone(),
+            info.default_branch.clone(),
+            clone,
+        ))
+    }
+}
+
 pub async fn get_repo(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Result<Json<RepoDetailResponse>, ApiError> {
-    let provider = state.actions.default_provider();
-    let configured = state.actions.provider_configured(&provider);
-    let base_url = state.forgejo.config().base_url.clone();
-
-    // Stage 11: look up the Clotho record first.
-    let (repo_info, owner, owner_org, visibility, default_branch, clone_url) =
-        if let Some(pool) = &state.pool {
-            match control::get_repo_with_org(pool, &name).await? {
-                Some(clotho) => {
-                    let forgejo = state.forgejo.get_repo(&name).await.ok();
-                    let mut info = control::build_repo_info(
-                        &clotho,
-                        forgejo.as_ref(),
-                        &base_url,
-                        &provider,
-                        configured,
-                    );
-                    info.owner = clotho.repo.forgejo_owner.clone();
-                    (
-                        info,
-                        clotho.repo.forgejo_owner.clone(),
-                        clotho.org_name,
-                        clotho.repo.visibility.clone(),
-                        clotho.repo.default_branch.clone(),
-                        format!(
-                            "{}/{}/{name}.git",
-                            base_url.trim_end_matches('/'),
-                            clotho.repo.forgejo_owner
-                        ),
-                    )
-                }
-                None => {
-                    // Not in the control-plane table yet: fall back to the
-                    // Stage 3/6 behavior so existing repos stay reachable.
-                    let forgejo_repo = state.forgejo.get_repo(&name).await?;
-                    let mut forgejo = forgejo_repo;
-                    forgejo.provider = provider.clone();
-                    forgejo.configured = configured;
-                    let owner = state.forgejo.owner().to_string();
-                    let clone = format!("{}/{}/{name}.git", base_url.trim_end_matches('/'), owner);
-                    (
-                        forgejo,
-                        owner.clone(),
-                        owner,
-                        "public".into(),
-                        "main".into(),
-                        clone,
-                    )
-                }
-            }
-        } else {
-            let forgejo_repo = state.forgejo.get_repo(&name).await?;
-            let mut forgejo = forgejo_repo;
-            forgejo.provider = provider.clone();
-            forgejo.configured = configured;
-            let owner = state.forgejo.owner().to_string();
-            let clone = format!("{}/{}/{name}.git", base_url.trim_end_matches('/'), owner);
-            (
-                forgejo,
-                owner.clone(),
-                owner,
-                "public".into(),
-                "main".into(),
-                clone,
-            )
-        };
+    let (repo_info, owner, owner_org, description, visibility, default_branch, clone_url) =
+        load_repo_detail(&state, &name).await?;
 
     let mut vcs = state.vcs.clone();
     let heads = vcs
@@ -204,15 +214,131 @@ pub async fn get_repo(
         name,
         owner,
         owner_org,
+        description,
         visibility,
         default_branch,
         clone_url,
-        provider,
-        configured,
-        forgejo: repo_info,
+        provider: state.actions.default_provider(),
+        configured: state
+            .actions
+            .provider_configured(&state.actions.default_provider()),
+        info: repo_info,
         main_commit_id: heads.main_commit_id,
         heads: heads.heads.into_iter().map(Into::into).collect(),
     }))
+}
+
+pub async fn update_repo(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Json(req): Json<UpdateRepoRequest>,
+) -> Result<Json<RepoDetailResponse>, ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
+    if let Some(pool) = &state.pool {
+        let clotho = control::require_repo_admin(pool, &name, &auth.user_id).await?;
+        let updated = control::update_repo_row(pool, &clotho.repo.id, &req).await?;
+
+        if let Err(e) = state
+            .forgejo
+            .patch_repo(
+                &updated.forgejo_owner,
+                &updated.name,
+                req.description.as_deref(),
+                req.visibility.as_deref(),
+                req.default_branch.as_deref(),
+            )
+            .await
+        {
+            tracing::warn!(repo = %name, error = %e, "best-effort collab provider repo sync failed");
+        }
+
+        control::log_activity(
+            pool,
+            ActivityEventInput {
+                actor_id: auth.user_id.clone(),
+                org_id: Some(clotho.repo.org_id.clone()),
+                repo_id: Some(clotho.repo.id.clone()),
+                event_type: "repo.updated".into(),
+                payload: serde_json::json!({
+                    "repo_name": name,
+                    "description": req.description,
+                    "visibility": req.visibility,
+                    "default_branch": req.default_branch,
+                }),
+            },
+        )
+        .await?;
+
+        let clotho_with_org = control::get_repo_with_org(pool, &name)
+            .await?
+            .ok_or_else(|| ApiError::NotFound(format!("repo {name:?} not found")))?;
+        let provider = state.actions.default_provider();
+        let configured = state.actions.provider_configured(&provider);
+        let mut info = control::build_repo_info(
+            &clotho_with_org,
+            None,
+            &state.public_git_url,
+            &provider,
+            configured,
+        );
+        info.owner = clotho_with_org.repo.forgejo_owner.clone();
+        let clone_url = public_clone_url(&state, &clotho_with_org.repo.forgejo_owner, &name);
+        Ok(Json(RepoDetailResponse {
+            name: clotho_with_org.repo.name.clone(),
+            owner: clotho_with_org.repo.forgejo_owner.clone(),
+            owner_org: clotho_with_org.org_name.clone(),
+            description: clotho_with_org.repo.description.clone(),
+            visibility: clotho_with_org.repo.visibility.clone(),
+            default_branch: clotho_with_org.repo.default_branch.clone(),
+            clone_url,
+            provider,
+            configured,
+            info,
+            main_commit_id: String::new(),
+            heads: vec![],
+        }))
+    } else {
+        Err(ApiError::Internal(
+            "database is not configured; repo settings require the control plane".into(),
+        ))
+    }
+}
+
+pub async fn delete_repo(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("database is not configured".into()))?;
+    let clotho = control::require_repo_admin(pool, &name, &auth.user_id).await?;
+    let git_owner = clotho.repo.forgejo_owner.clone();
+    let repo_id = clotho.repo.id.clone();
+    let org_id = clotho.repo.org_id.clone();
+
+    control::delete_repo_row(pool, &repo_id).await?;
+
+    if let Err(e) = state.forgejo.delete_repo(&git_owner, &name).await {
+        tracing::warn!(repo = %name, error = %e, "best-effort collab provider repo delete failed");
+    }
+
+    control::log_activity(
+        pool,
+        ActivityEventInput {
+            actor_id: auth.user_id,
+            org_id: Some(org_id),
+            repo_id: None,
+            event_type: "repo.deleted".into(),
+            payload: serde_json::json!({"repo_name": name}),
+        },
+    )
+    .await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]

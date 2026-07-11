@@ -1,19 +1,21 @@
 import Link from "next/link";
 
 const items = [
-  { href: "/settings", label: "overview", exact: true },
-  { href: "/settings/compute", label: "compute" },
-  { href: "/settings/secrets", label: "secrets" },
+  { href: "/settings", label: "overview", key: "overview" as const },
+  { href: "/settings/appearance", label: "appearance", key: "appearance" as const },
+  { href: "/settings/compute", label: "compute", key: "compute" as const },
+  { href: "/settings/secrets", label: "secrets", key: "secrets" as const },
 ] as const;
 
-export function SettingsNav({ active }: { active: "overview" | "compute" | "secrets" }) {
+export function SettingsNav({
+  active,
+}: {
+  active: "overview" | "appearance" | "compute" | "secrets";
+}) {
   return (
     <nav className="flex flex-wrap gap-1 border-b border-kumo-hairline pb-3">
       {items.map((item) => {
-        const current =
-          active === "overview"
-            ? item.label === "overview"
-            : item.label === active;
+        const current = item.key === active;
         return (
           <Link
             key={item.href}

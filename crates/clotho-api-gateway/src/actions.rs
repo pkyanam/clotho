@@ -12,14 +12,17 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use clotho_common::pb::vcs::v1::GetHeadsRequest;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use tokio::sync::Mutex;
 
+use crate::auth;
+use crate::control;
 use crate::error::ApiError;
+use crate::notifications;
 use crate::{ci, AppState};
 
 #[derive(Clone)]
@@ -291,6 +294,29 @@ impl ActionsState {
                     .await
                     {
                         tracing::warn!(%run_id, error = %e, "failed to persist action log");
+                    }
+                    if run.conclusion == "failure" || run.conclusion == "failed" {
+                        let notify_user_id = control::get_repo_by_name(pool, &run.repo)
+                            .await
+                            .map(|r| r.created_by)
+                            .unwrap_or_else(|_| String::new());
+                        let notify_user_id = if notify_user_id.is_empty() {
+                            notifications::user_id_by_name(pool, "clotho")
+                                .await
+                                .unwrap_or_default()
+                        } else {
+                            notify_user_id
+                        };
+                        if !notify_user_id.is_empty() {
+                            notifications::notify_action_failed(
+                                pool,
+                                &run.repo,
+                                run_id,
+                                &run.conclusion,
+                                &notify_user_id,
+                            )
+                            .await;
+                        }
                     }
                     return;
                 }
@@ -630,9 +656,14 @@ pub async fn get_logs(
 
 pub async fn create_run(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Json(req): Json<CreateActionRunRequest>,
 ) -> Result<(StatusCode, Json<ActionRun>), ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
+    if let Some(pool) = &state.pool {
+        control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
+    }
     let config = state.actions.config_for(&name).await;
     if !config.enabled {
         return Err(ApiError::InvalidRequest(
@@ -679,9 +710,14 @@ pub async fn get_config(
 
 pub async fn put_config(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Json(mut config): Json<ActionsConfig>,
 ) -> Result<Json<ActionsConfig>, ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
+    if let Some(pool) = &state.pool {
+        control::require_repo_permission(pool, &name, &auth.user_id, "admin").await?;
+    }
     if config.provider.trim().is_empty() {
         config.provider = state.actions.defaults.provider.clone();
     }
@@ -822,11 +858,7 @@ async fn fetch_providers_from_compute(
         .map_err(|e| e.message().to_string())?
         .into_inner();
 
-    let providers = resp
-        .providers
-        .into_iter()
-        .map(provider_from_pb)
-        .collect();
+    let providers = resp.providers.into_iter().map(provider_from_pb).collect();
     Ok(ComputeProviderListResponse {
         providers,
         default_provider_id: if resp.default_provider_id.is_empty() {

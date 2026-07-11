@@ -1,19 +1,32 @@
-/* ── clotho design tokens: pure black & white. no color, no grey fills. ────── */
-:root {
+/* ── clotho design tokens: pure black & white. no accent color. ───────────── */
+/* dark (default product look) */
+:root,
+:root[data-mode="dark"] {
   --background: #000000;
   --foreground: #ffffff;
-  /* "muted"/"faint" kept as token names but mapped to white — text is always
-     white; hierarchy comes from size/weight/spacing, not grey. */
+  /* "muted"/"faint" map to the foreground — hierarchy is not grey. */
   --muted: #ffffff;
   --faint: #ffffff;
-  /* the only non-pure values: hairline borders so cards/sections have edges. */
   --border: rgba(255, 255, 255, 0.16);
   --border-strong: rgba(255, 255, 255, 0.32);
-  /* near-black surfaces — a barely-there lift off pure black so cards read
-     without introducing grey. */
   --surface: #070707;
   --surface-hover: #0c0c0c;
   --panel: #0a0a0a;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.2);
+}
+
+/* light — exact invert of the belweave dark palette */
+:root[data-mode="light"] {
+  --background: #ffffff;
+  --foreground: #000000;
+  --muted: #000000;
+  --faint: #000000;
+  --border: rgba(0, 0, 0, 0.16);
+  --border-strong: rgba(0, 0, 0, 0.32);
+  --surface: #f8f8f8;
+  --surface-hover: #f3f3f3;
+  --panel: #f5f5f5;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.2);
 }
 
 /* base — tailwind consumers should keep these inside @layer base equivalents */
@@ -21,7 +34,13 @@ html {
   background: var(--background);
   color-scheme: dark;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+html[data-mode="light"] {
+  color-scheme: light;
+}
+html[data-mode="dark"] {
+  color-scheme: dark;
 }
 body {
   background: var(--background);
@@ -38,11 +57,10 @@ a {
   text-decoration: none;
 }
 ::selection {
-  background: #ffffff;
-  color: #000000;
+  background: var(--foreground);
+  color: var(--background);
 }
-/* visible keyboard focus — high-contrast white ring; the palette carries no
-   color, so focus cannot rely on hue. */
+/* visible keyboard focus — high-contrast ring; the palette carries no hue. */
 :focus-visible {
   outline: 2px solid var(--foreground);
   outline-offset: 3px;

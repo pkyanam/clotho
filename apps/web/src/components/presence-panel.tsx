@@ -5,7 +5,7 @@ import { Badge } from "@cloudflare/kumo";
 import { RobotIcon } from "@phosphor-icons/react";
 import { ClothoClient, type AgentSession } from "@clotho/sdk-js";
 
-import { browserApiUrl, timeAgo } from "src/lib/api";
+import { browserApiUrl, timeAgo } from "src/lib/api-shared";
 
 const POLL_INTERVAL_MS = 10_000;
 
@@ -41,18 +41,18 @@ export function PresencePanel({ repo }: { repo: string }) {
   }, [repo]);
 
   return (
-    <section className="border border-kumo-hairline p-4">
-      <h2 className="flex items-center gap-2 text-xs text-kumo-subtle">
-        <RobotIcon size={14} />
+    <section className="border border-kumo-hairline bg-kumo-base p-4">
+      <h2 className="flex items-center gap-2 text-[0.9375rem] font-medium text-kumo-default">
+        <RobotIcon size={15} />
         agent sessions
-        <span className="ml-auto text-kumo-inactive">
-          {error ? "offline" : "polling"}
+        <span className="ml-auto text-[0.75rem] font-normal text-kumo-inactive">
+          {error ? "offline" : "live"}
         </span>
       </h2>
       {sessions === null ? (
-        <p className="mt-3 text-xs text-kumo-inactive">…</p>
+        <p className="mt-3 text-[0.8125rem] text-kumo-inactive">loading…</p>
       ) : sessions.length === 0 ? (
-        <p className="mt-3 text-xs text-kumo-inactive">
+        <p className="mt-3 text-[0.8125rem] text-kumo-inactive">
           no agent has touched this repo in the last 7 days.
         </p>
       ) : (
@@ -60,7 +60,7 @@ export function PresencePanel({ repo }: { repo: string }) {
           {sessions.map((session) => (
             <li
               key={session.token_id}
-              className="flex items-baseline justify-between gap-2 text-xs"
+              className="flex items-baseline justify-between gap-2 text-[0.8125rem]"
             >
               <span className="flex items-baseline gap-2">
                 <span>{session.agent}</span>

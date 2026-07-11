@@ -132,7 +132,7 @@ async fn human_browses_repo_and_reviews_structured_pr_diff() {
 
     let detail = get_json(&env, &format!("/api/v1/repos/{name}"), "repo detail").await;
     assert_eq!(detail["main_commit_id"], code_commit_id);
-    assert_eq!(detail["forgejo"]["default_branch"], "main");
+    assert_eq!(detail["info"]["default_branch"], "main");
 
     let tree = get_json(&env, &format!("/api/v1/repos/{name}/tree"), "tree").await;
     let files = tree["files"].as_array().unwrap();

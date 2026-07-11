@@ -12,14 +12,14 @@ export async function createOrgSecret(org: string, formData: FormData) {
   if (!name || !value) {
     throw new Error("name and value are required");
   }
-  await api().createOrgSecret(org, { name, value, description });
+  await (await api()).createOrgSecret(org, { name, value, description });
   revalidatePath("/settings/secrets");
   revalidatePath("/settings/compute");
   redirect("/settings/secrets");
 }
 
 export async function deleteOrgSecret(org: string, name: string) {
-  await api().deleteOrgSecret(org, name);
+  await (await api()).deleteOrgSecret(org, name);
   revalidatePath("/settings/secrets");
   revalidatePath("/settings/compute");
   redirect("/settings/secrets");

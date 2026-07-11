@@ -2,7 +2,10 @@ import { Badge, Button } from "@cloudflare/kumo";
 import Link from "next/link";
 import type { ActivityEvent, ComputeProvider, RepoInfo } from "@clotho/sdk-js";
 
+import { loadAgentSummary } from "src/lib/agents-summary";
 import { api, timeAgo } from "src/lib/api";
+import { formatEvent, isoToMillis } from "src/lib/events";
+import { filterSeedOrgs, filterSeedRepos } from "src/lib/seed-noise";
 import {
   EmptyState,
   PageFrame,
@@ -14,36 +17,40 @@ import {
 
 export const dynamic = "force-dynamic";
 
-function isoToMillis(iso: string): number {
-  const t = Date.parse(iso);
-  return Number.isFinite(t) ? t : 0;
-}
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ show?: string }>;
+}) {
+  const { show } = await searchParams;
+  const showAll = show === "all";
 
-export default async function Home() {
+  const client = await api();
   const [orgs, repos, activity, providerList] = await Promise.all([
-    api().orgs().catch(() => null),
-    api().listRepos().catch(() => null),
-    api()
+    client.orgs().catch(() => null),
+    client.listRepos().catch(() => null),
+    client
       .activity({ limit: 12 })
       .catch(() => [] as ActivityEvent[]),
-    api()
+    client
       .computeProviderList()
       .catch(() => ({ providers: [] as ComputeProvider[], default_provider_id: "" })),
   ]);
 
   const gatewayDown = repos === null;
-  const repoList = repos ?? [];
+  const rawRepoList = repos ?? [];
+  const repoList = filterSeedRepos(rawRepoList, showAll);
+  const hiddenRepoCount = rawRepoList.length - repoList.length;
+  const orgList = filterSeedOrgs(orgs ?? [], showAll);
+
   const providers = providerList.providers;
   const configuredProviders = providers.filter((p) => p.configured);
-  const unconfigured = providers.filter((p) => !p.configured);
+  const unconfiguredProviders = providers.filter((p) => !p.configured);
+  const daytona = providers.find((p) => p.id === "daytona");
 
-  // Prefer the bootstrap / primary org; hide noisy stage-test names by default
-  // when there are more than a handful — still searchable via orgs page later.
-  const orgList = (orgs ?? []).filter((o) => {
-    if ((orgs?.length ?? 0) <= 8) return true;
-    const n = o.name.toLowerCase();
-    return !n.includes("stage") && !/test-\d{10,}/.test(n);
-  });
+  const agentSummary = gatewayDown
+    ? null
+    : await loadAgentSummary(repoList.length > 0 ? repoList : rawRepoList);
 
   return (
     <PageFrame>
@@ -95,12 +102,16 @@ export default async function Home() {
             />
             <StatCell
               label="organizations"
-              value={orgs?.length ?? 0}
+              value={orgList.length}
             />
             <StatCell
-              label="activity"
-              value={activity.length > 0 ? "live" : "quiet"}
-              muted={activity.length === 0}
+              label="agents · 7d"
+              value={
+                agentSummary && agentSummary.identities > 0
+                  ? agentSummary.identities
+                  : "none"
+              }
+              muted={!agentSummary || agentSummary.identities === 0}
             />
           </div>
 
@@ -109,27 +120,68 @@ export default async function Home() {
               <section>
                 <SectionHeader
                   title="repositories"
-                  meta={`${repoList.length} total`}
+                  meta={
+                    hiddenRepoCount > 0 && !showAll
+                      ? `${repoList.length} shown`
+                      : `${repoList.length} total`
+                  }
                   actions={
-                    <Link
-                      href="/repos"
-                      className="text-[0.8125rem] text-kumo-inactive hover:text-kumo-default"
-                    >
-                      view all
-                    </Link>
+                    <div className="flex flex-wrap items-center gap-3">
+                      {hiddenRepoCount > 0 && !showAll && (
+                        <Link
+                          href="/?show=all"
+                          className="text-[0.8125rem] text-kumo-inactive hover:text-kumo-default"
+                        >
+                          show all including test
+                        </Link>
+                      )}
+                      {showAll && hiddenRepoCount > 0 && (
+                        <Link
+                          href="/"
+                          className="text-[0.8125rem] text-kumo-inactive hover:text-kumo-default"
+                        >
+                          hide test repos
+                        </Link>
+                      )}
+                      <Link
+                        href="/repos"
+                        className="text-[0.8125rem] text-kumo-inactive hover:text-kumo-default"
+                      >
+                        view all
+                      </Link>
+                    </div>
                   }
                 />
                 {repoList.length === 0 ? (
                   <div className="mt-4">
-                    <EmptyState
-                      title="no repositories yet"
-                      description="create a repository to start collaborating with humans and agents."
-                      action={
-                        <Link href="/repos/new">
-                          <Button type="button">create repository</Button>
-                        </Link>
-                      }
-                    />
+                    {rawRepoList.length > 0 && !showAll ? (
+                      <EmptyState
+                        title="no product repositories yet"
+                        description="seed and stage test repos are hidden by default. create a repository or show all to see test data."
+                        action={
+                          <div className="flex flex-wrap justify-center gap-2">
+                            <Link href="/repos/new">
+                              <Button type="button">create repository</Button>
+                            </Link>
+                            <Link href="/?show=all">
+                              <Button type="button" variant="outline">
+                                show all including test
+                              </Button>
+                            </Link>
+                          </div>
+                        }
+                      />
+                    ) : (
+                      <EmptyState
+                        title="no repositories yet"
+                        description="create a repository to start collaborating with humans and agents."
+                        action={
+                          <Link href="/repos/new">
+                            <Button type="button">create repository</Button>
+                          </Link>
+                        }
+                      />
+                    )}
                   </div>
                 ) : (
                   <ul className="mt-4 divide-y divide-kumo-hairline border border-kumo-hairline">
@@ -141,7 +193,22 @@ export default async function Home() {
               </section>
 
               <section>
-                <SectionHeader title="compute health" meta="providers" />
+                <SectionHeader
+                  title="compute health"
+                  meta={
+                    configuredProviders.length > 0
+                      ? `${configuredProviders.length} connected`
+                      : "not connected"
+                  }
+                  actions={
+                    <Link
+                      href="/settings/compute"
+                      className="text-[0.8125rem] text-kumo-inactive hover:text-kumo-default"
+                    >
+                      settings
+                    </Link>
+                  }
+                />
                 {providers.length === 0 ? (
                   <div className="mt-4">
                     <EmptyState
@@ -154,40 +221,52 @@ export default async function Home() {
                       }
                     />
                   </div>
+                ) : configuredProviders.length === 0 ? (
+                  <div className="mt-4 border border-kumo-hairline bg-kumo-base px-5 py-6">
+                    <p className="text-[0.9375rem] text-kumo-default">
+                      connect compute to run Actions and agent sandboxes
+                    </p>
+                    <p className="mt-2 max-w-lg text-[0.8125rem] leading-relaxed text-kumo-inactive">
+                      daytona is the recommended starting provider — paste an api
+                      key once in settings and clotho stores it as an org secret.
+                    </p>
+                    <div className="mt-5 flex flex-wrap items-center gap-3">
+                      <Link href="/settings/compute">
+                        <Button type="button">connect daytona</Button>
+                      </Link>
+                      {unconfiguredProviders.length > 1 && (
+                        <Link
+                          href="/settings/compute"
+                          className="text-[0.8125rem] text-kumo-inactive underline hover:text-kumo-default"
+                        >
+                          other providers ({unconfiguredProviders.length - 1})
+                        </Link>
+                      )}
+                    </div>
+                  </div>
                 ) : (
-                  <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {providers.map((p) => (
-                      <li
-                        key={p.id}
-                        className="border border-kumo-hairline bg-kumo-base px-4 py-3"
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[0.9375rem]">{p.name}</span>
-                          <Badge variant="outline">
-                            {p.configured ? "configured" : "not connected"}
-                          </Badge>
-                          {p.enabled && <Badge variant="outline">default</Badge>}
-                        </div>
-                        <p className="mt-2 text-[0.8125rem] text-kumo-inactive">
-                          {p.configured
-                            ? p.configured_reason || "ready for Actions"
-                            : p.configured_reason || "add credentials in settings"}
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {unconfigured.length > 0 && configuredProviders.length === 0 && (
-                  <p className="mt-3 text-[0.8125rem] text-kumo-inactive">
-                    tip: open{" "}
-                    <Link
-                      href="/settings/compute"
-                      className="underline hover:text-kumo-default"
-                    >
-                      compute settings
-                    </Link>{" "}
-                    to connect daytona without host env files.
-                  </p>
+                  <>
+                    <ul className="mt-4 divide-y divide-kumo-hairline border border-kumo-hairline">
+                      {configuredProviders.map((p) => (
+                        <ComputeRow key={p.id} provider={p} prominent />
+                      ))}
+                    </ul>
+                    {unconfiguredProviders.length > 0 && (
+                      <p className="mt-3 text-[0.8125rem] text-kumo-inactive">
+                        {unconfiguredProviders.length} more provider
+                        {unconfiguredProviders.length === 1 ? "" : "s"} available —{" "}
+                        <Link
+                          href="/settings/compute"
+                          className="underline hover:text-kumo-default"
+                        >
+                          connect in settings
+                        </Link>
+                        {daytona && !daytona.configured && (
+                          <> (including {daytona.name})</>
+                        )}
+                      </p>
+                    )}
+                  </>
                 )}
               </section>
             </div>
@@ -213,6 +292,49 @@ export default async function Home() {
 
               <Panel className="p-4">
                 <SectionHeader
+                  title="agents"
+                  meta="7d"
+                  actions={
+                    <Link
+                      href="/agents"
+                      className="text-[0.8125rem] text-kumo-inactive hover:text-kumo-default"
+                    >
+                      manage agents
+                    </Link>
+                  }
+                />
+                {!agentSummary || agentSummary.sessionCount === 0 ? (
+                  <p className="mt-4 text-[0.8125rem] leading-relaxed text-kumo-inactive">
+                    no agent sessions yet. agents connect with scoped tokens and
+                    show up here when they start working.{" "}
+                    <Link href="/agents" className="underline hover:text-kumo-default">
+                      view agents
+                    </Link>
+                  </p>
+                ) : (
+                  <dl className="mt-4 space-y-2 text-[0.8125rem]">
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-kumo-inactive">identities</dt>
+                      <dd className="text-kumo-default">{agentSummary.identities}</dd>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-kumo-inactive">recent sessions</dt>
+                      <dd className="text-kumo-default">{agentSummary.sessionCount}</dd>
+                    </div>
+                    {agentSummary.lastSeenMs !== null && (
+                      <div className="flex justify-between gap-2">
+                        <dt className="text-kumo-inactive">last activity</dt>
+                        <dd className="text-kumo-default">
+                          {timeAgo(agentSummary.lastSeenMs)}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                )}
+              </Panel>
+
+              <Panel className="p-4">
+                <SectionHeader
                   title="activity"
                   meta="recent"
                   actions={
@@ -230,16 +352,28 @@ export default async function Home() {
                   </p>
                 ) : (
                   <ul className="mt-4 space-y-3">
-                    {activity.map((ev) => (
-                      <li key={ev.id} className="text-[0.8125rem]">
-                        <span className="block text-kumo-default">
-                          {formatEvent(ev)}
-                        </span>
-                        <span className="text-kumo-inactive">
-                          {timeAgo(isoToMillis(ev.created_at))}
-                        </span>
-                      </li>
-                    ))}
+                    {activity.map((ev) => {
+                      const formatted = formatEvent(ev);
+                      return (
+                        <li key={ev.id} className="text-[0.8125rem]">
+                          {formatted.href ? (
+                            <Link
+                              href={formatted.href}
+                              className="block text-kumo-default hover:underline"
+                            >
+                              {formatted.text}
+                            </Link>
+                          ) : (
+                            <span className="block text-kumo-default">
+                              {formatted.text}
+                            </span>
+                          )}
+                          <span className="text-kumo-inactive">
+                            {timeAgo(isoToMillis(ev.created_at))}
+                          </span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </Panel>
@@ -311,22 +445,27 @@ function RepoRow({ repo }: { repo: RepoInfo }) {
   );
 }
 
-function formatEvent(ev: ActivityEvent): string {
-  const payload = (ev.payload ?? {}) as Record<string, unknown>;
-  switch (ev.event_type) {
-    case "repo.created":
-      return `repository ${String(payload.repo_name ?? "")} created`;
-    case "org.created":
-      return `organization ${String(payload.org_name ?? "")} created`;
-    case "secret.created":
-      return `secret ${String(payload.name ?? "")} created`;
-    case "secret.updated":
-      return `secret ${String(payload.name ?? "")} rotated`;
-    case "secret.deleted":
-      return `secret ${String(payload.name ?? "")} deleted`;
-    case "provider.connected":
-      return `provider ${String(payload.provider ?? "")} connected`;
-    default:
-      return ev.event_type.replace(/\./g, " ");
-  }
+function ComputeRow({
+  provider,
+  prominent = false,
+}: {
+  provider: ComputeProvider;
+  prominent?: boolean;
+}) {
+  return (
+    <li className={prominent ? "bg-kumo-base px-4 py-3" : "px-4 py-3 opacity-80"}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[0.9375rem] text-kumo-default">{provider.name}</span>
+        <Badge variant="outline">
+          {provider.configured ? "configured" : "not connected"}
+        </Badge>
+        {provider.enabled && <Badge variant="outline">default</Badge>}
+      </div>
+      <p className="mt-1.5 text-[0.8125rem] text-kumo-inactive">
+        {provider.configured
+          ? provider.configured_reason || "ready for Actions"
+          : provider.configured_reason || "add credentials in settings"}
+      </p>
+    </li>
+  );
 }

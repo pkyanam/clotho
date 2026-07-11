@@ -10,26 +10,42 @@ REST edge** (`CLOTHO_API_URL`) so agents cannot drift from the public API
 
 ## Auth
 
-1. Admin creates an agent and mints a token (admin bearer =
-   `CLOTHO_AGENT_ADMIN_TOKEN`):
+1. An operator creates an agent and mints a token through the **REST edge**
+   (web `/agents`, `clotho agent …`, or `POST /api/v1/agents/…`) with human
+   Bearer auth — see [ADR-0016](adr/0016-agent-admin-via-edge.md). The
+   api-gateway proxies to agent-gateway with `CLOTHO_AGENT_ADMIN_TOKEN`.
 
 ```bash
-curl -s -X POST http://localhost:8090/admin/v1/agents \
-  -H "authorization: Bearer clotho-agent-admin-dev" \
+export CLOTHO_TOKEN=clotho_tok_…
+clotho agent create weaver --description "demo agent"
+clotho agent mint weaver --repos demo-loop --tools '*'
+# save the printed clotho_agt_… value — shown once
+```
+
+Equivalent curl:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/agents \
+  -H "Authorization: Bearer $CLOTHO_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"name":"weaver","description":"demo agent"}'
 
-curl -s -X POST http://localhost:8090/admin/v1/agents/weaver/tokens \
-  -H "authorization: Bearer clotho-agent-admin-dev" \
+curl -s -X POST http://localhost:8080/api/v1/agents/weaver/tokens \
+  -H "Authorization: Bearer $CLOTHO_TOKEN" \
   -H 'content-type: application/json' \
   -d '{
-    "allowed_repos": ["my-demo"],
+    "allowed_repos": ["demo-loop"],
     "allowed_tools": ["*"]
   }'
 # → { "token": "clotho_agt_…", … }  (plaintext returned once)
 ```
 
 2. Connect an MCP client with `Authorization: Bearer clotho_agt_…`.
+
+**MCP does not expose tools to create agents, mint tokens, or revoke peer
+credentials.** Operators provision agent identities out of band (CLI or web);
+agents must not mint sibling tokens (ADR-0016). MCP tools never return secret
+values — only metadata where applicable.
 
 Every tool call is audited (agent, tool, repo, status). Scope denials return
 an MCP tool error result, not a transport failure.
@@ -56,7 +72,7 @@ an MCP tool error result, not a transport failure.
 | Tool | REST |
 |---|---|
 | `list_issues` | `GET …/issues` |
-| `create_issue` | `POST …/issues` |
+| `create_issue` | `POST …/issues` (optional `labels`, `assignees`, `milestone`) |
 | `comment_issue` | `POST …/issues/{n}/comments` |
 | `list_pulls` | `GET …/pulls` |
 | `create_pull` | `POST …/pulls` |
@@ -83,16 +99,28 @@ an MCP tool error result, not a transport failure.
 | `get_tree` | `GET …/tree` |
 | `get_file` | `GET …/file` |
 
-## Demo loop (MCP only)
+## Demo loop
 
-With a token allowed on `my-demo` and tools `*`:
+**Step 0 — provision token (CLI only, not MCP):**
 
-1. `list_repos` / `orient_repo` — situational awareness  
-2. `create_issue` — open work  
-3. `commit` + `submit_change` — land code  
-4. `create_pull` / `review_pull` / `merge_pull` as needed  
-5. `start_action_run` → `list_action_runs` → `get_action_logs`  
-6. `list_providers` — honest compute status  
+```bash
+export CLOTHO_TOKEN=clotho_tok_…
+clotho agent create weaver --description "MCP demo"
+clotho agent mint weaver --repos demo-loop --tools '*'
+export CLOTHO_AGENT_TOKEN=clotho_agt_…   # from mint output
+```
+
+**Steps 1–6 — MCP tools** (connect with `Authorization: Bearer $CLOTHO_AGENT_TOKEN`):
+
+1. `list_repos` / `orient_repo` — situational awareness on `demo-loop`
+2. `create_issue` — e.g. title `"flaky"`, labels `["bug"]`
+3. `commit` + `submit_change` — land code on a branch
+4. `create_pull` / `review_pull` / `merge_pull` as needed
+5. `start_action_run` → `list_action_runs` → `get_action_logs`
+6. `list_providers` — honest compute status
+
+Merge policy gates from Slice E apply to `merge_pull` the same as the REST
+`POST …/merge` endpoint (409-style errors surfaced as tool failures).
 
 ## Config
 

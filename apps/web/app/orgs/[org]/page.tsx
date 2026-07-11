@@ -19,7 +19,7 @@ export default async function OrgDetailPage({
   params: Promise<{ org: string }>;
 }) {
   const { org } = await params;
-  const client = api();
+  const client = await api();
   const detail = await client.getOrg(org).catch((e) => {
     if (e instanceof ClothoApiError && e.status === 404) notFound();
     throw e;

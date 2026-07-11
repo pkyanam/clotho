@@ -150,6 +150,9 @@ Two distinct things worth separating:
 - CCI abstraction; integrate ComputeSDK or ship a compatible interface
 - BYO-device runner
 - Tailscale/tailnet integration for private-cloud mode
+- *Productization (PRD v3 / ADRs 0018–0021):* AuthProvider (Clerk-first), Provider Fabric
+  (BYO object store + NetworkProvider), Arachne on the VCS path, Tailscale private-reach
+  and `clotho-runner` BYOC — see docs/prd.md Stages 17–19.
 
 **Phase 3 — Data layer extensibility**
 - External database connector framework
@@ -159,6 +162,8 @@ Two distinct things worth separating:
 - Global edge caching for Arachne chunks/xorbs
 - Federation (ForgeFed-compatible)
 - Published performance benchmarks vs. GitHub+LFS and HF Hub
+- *Agent runtime v2 (PRD v3 / ADR-0022):* durable merge-queue, sandbox sessions, provenance
+  trailers before discovery/social polish (prd Stages 20–21).
 
 ---
 

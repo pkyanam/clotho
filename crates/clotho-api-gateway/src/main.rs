@@ -87,6 +87,21 @@ async fn main() -> Result<(), Error> {
         bootstrap_user_email: env_or("CLOTHO_BOOTSTRAP_USER_EMAIL", "admin@clotho.internal"),
         bootstrap_org_name: env_or("CLOTHO_BOOTSTRAP_ORG_NAME", "clotho"),
         bootstrap_org_display_name: env_or("CLOTHO_BOOTSTRAP_ORG_DISPLAY_NAME", "Clotho"),
+        auth_required: env_truthy("CLOTHO_AUTH_REQUIRED"),
+        auth_provider: env_or("CLOTHO_AUTH_PROVIDER", "bootstrap"),
+        clerk: {
+            // Only required when CLOTHO_AUTH_PROVIDER=clerk; local/demo stay bootstrap.
+            let provider = env_or("CLOTHO_AUTH_PROVIDER", "bootstrap");
+            if provider.eq_ignore_ascii_case("clerk") {
+                Some(
+                    clotho_api_gateway::auth_provider::ClerkConfig::from_env()
+                        .map_err(|e| Error::Config(e.to_string()))?,
+                )
+            } else {
+                clotho_api_gateway::auth_provider::ClerkConfig::from_env().ok()
+            }
+        },
+        public_git_url: env_or("CLOTHO_PUBLIC_GIT_URL", "http://localhost:13000"),
         forgejo: ForgejoConfig {
             base_url: env_or("CLOTHO_FORGEJO_URL", "http://localhost:13000"),
             owner: env_or("CLOTHO_FORGEJO_OWNER", "clotho"),

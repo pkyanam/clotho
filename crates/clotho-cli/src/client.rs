@@ -8,13 +8,15 @@ use serde_json::Value;
 pub struct Config {
     pub api_url: String,
     pub json: bool,
+    pub token: Option<String>,
 }
 
 impl Config {
-    pub fn from_env_and_args(api_url: String, json: bool) -> Self {
+    pub fn from_env_and_args(api_url: String, json: bool, token: Option<String>) -> Self {
         Self {
             api_url: api_url.trim_end_matches('/').to_string(),
             json,
+            token,
         }
     }
 }
@@ -37,6 +39,9 @@ pub async fn request_value(
 ) -> Result<Value> {
     let client = reqwest::Client::new();
     let mut request = client.request(method.clone(), format!("{}{}", config.api_url, path));
+    if let Some(token) = &config.token {
+        request = request.header("Authorization", format!("Bearer {token}"));
+    }
     if let Some(body) = body {
         request = request.json(&body);
     }

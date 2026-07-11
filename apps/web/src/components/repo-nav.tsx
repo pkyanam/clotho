@@ -2,6 +2,8 @@ import Link from "next/link";
 
 type RepoSection =
   | "code"
+  | "commits"
+  | "branches"
   | "pulls"
   | "issues"
   | "actions"
@@ -12,6 +14,8 @@ type RepoSection =
 
 const sections: Array<{ key: RepoSection; label: string; href: string }> = [
   { key: "code", label: "code", href: "" },
+  { key: "commits", label: "commits", href: "/commits" },
+  { key: "branches", label: "branches", href: "/branches" },
   { key: "pulls", label: "pull requests", href: "/pulls" },
   { key: "issues", label: "issues", href: "/issues" },
   { key: "actions", label: "actions", href: "/actions" },

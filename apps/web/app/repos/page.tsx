@@ -11,7 +11,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function ReposPage() {
-  const repos = await api()
+  const repos = await (await api())
     .listRepos()
     .catch(() => null);
 

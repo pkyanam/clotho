@@ -28,7 +28,7 @@ export default async function RepoPage({
   params: Promise<{ name: string }>;
 }) {
   const { name } = await params;
-  const client = api();
+  const client = await api();
 
   const detail = await client.getRepo(name).catch((e) => {
     if (e instanceof ClothoApiError && e.status === 404) notFound();
@@ -58,7 +58,7 @@ export default async function RepoPage({
   ).length;
   const passingActions = statuses.filter((s) => s.state === "success").length;
   const description =
-    detail.forgejo?.description ||
+    detail.description ||
     (detail as { description?: string }).description ||
     "";
   const clone = publicCloneUrl(detail.clone_url, detail.owner, name);
@@ -137,10 +137,16 @@ export default async function RepoPage({
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          <StatCell label="branches" value={branches.length} />
-          <StatCell label="agents" value={sessions.length} />
+          <Link href={`/repos/${name}/branches`} className="block">
+            <StatCell label="branches" value={branches.length} />
+          </Link>
+          <Link href={`/repos/${name}/agents`} className="block">
+            <StatCell label="agents" value={sessions.length} />
+          </Link>
           <StatCell label="files" value={tree.files.length} />
-          <StatCell label="storage" value={formatBytes(storageBytes)} />
+          <Link href={`/repos/${name}/storage`} className="block">
+            <StatCell label="storage" value={formatBytes(storageBytes)} />
+          </Link>
         </div>
       </div>
 
@@ -187,7 +193,18 @@ export default async function RepoPage({
           </section>
 
           <section>
-            <SectionHeader title="commits" meta={`${commits.length} recent`} />
+            <SectionHeader
+              title="commits"
+              meta={`${commits.length} recent`}
+              actions={
+                <Link
+                  href={`/repos/${name}/commits`}
+                  className="text-[0.8125rem] text-kumo-inactive hover:text-kumo-default"
+                >
+                  view all
+                </Link>
+              }
+            />
             {commits.length === 0 ? (
               <p className="mt-4 border border-kumo-hairline px-4 py-6 text-[0.875rem] text-kumo-inactive">
                 no commits yet.
@@ -286,9 +303,9 @@ function StatusChip({
 }) {
   const ring =
     tone === "ok"
-      ? "border-white/40"
+      ? "border-kumo-contrast/40"
       : tone === "warn" || tone === "bad"
-        ? "border-white/25"
+        ? "border-kumo-contrast/25"
         : "border-kumo-hairline";
   return (
     <span

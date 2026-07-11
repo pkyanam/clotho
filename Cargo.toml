@@ -35,6 +35,9 @@ xet-core-structures = "=1.5.2"
 # AWS-specific code paths (no vendor lock-in).
 object_store = { version = "0.14.0", features = ["aws"] }
 async-trait = "0.1"
+# Clerk session JWT verification (Stage 17 / ADR-0018). HS256 test secret for
+# mocked unit/integration tests; production uses JWKS (RS256).
+jsonwebtoken = "9"
 axum = "0.8"
 # tree-sitter core + grammars for the structured diff engine (docs/prd.md §2):
 # one symbol-level diff object feeds both the agent API and the PR view.

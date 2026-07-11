@@ -1,10 +1,14 @@
 import { Badge, Button } from "@cloudflare/kumo";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ClothoApiError } from "@clotho/sdk-js";
 
 import { api, timeAgo } from "src/lib/api";
+import { IssueMetadataFields } from "src/components/issue-metadata-fields";
 import { RepoNav } from "src/components/repo-nav";
-import { commentOnIssue } from "../actions";
+import { MetaRow, PageFrame, Panel } from "src/components/ui/page-frame";
+import { ThreadEntry } from "src/components/ui/thread-entry";
+import { commentOnIssue, updateIssueMetadata } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -17,82 +21,152 @@ export default async function IssuePage({
   const number = Number(rawNumber);
   if (!Number.isInteger(number) || number < 1) notFound();
 
-  const detail = await api()
-    .issue(name, number)
-    .catch((e) => {
-      if (e instanceof ClothoApiError && e.status === 404) notFound();
-      throw e;
-    });
-  const action = commentOnIssue.bind(null, name, number);
+  const client = await api();
+  const detail = await client.issue(name, number).catch((e) => {
+    if (e instanceof ClothoApiError && e.status === 404) notFound();
+    throw e;
+  });
+  const [labels, repo] = await Promise.all([
+    client.listLabels(name).catch(() => []),
+    client.getRepo(name).catch(() => null),
+  ]);
+  const ownerOrg = repo?.owner_org || repo?.owner;
+  const org = ownerOrg
+    ? await client.getOrg(ownerOrg).catch(() => null)
+    : null;
+  const members = org?.members ?? [];
+
+  const commentAction = commentOnIssue.bind(null, name, number);
+  const metadataAction = updateIssueMetadata.bind(null, name, number);
+  const { issue, comments } = detail;
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8">
+    <PageFrame>
       <RepoNav name={name} active="issues" />
 
-      <div className="mt-6 flex flex-wrap items-center gap-3">
-        <h1 className="min-w-0 text-2xl leading-tight">{detail.issue.title}</h1>
-        <Badge variant="outline">{detail.issue.state}</Badge>
+      <div className="mt-6 border-b border-kumo-hairline pb-6">
+        <div className="text-[0.8125rem] text-kumo-inactive">
+          <Link
+            href={`/repos/${name}/issues`}
+            className="hover:text-kumo-default"
+          >
+            issues
+          </Link>{" "}
+          / #{issue.number}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <h1
+            className="min-w-0 text-balance leading-tight text-kumo-default"
+            style={{ fontSize: "clamp(1.375rem, 2.5vw, 1.75rem)" }}
+          >
+            {issue.title}
+          </h1>
+          <Badge variant="outline">{issue.state}</Badge>
+          {issue.labels.map((label) => (
+            <Badge key={label.name} variant="outline">
+              {label.name}
+            </Badge>
+          ))}
+        </div>
+        <p className="mt-2 text-[0.875rem] text-kumo-inactive">
+          opened by {issue.user.login}
+          {issue.assignees.length > 0
+            ? ` · assigned to ${issue.assignees.map((a) => a.login).join(", ")}`
+            : ""}
+          {issue.milestone ? ` · ${issue.milestone.title}` : ""} · updated{" "}
+          {timeAgo(Date.parse(issue.updated_at))}
+        </p>
       </div>
-      <p className="mt-2 text-xs text-kumo-inactive">
-        #{detail.issue.number} · {detail.issue.user.login} · updated{" "}
-        {timeAgo(Date.parse(detail.issue.updated_at))}
-      </p>
 
-      <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="min-w-0 space-y-6">
-          <article className="border border-kumo-hairline p-4">
-            <div className="mb-3 text-xs text-kumo-inactive">
-              opened {timeAgo(Date.parse(detail.issue.created_at))}
-            </div>
-            <p className="whitespace-pre-wrap text-sm text-kumo-subtle">
-              {detail.issue.body || "no description."}
-            </p>
-          </article>
+      <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0 space-y-4">
+          <ThreadEntry
+            author={issue.user.login}
+            meta={`opened ${timeAgo(Date.parse(issue.created_at))}`}
+            body={issue.body || "no description provided."}
+            muted={!issue.body}
+          />
 
-          {detail.comments.map((comment) => (
-            <article key={comment.id} className="border border-kumo-hairline p-4">
-              <div className="mb-3 text-xs text-kumo-inactive">
-                {comment.user.login} · {timeAgo(Date.parse(comment.updated_at))}
-              </div>
-              <p className="whitespace-pre-wrap text-sm text-kumo-subtle">
-                {comment.body}
-              </p>
-            </article>
+          {comments.map((comment) => (
+            <ThreadEntry
+              key={comment.id}
+              author={comment.user.login}
+              meta={timeAgo(Date.parse(comment.updated_at))}
+              body={comment.body}
+            />
           ))}
 
-          <form action={action} className="border border-kumo-hairline p-4">
-            <label className="block text-xs text-kumo-subtle">
-              add comment
+          <form
+            action={commentAction}
+            className="border border-kumo-hairline bg-kumo-base"
+          >
+            <div className="border-b border-kumo-hairline px-4 py-3 text-[0.875rem] text-kumo-default">
+              add a comment
+            </div>
+            <div className="p-4">
               <textarea
                 name="body"
                 required
                 rows={5}
-                className="mt-2 block w-full resize-y border border-kumo-hairline bg-kumo-base px-3 py-2 text-sm text-kumo-default outline-none focus:border-kumo-contrast"
+                placeholder="write in plain language — agents read this thread too. @name mentions are best-effort."
+                aria-label="comment body"
+                className="block w-full resize-y border border-kumo-hairline bg-kumo-canvas px-3 py-2 text-[0.9375rem] text-kumo-default outline-none placeholder:text-kumo-placeholder focus:border-kumo-contrast"
               />
-            </label>
-            <div className="mt-3">
-              <Button type="submit">comment</Button>
+              <div className="mt-3">
+                <Button type="submit">comment</Button>
+              </div>
             </div>
           </form>
         </div>
 
-        <aside className="space-y-4">
-          <section className="border border-kumo-hairline p-4 text-xs">
-            <h2 className="text-sm">labels</h2>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {detail.issue.labels.length === 0 ? (
-                <span className="text-kumo-inactive">none</span>
-              ) : (
-                detail.issue.labels.map((label) => (
-                  <Badge key={label.name} variant="outline">
-                    {label.name}
-                  </Badge>
-                ))
-              )}
-            </div>
-          </section>
+        <aside className="space-y-5">
+          <Panel className="p-4">
+            <h2 className="text-[0.9375rem] font-medium text-kumo-default">
+              details
+            </h2>
+            <dl className="mt-2">
+              <MetaRow label="state" value={issue.state} />
+              <MetaRow label="author" value={issue.user.login} />
+              <MetaRow
+                label="assignees"
+                value={
+                  issue.assignees.length > 0
+                    ? issue.assignees.map((a) => a.login).join(", ")
+                    : "none"
+                }
+              />
+              <MetaRow
+                label="milestone"
+                value={issue.milestone?.title ?? "none"}
+              />
+              <MetaRow
+                label="opened"
+                value={timeAgo(Date.parse(issue.created_at))}
+              />
+              <MetaRow label="comments" value={String(comments.length)} />
+            </dl>
+          </Panel>
+
+          {(labels.length > 0 || members.length > 0) && (
+            <Panel className="p-4">
+              <h2 className="text-[0.9375rem] font-medium text-kumo-default">
+                labels & assignee
+              </h2>
+              <form action={metadataAction} className="mt-3 space-y-4">
+                <IssueMetadataFields
+                  labels={labels}
+                  members={members}
+                  defaultLabels={issue.labels.map((l) => l.name)}
+                  defaultAssignees={issue.assignees.map((a) => a.login)}
+                />
+                <Button type="submit" variant="secondary">
+                  save
+                </Button>
+              </form>
+            </Panel>
+          )}
         </aside>
       </div>
-    </div>
+    </PageFrame>
   );
 }

@@ -22,6 +22,17 @@ pub fn take_flag(args: &mut Vec<String>, name: &str) -> bool {
     }
 }
 
+pub fn take_repeated_str(args: &mut Vec<String>, name: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    while let Some(pos) = args.iter().position(|a| a == name) {
+        args.remove(pos);
+        if pos < args.len() {
+            values.push(args.remove(pos));
+        }
+    }
+    values
+}
+
 pub fn take_repeated(args: &mut Vec<String>, name: &str) -> Vec<PathBuf> {
     let mut values = Vec::new();
     while let Some(pos) = args.iter().position(|a| a == name) {
@@ -47,8 +58,9 @@ pub fn require_two(args: &[String], usage: &str) -> Result<(String, String)> {
     Ok((args[0].clone(), args[1].clone()))
 }
 
-pub fn strip_globals(args: &mut Vec<String>) -> (Option<String>, bool) {
+pub fn strip_globals(args: &mut Vec<String>) -> (Option<String>, bool, Option<String>) {
     let api = take_option(args, "--api");
+    let token = take_option(args, "--token");
     let json = take_flag(args, "--json");
-    (api, json)
+    (api, json, token)
 }

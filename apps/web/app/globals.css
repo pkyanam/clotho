@@ -25,15 +25,12 @@
 }
 
 /*
- * clotho theme overlay on top of kumo's dark mode.
+ * clotho theme overlay on top of kumo.
  *
- * kumo is run in `data-mode="dark"` (no `data-theme`), so its dark token set
- * applies as the base. we then override the surface, text, border and brand
- * tokens to the belweave palette — pure black surfaces, always-white text,
- * hairline white borders, white-as-brand (no accent color). kumo's semantic
- * status colors (info / success / warning / danger) and badge hues are kept
- * intact: that is the "cloudflare" half of the hybrid, used by badges,
- * banners and charts where belweave deliberately carries no color.
+ * kumo is driven by `data-mode` on `<html>` (no `data-theme`). we override
+ * surface, text, border and brand tokens to the belweave palette. dark is
+ * pure black / white; light is the exact invert. kumo's semantic status
+ * colors (info / success / warning / danger) stay intact for badges.
  */
 :root[data-mode="dark"] {
   /* surfaces — pure black, flat, a barely-there lift off the canvas */
@@ -75,22 +72,67 @@
   --color-kumo-tip-shadow: transparent;
 }
 
+:root[data-mode="light"] {
+  /* surfaces — pure white canvas; near-white lifts for panels */
+  --color-kumo-canvas: #ffffff;
+  --color-kumo-base: #f8f8f8;
+  --color-kumo-elevated: #f3f3f3;
+  --color-kumo-recessed: #f5f5f5;
+  --color-kumo-tint: #f3f3f3;
+  --color-kumo-contrast: #000000;
+  --color-kumo-overlay: #f5f5f5;
+  --color-kumo-control: #f8f8f8;
+  --color-kumo-interact: rgba(0, 0, 0, 0.08);
+  --color-kumo-fill: #f3f3f3;
+  --color-kumo-fill-hover: #eeeeee;
+
+  /* text — always black; hierarchy via size/weight/spacing, not grey mud */
+  --text-color-kumo-default: #000000;
+  --text-color-kumo-strong: #000000;
+  --text-color-kumo-subtle: #000000;
+  --text-color-kumo-inactive: rgba(0, 0, 0, 0.5);
+  --text-color-kumo-placeholder: rgba(0, 0, 0, 0.4);
+  --text-color-kumo-inverse: #ffffff;
+
+  /* brand — black-on-white primary actions */
+  --color-kumo-brand: #000000;
+  --color-kumo-brand-hover: rgba(0, 0, 0, 0.88);
+  --text-color-kumo-brand: #000000;
+  --text-color-kumo-link: #000000;
+
+  /* borders & rings — hairline black */
+  --color-kumo-hairline: rgba(0, 0, 0, 0.16);
+  --color-kumo-line: rgba(0, 0, 0, 0.16);
+  --color-kumo-focus: #000000;
+  --color-kumo-tip-stroke: rgba(0, 0, 0, 0.16);
+
+  --color-kumo-shadow-edge: transparent;
+  --color-kumo-shadow-drop: transparent;
+  --color-kumo-tip-shadow: transparent;
+}
+
 /*
  * primary / destructive button emphasis.
  *
  * kumo derives the emphasis background from `--color-kumo-brand` via
- * `color-mix(…, white 30%)` and forces `!text-white`. because clotho sets
- * brand to white, that yields a white-on-white button. the emphasis vars
- * are applied as inline styles by the button component, so we override them
- * with `!important` to give primary actions a flat black background with a
- * hairline white ring — the belweave "white-on-black" primary — while the
- * forced white text finally reads.
+ * `color-mix` and often forces light text. we pin emphasis to the contrast
+ * surface so primary actions stay readable in both modes.
  */
-[data-kumo-component="Button"],
-[data-kumo-component="LinkButton"] {
+:root[data-mode="dark"] [data-kumo-component="Button"],
+:root[data-mode="dark"] [data-kumo-component="LinkButton"] {
   --kumo-button-emphasis-bg: #000000 !important;
   --kumo-button-emphasis-ring: rgba(255, 255, 255, 0.32) !important;
   --kumo-button-emphasis-gradient-start: #0c0c0c !important;
+  --kumo-button-emphasis-gradient-end: #000000 !important;
+}
+
+:root[data-mode="light"] [data-kumo-component="Button"],
+:root[data-mode="light"] [data-kumo-component="LinkButton"] {
+  /* kumo forces !text-white on emphasis — keep a black fill so primaries
+     read on the white canvas (invert of dark's ring-defined black control). */
+  --kumo-button-emphasis-bg: #000000 !important;
+  --kumo-button-emphasis-ring: rgba(0, 0, 0, 0.32) !important;
+  --kumo-button-emphasis-gradient-start: #111111 !important;
   --kumo-button-emphasis-gradient-end: #000000 !important;
 }
 
@@ -129,5 +171,52 @@
   kbd {
     font-family: var(--font-geist-pixel), ui-monospace, "SFMono-Regular",
       monospace;
+  }
+}
+
+/*
+ * Motion — restrained console micro-transitions (Stage 13 polish).
+ * Three intentional entrances only: command palette, mobile drawer, and
+ * empty states. Fast, small-distance, no glow.
+ */
+@keyframes clotho-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes clotho-fade-down {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.palette-enter {
+  animation: clotho-fade-down 120ms ease-out both;
+}
+
+.drawer-enter {
+  animation: clotho-fade-down 140ms ease-out both;
+}
+
+.empty-enter {
+  animation: clotho-fade-up 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .palette-enter,
+  .drawer-enter,
+  .empty-enter {
+    animation: none;
   }
 }

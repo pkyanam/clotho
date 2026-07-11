@@ -1,5 +1,5 @@
 /**
- * jj materializes unresolved conflicts as marker text (ADR-0006): a
+ * Unresolved conflicts are materialized as marker text (ADR-0006): a
  * `<<<<<<<`/`>>>>>>>` envelope with `%%%%%%%` (diff from base) and
  * `+++++++`/`-------` (side contents) section markers. The gateway flags
  * conflicted files; these helpers let the UI style the marker lines rather

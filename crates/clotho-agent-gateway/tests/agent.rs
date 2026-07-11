@@ -148,6 +148,39 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         "mint token",
     )
     .await;
+    let token_id = minted["token_id"].as_str().unwrap();
+
+    // 1b. List agents and tokens; revoke is idempotent on a fresh token later.
+    let listed = reqwest::Client::new()
+        .get(format!("{}/admin/v1/agents", env.mcp_base_url))
+        .bearer_auth(&env.admin_token)
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert!(
+        listed["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["name"] == agent_name.as_str()),
+        "list agents missing {agent_name}"
+    );
+    let tokens = reqwest::Client::new()
+        .get(format!(
+            "{}/admin/v1/agents/{agent_name}/tokens",
+            env.mcp_base_url
+        ))
+        .bearer_auth(&env.admin_token)
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(tokens["tokens"].as_array().unwrap().len(), 1);
     let token = minted["token"].as_str().unwrap().to_string();
     assert!(token.starts_with("clotho_agt_"));
 
@@ -365,4 +398,27 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         .expect("outsider session present");
     assert_eq!(outsider_session["last_status"], "denied");
     assert_eq!(outsider_session["last_tool"], "checkpoint");
+
+    // 13. Revoke the primary token and confirm it no longer authenticates.
+    let revoke = reqwest::Client::new()
+        .delete(format!(
+            "{}/admin/v1/agents/{agent_name}/tokens/{token_id}",
+            env.mcp_base_url
+        ))
+        .bearer_auth(&env.admin_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(revoke.status(), 204);
+    let transport = StreamableHttpClientTransport::from_config(
+        StreamableHttpClientTransportConfig::with_uri(format!("{}/mcp", env.mcp_base_url))
+            .auth_header(minted["token"].as_str().unwrap()),
+    );
+    let revoked = ClientInfo::new(
+        ClientCapabilities::default(),
+        Implementation::new("clotho-stage4-test", "0.1.0"),
+    )
+    .serve(transport)
+    .await;
+    assert!(revoked.is_err(), "revoked token must fail to initialize");
 }

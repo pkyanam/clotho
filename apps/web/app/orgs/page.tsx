@@ -10,7 +10,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function OrgsPage() {
-  const orgs = await api()
+  const orgs = await (await api())
     .orgs()
     .catch(() => []);
 

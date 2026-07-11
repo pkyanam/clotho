@@ -17,6 +17,10 @@ pub enum ApiError {
     Upstream(String),
     #[error("{0}")]
     Internal(String),
+    #[error("{0}")]
+    Unauthorized(String),
+    #[error("{0}")]
+    Forbidden(String),
 }
 
 impl ApiError {
@@ -27,6 +31,8 @@ impl ApiError {
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::Upstream(_) => StatusCode::BAD_GATEWAY,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            Self::Forbidden(_) => StatusCode::FORBIDDEN,
         }
     }
 }

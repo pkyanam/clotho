@@ -1,14 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+
+import { ClerkAuthControls } from "./clerk-provider";
+import { NotificationBell } from "./notification-bell";
 
 const NAV = [
   { href: "/", label: "dashboard" },
   { href: "/repos", label: "repos" },
   { href: "/agents", label: "agents" },
   { href: "/activity", label: "activity" },
+  { href: "/notifications", label: "notifications" },
   { href: "/settings", label: "settings" },
 ] as const;
 
@@ -78,6 +82,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
+            <NotificationBell />
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
@@ -101,13 +106,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               secrets
             </Link>
+            <ClerkAuthControls />
           </div>
         </div>
 
         {mobileOpen && (
           <nav
             key={drawerKey}
-            className="border-t border-kumo-hairline px-4 py-3 md:hidden"
+            className="drawer-enter border-t border-kumo-hairline px-4 py-3 md:hidden"
           >
             <ul className="space-y-1">
               {NAV.map((item) => (
@@ -151,69 +157,125 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 }
 
+const PALETTE_COMMANDS = [
+  { href: "/", label: "go to dashboard", keywords: "home" },
+  { href: "/repos", label: "all repositories", keywords: "repos list" },
+  { href: "/repos/new", label: "create repository", keywords: "new repo" },
+  { href: "/agents", label: "agents", keywords: "sessions identity presence" },
+  { href: "/activity", label: "activity", keywords: "feed events" },
+  { href: "/notifications", label: "notifications", keywords: "alerts mentions" },
+  { href: "/orgs", label: "organizations", keywords: "teams members" },
+  { href: "/settings", label: "settings hub", keywords: "account org" },
+  {
+    href: "/settings/appearance",
+    label: "appearance",
+    keywords: "theme dark light system color scheme",
+  },
+  {
+    href: "/settings/compute",
+    label: "compute providers",
+    keywords: "daytona connect sandboxes",
+  },
+  {
+    href: "/settings/secrets",
+    label: "secrets",
+    keywords: "api key credentials rotate",
+  },
+] as const;
+
 function CommandPalette({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
   const [query, setQuery] = useState("");
-  const commands = [
-    { href: "/", label: "go to dashboard", keywords: "home" },
-    { href: "/repos/new", label: "create repository", keywords: "new repo" },
-    { href: "/settings/compute", label: "compute providers", keywords: "daytona connect" },
-    { href: "/settings/secrets", label: "secrets", keywords: "api key credentials" },
-    { href: "/settings", label: "settings hub", keywords: "account org" },
-    { href: "/agents", label: "agents", keywords: "sessions identity" },
-    { href: "/activity", label: "activity", keywords: "feed events" },
-    { href: "/repos", label: "all repositories", keywords: "repos list" },
-  ].filter((c) => {
+  const [selected, setSelected] = useState(0);
+
+  const commands = PALETTE_COMMANDS.filter((c) => {
     const q = query.trim().toLowerCase();
     if (!q) return true;
-    return (
-      c.label.includes(q) ||
-      c.keywords.includes(q) ||
-      c.href.includes(q)
-    );
+    return c.label.includes(q) || c.keywords.includes(q) || c.href.includes(q);
   });
+  const active = Math.min(selected, Math.max(commands.length - 1, 0));
+
+  function open(href: string) {
+    onClose();
+    router.push(href);
+  }
+
+  function onInputKey(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelected((v) => Math.min(v + 1, commands.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelected((v) => Math.max(v - 1, 0));
+    } else if (e.key === "Enter" && commands[active]) {
+      e.preventDefault();
+      open(commands[active].href);
+    }
+  }
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 px-4 pt-[12vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-kumo-canvas/70 px-4 pt-[12vh]"
       role="dialog"
       aria-modal="true"
       aria-label="command palette"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg border border-kumo-hairline bg-kumo-base shadow-none"
+        className="palette-enter w-full max-w-lg border border-kumo-hairline bg-kumo-base shadow-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="border-b border-kumo-hairline px-4 py-3">
           <input
             autoFocus
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSelected(0);
+            }}
+            onKeyDown={onInputKey}
             placeholder="jump to…"
             className="w-full bg-transparent text-[0.9375rem] text-kumo-default outline-none placeholder:text-kumo-placeholder"
             aria-label="command search"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="palette-results"
           />
         </div>
-        <ul className="max-h-72 overflow-y-auto py-1">
+        <ul
+          id="palette-results"
+          role="listbox"
+          className="max-h-72 overflow-y-auto py-1"
+        >
           {commands.length === 0 ? (
-            <li className="px-4 py-6 text-sm text-kumo-inactive">no matches</li>
+            <li className="px-4 py-6 text-sm text-kumo-inactive">
+              nothing matches “{query.trim()}” — try repos, agents, compute, or
+              secrets.
+            </li>
           ) : (
-            commands.map((c) => (
-              <li key={c.href + c.label}>
+            commands.map((c, i) => (
+              <li key={c.href} role="option" aria-selected={i === active}>
                 <Link
                   href={c.href}
                   onClick={onClose}
-                  className="flex items-center justify-between px-4 py-2.5 text-sm transition-colors hover:bg-kumo-elevated"
+                  onMouseEnter={() => setSelected(i)}
+                  className={`flex items-center justify-between px-4 py-2.5 text-sm transition-colors ${
+                    i === active
+                      ? "bg-kumo-elevated text-kumo-default"
+                      : "text-kumo-default hover:bg-kumo-elevated"
+                  }`}
                 >
                   <span>{c.label}</span>
-                  <span className="text-[0.75rem] text-kumo-inactive">{c.href}</span>
+                  <span className="text-[0.75rem] text-kumo-inactive">
+                    {c.href}
+                  </span>
                 </Link>
               </li>
             ))
           )}
         </ul>
         <div className="border-t border-kumo-hairline px-4 py-2 text-[0.75rem] text-kumo-inactive">
-          esc to close · enter to open
+          ↑↓ to select · enter to open · esc to close
         </div>
       </div>
     </div>

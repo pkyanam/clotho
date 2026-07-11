@@ -18,6 +18,8 @@ pub enum IdentityError {
     AgentNotFound(String),
     #[error("agent name {0:?} already exists")]
     AgentExists(String),
+    #[error("token {0:?} not found for agent {1:?}")]
+    TokenNotFound(Uuid, String),
     #[error(transparent)]
     Db(#[from] sqlx::Error),
 }
@@ -28,7 +30,24 @@ pub struct Agent {
     pub name: String,
     pub description: String,
     pub created_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_at: Option<DateTime<Utc>>,
 }
+
+/// Token metadata — never includes the plaintext bearer secret.
+#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+pub struct TokenMeta {
+    pub id: Uuid,
+    /// Recognizable prefix for display (`clotho_agt_…`).
+    pub token_prefix: String,
+    pub allowed_repos: Vec<String>,
+    pub allowed_tools: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+
+const TOKEN_DISPLAY_PREFIX: &str = "clotho_agt_";
 
 #[derive(Debug, serde::Serialize)]
 pub struct MintedToken {
@@ -120,7 +139,7 @@ impl IdentityStore {
     ) -> Result<Agent, IdentityError> {
         sqlx::query_as::<_, Agent>(
             "insert into agents (name, description) values ($1, $2)
-             returning id, name, description, created_at",
+             returning id, name, description, created_at, disabled_at",
         )
         .bind(name)
         .bind(description)
@@ -272,6 +291,128 @@ impl IdentityStore {
         .bind(limit)
         .fetch_all(&self.pool)
         .await?)
+    }
+
+    /// All agents, optionally including disabled ones.
+    pub async fn list_agents(&self, include_disabled: bool) -> Result<Vec<Agent>, IdentityError> {
+        let rows = if include_disabled {
+            sqlx::query_as::<_, Agent>(
+                "select id, name, description, created_at, disabled_at
+                 from agents order by name",
+            )
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, Agent>(
+                "select id, name, description, created_at, disabled_at
+                 from agents where disabled_at is null order by name",
+            )
+            .fetch_all(&self.pool)
+            .await?
+        };
+        Ok(rows)
+    }
+
+    pub async fn get_agent(&self, name: &str) -> Result<Agent, IdentityError> {
+        sqlx::query_as::<_, Agent>(
+            "select id, name, description, created_at, disabled_at
+             from agents where name = $1",
+        )
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| IdentityError::AgentNotFound(name.into()))
+    }
+
+    /// Soft-disable an agent; all of its tokens stop authenticating at once.
+    pub async fn disable_agent(&self, name: &str) -> Result<Agent, IdentityError> {
+        sqlx::query_as::<_, Agent>(
+            "update agents set disabled_at = now()
+             where name = $1 and disabled_at is null
+             returning id, name, description, created_at, disabled_at",
+        )
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| IdentityError::AgentNotFound(name.into()))
+    }
+
+    /// Metadata for every token minted for one agent, newest first.
+    pub async fn list_tokens(&self, agent_name: &str) -> Result<Vec<TokenMeta>, IdentityError> {
+        let agent_id: Option<Uuid> = sqlx::query_scalar("select id from agents where name = $1")
+            .bind(agent_name)
+            .fetch_optional(&self.pool)
+            .await?;
+        let agent_id = agent_id.ok_or_else(|| IdentityError::AgentNotFound(agent_name.into()))?;
+
+        let rows = sqlx::query_as::<_, TokenMeta>(
+            "select id,
+                    $2::text as token_prefix,
+                    allowed_repos, allowed_tools, created_at, expires_at, revoked_at
+             from agent_tokens
+             where agent_id = $1
+             order by created_at desc",
+        )
+        .bind(agent_id)
+        .bind(TOKEN_DISPLAY_PREFIX)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    pub async fn revoke_token(
+        &self,
+        agent_name: &str,
+        token_id: Uuid,
+    ) -> Result<(), IdentityError> {
+        let result = sqlx::query(
+            "update agent_tokens t
+             set revoked_at = now()
+             from agents a
+             where t.agent_id = a.id
+               and a.name = $1
+               and t.id = $2
+               and t.revoked_at is null",
+        )
+        .bind(agent_name)
+        .bind(token_id)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(IdentityError::TokenNotFound(token_id, agent_name.into()));
+        }
+        Ok(())
+    }
+
+    pub async fn update_token_scopes(
+        &self,
+        agent_name: &str,
+        token_id: Uuid,
+        allowed_repos: Option<Vec<String>>,
+        allowed_tools: Option<Vec<String>>,
+    ) -> Result<TokenMeta, IdentityError> {
+        let row = sqlx::query_as::<_, TokenMeta>(
+            "update agent_tokens t
+             set allowed_repos = coalesce($3, t.allowed_repos),
+                 allowed_tools = coalesce($4, t.allowed_tools)
+             from agents a
+             where t.agent_id = a.id
+               and a.name = $1
+               and t.id = $2
+               and t.revoked_at is null
+             returning t.id,
+                       $5::text as token_prefix,
+                       t.allowed_repos, t.allowed_tools,
+                       t.created_at, t.expires_at, t.revoked_at",
+        )
+        .bind(agent_name)
+        .bind(token_id)
+        .bind(allowed_repos)
+        .bind(allowed_tools)
+        .bind(TOKEN_DISPLAY_PREFIX)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.ok_or_else(|| IdentityError::TokenNotFound(token_id, agent_name.into()))
     }
 
     /// Recent audit entries for one agent, newest first.

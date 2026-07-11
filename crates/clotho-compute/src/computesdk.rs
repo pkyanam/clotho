@@ -105,7 +105,9 @@ impl ComputeSdkBridgeProvider {
             if v.trim().is_empty() {
                 continue;
             }
-            let key = if k.chars().all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
+            let key = if k
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
             {
                 k.clone()
             } else {
@@ -308,9 +310,7 @@ impl ComputeProvider for ComputeSdkBridgeProvider {
         if !status.is_success() {
             // Map 503 (unconfigured) to Disabled for honest FAILED_PRECONDITION.
             if status.as_u16() == 503 {
-                return Err(ComputeError::Disabled(format!(
-                    "computesdk bridge: {text}"
-                )));
+                return Err(ComputeError::Disabled(format!("computesdk bridge: {text}")));
             }
             return Err(ComputeError::Provider(format!(
                 "computesdk bridge job: {status}: {text}"

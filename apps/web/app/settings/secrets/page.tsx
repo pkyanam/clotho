@@ -19,7 +19,7 @@ function isoToMillis(iso: string): number {
 }
 
 export default async function SecretsSettingsPage() {
-  const orgs = await api()
+  const orgs = await (await api())
     .orgs()
     .catch(() => []);
   const primaryOrg = orgs[0]?.name ?? "clotho";
@@ -27,7 +27,7 @@ export default async function SecretsSettingsPage() {
   let secrets: SecretMeta[] = [];
   let loadError: string | null = null;
   try {
-    secrets = await api().orgSecrets(primaryOrg);
+    secrets = await (await api()).orgSecrets(primaryOrg);
   } catch (e) {
     loadError = e instanceof Error ? e.message : "failed to load secrets";
   }

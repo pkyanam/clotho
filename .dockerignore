@@ -1,0 +1,10 @@
+.git
+.turbo
+**/.next
+**/node_modules
+target
+.env
+.env.*
+!.env.example
+collab/forgejo
+

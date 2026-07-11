@@ -24,7 +24,25 @@ describe("ClothoClient", () => {
     await client.listRepos();
     expect(fetchMock).toHaveBeenCalledWith(
       "http://gateway.test/api/v1/repos",
-      undefined,
+      expect.objectContaining({ headers: {} }),
+    );
+  });
+
+  it("sends Authorization when token is set", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ user: { id: "u1", name: "clotho", email: "", display_name: "clotho", created_at: "" }, token_id: null }));
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      token: "clotho_tok_secret",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    await client.me();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://gateway.test/api/v1/me",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: "Bearer clotho_tok_secret",
+        }),
+      }),
     );
   });
 
@@ -49,12 +67,12 @@ describe("ClothoClient", () => {
     await client.tree("weave");
     expect(fetchMock).toHaveBeenCalledWith(
       "http://gateway.test/api/v1/repos/weave/tree",
-      undefined,
+      expect.objectContaining({ headers: {} }),
     );
     await client.file("weave", "src/a b.rs", "deadbeef");
     expect(fetchMock).toHaveBeenLastCalledWith(
       "http://gateway.test/api/v1/repos/weave/file?path=src%2Fa+b.rs&commit_id=deadbeef",
-      undefined,
+      expect.objectContaining({ headers: {} }),
     );
   });
 
@@ -104,8 +122,52 @@ describe("ClothoClient", () => {
     await client.agentSessions("weave", { limit: 5, withinSecs: 3600 });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://gateway.test/api/v1/repos/weave/agent-sessions?limit=5&within_secs=3600",
-      undefined,
+      expect.objectContaining({ headers: {} }),
     );
+  });
+
+  it("lists and mints agent identities", async () => {
+    const agent = {
+      id: "a1",
+      name: "weaver",
+      description: "demo",
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    const minted = {
+      token: "clotho_agt_deadbeef",
+      token_id: "t1",
+      agent: "weaver",
+      allowed_repos: ["*"],
+      allowed_tools: ["*"],
+      expires_at: null,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ agents: [agent] }))
+      .mockResolvedValueOnce(jsonResponse(agent, 201))
+      .mockResolvedValueOnce(jsonResponse({ agent, tokens: [] }))
+      .mockResolvedValueOnce(jsonResponse(minted, 201))
+      .mockResolvedValueOnce(jsonResponse({ tokens: [{ id: "t1", token_prefix: "clotho_agt_", allowed_repos: ["*"], allowed_tools: ["*"], created_at: "2026-01-01T00:00:00Z", expires_at: null, revoked_at: null }] }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(jsonResponse({ entries: [] }));
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    const agents = await client.listAgents();
+    expect(agents).toHaveLength(1);
+    await client.createAgent({ name: "weaver", description: "demo" });
+    await client.getAgent("weaver");
+    const token = await client.mintAgentToken("weaver", {
+      allowedRepos: ["*"],
+      allowedTools: ["*"],
+    });
+    expect(token.token).toContain("clotho_agt_");
+    const tokens = await client.listAgentTokens("weaver");
+    expect(tokens).toHaveLength(1);
+    await client.revokeAgentToken("weaver", "t1");
+    const audit = await client.agentAudit("weaver");
+    expect(audit).toEqual([]);
   });
 
   it("lists and creates org secrets without returning raw values", async () => {
@@ -141,7 +203,7 @@ describe("ClothoClient", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       "http://gateway.test/api/v1/orgs/clotho/secrets",
-      undefined,
+      expect.objectContaining({ headers: {} }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
@@ -181,7 +243,7 @@ describe("ClothoClient", () => {
     );
     expect(fetchMock).toHaveBeenCalledWith(
       "http://gateway.test/api/v1/repos/weave/secrets/CI_TOKEN",
-      undefined,
+      expect.objectContaining({ headers: {} }),
     );
   });
 
@@ -239,14 +301,19 @@ describe("ClothoClient", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       "http://gateway.test/api/v1/repos/weave/issues?state=all",
-      undefined,
+      expect.objectContaining({ headers: {} }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "http://gateway.test/api/v1/repos/weave/issues",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ title: "race", body: "found" }),
+        body: JSON.stringify({
+          title: "race",
+          body: "found",
+          labels: [],
+          assignees: [],
+        }),
       }),
     );
   });
@@ -287,6 +354,62 @@ describe("ClothoClient", () => {
     );
   });
 
+  it("lists pull comments, reviews, and merge policy", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          comments: [{ id: 1, body: "root", in_reply_to: null }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          reviews: [{ id: 2, state: "APPROVED", user: { login: "alice" } }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          require_passing_actions: true,
+          block_merge_when_conflicted: true,
+          require_review_approvals: 1,
+          protect_default_branch: false,
+          updated_at: "2026-01-01T00:00:00Z",
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          require_passing_actions: false,
+          block_merge_when_conflicted: true,
+          require_review_approvals: 0,
+          protect_default_branch: false,
+          updated_at: "2026-01-02T00:00:00Z",
+        }),
+      );
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    await expect(client.listPullComments("weave", 3)).resolves.toEqual([
+      { id: 1, body: "root", in_reply_to: null },
+    ]);
+    await expect(client.listPullReviews("weave", 3)).resolves.toEqual([
+      { id: 2, state: "APPROVED", user: { login: "alice" } },
+    ]);
+    await expect(client.getMergePolicy("weave")).resolves.toMatchObject({
+      require_passing_actions: true,
+      require_review_approvals: 1,
+    });
+    await client.updateMergePolicy("weave", { require_passing_actions: false });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://gateway.test/api/v1/repos/weave/merge-policy",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ require_passing_actions: false }),
+      }),
+    );
+  });
+
   it("reads branches and statuses from the facade", async () => {
     const fetchMock = vi
       .fn()
@@ -304,7 +427,7 @@ describe("ClothoClient", () => {
 
     expect(fetchMock).toHaveBeenLastCalledWith(
       "http://gateway.test/api/v1/repos/weave/commits/abc%2Fdef/statuses",
-      undefined,
+      expect.objectContaining({ headers: {} }),
     );
   });
 
@@ -366,17 +489,17 @@ describe("ClothoClient", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,
       "http://gateway.test/api/v1/repos/weave/actions/runs/run-1/logs",
-      undefined,
+      expect.objectContaining({ headers: {} }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       7,
       "http://gateway.test/api/v1/providers",
-      undefined,
+      expect.objectContaining({ headers: {} }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       8,
       "http://gateway.test/api/v1/providers/daytona",
-      undefined,
+      expect.objectContaining({ headers: {} }),
     );
   });
 
@@ -407,15 +530,15 @@ describe("ClothoClient", () => {
 
     expect(fetchMock).toHaveBeenLastCalledWith(
       "http://gateway.test/api/v1/activity?limit=10",
-      undefined,
+      expect.objectContaining({ headers: {} }),
     );
   });
 
-  it("creates an org with optional display name and forgejo owner", async () => {
-    const { client, fetchMock } = clientWith(jsonResponse({ name: "weavers" }));
+  it("creates an org with optional display name and git owner", async () => {
+    const { client, fetchMock } = clientWith(jsonResponse({ id: "o1", name: "weavers", display_name: "Weavers", created_by: "u1", created_at: "" }));
     await client.createOrg("weavers", {
       displayName: "Weavers",
-      forgejoOwner: "weavers",
+      gitOwner: "weavers",
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://gateway.test/api/v1/orgs",
@@ -424,9 +547,98 @@ describe("ClothoClient", () => {
         body: JSON.stringify({
           name: "weavers",
           display_name: "Weavers",
-          forgejo_owner: "weavers",
+          git_owner: "weavers",
         }),
       }),
     );
+  });
+
+  it("creates issues with labels and assignees", async () => {
+    const { client, fetchMock } = clientWith(jsonResponse({ number: 1, title: "t" }));
+    await client.createIssue("weave", {
+      title: "t",
+      body: "b",
+      labels: ["bug"],
+      assignees: ["clotho"],
+      milestone: 3,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://gateway.test/api/v1/repos/weave/issues",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          title: "t",
+          body: "b",
+          labels: ["bug"],
+          assignees: ["clotho"],
+          milestone: 3,
+        }),
+      }),
+    );
+  });
+
+  it("updates issues and lists labels, milestones, notifications", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ number: 1, state: "closed" }))
+      .mockResolvedValueOnce(jsonResponse({ labels: [{ id: 1, name: "bug" }] }))
+      .mockResolvedValueOnce(jsonResponse({ milestones: [{ id: 2, title: "v1" }] }))
+      .mockResolvedValueOnce(
+        jsonResponse({ notifications: [], unread_count: 0 }),
+      );
+
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    await client.updateIssue("weave", 1, { state: "closed" });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://gateway.test/api/v1/repos/weave/issues/1",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+
+    await expect(client.listLabels("weave")).resolves.toEqual([
+      { id: 1, name: "bug" },
+    ]);
+    await expect(client.listMilestones("weave")).resolves.toEqual([
+      { id: 2, title: "v1" },
+    ]);
+    await expect(client.notifications({ unread: true })).resolves.toEqual({
+      notifications: [],
+      unread_count: 0,
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://gateway.test/api/v1/notifications?unread=true",
+      expect.objectContaining({ headers: {} }),
+    );
+  });
+
+  it("lists fabric providers by layer", async () => {
+    const { client, fetchMock } = clientWith(
+      jsonResponse({
+        providers: [
+          {
+            id: "bootstrap",
+            name: "Bootstrap",
+            layer: "auth",
+            kind: "auth",
+            enabled: true,
+            configured: true,
+            capabilities: ["human-api-tokens"],
+          },
+        ],
+        default_provider_id: "bootstrap",
+        layer: "auth",
+      }),
+    );
+    const list = await client.listProviders({ layer: "auth" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://gateway.test/api/v1/providers?layer=auth",
+      expect.objectContaining({ headers: {} }),
+    );
+    expect(list.default_provider_id).toBe("bootstrap");
+    expect(list.providers[0]?.id).toBe("bootstrap");
   });
 });

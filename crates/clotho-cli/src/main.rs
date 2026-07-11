@@ -9,17 +9,21 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
-use crate::args::{require_one, require_two, strip_globals, take_flag, take_option, take_repeated};
+use crate::args::{
+    require_one, require_two, strip_globals, take_flag, take_option, take_repeated,
+    take_repeated_str,
+};
 use crate::client::{emit, first_line, request_json, request_value, short, Config};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    let (api_opt, json) = strip_globals(&mut args);
+    let (api_opt, json, token_opt) = strip_globals(&mut args);
     let api_url = api_opt
         .or_else(|| std::env::var("CLOTHO_API_URL").ok())
         .unwrap_or_else(|| "http://localhost:8080".into());
-    let config = Config::from_env_and_args(api_url, json);
+    let token = token_opt.or_else(|| std::env::var("CLOTHO_TOKEN").ok());
+    let config = Config::from_env_and_args(api_url, json, token);
 
     let Some(command) = args.first().cloned() else {
         usage();
@@ -28,15 +32,20 @@ async fn main() -> Result<()> {
     args.remove(0);
 
     match command.as_str() {
+        "auth" => cmd_auth(&config, args).await,
         // Grouped commands (Stage 15).
         "repo" => cmd_repo(&config, args).await,
         "issue" => cmd_issue(&config, args).await,
+        "label" => cmd_label(&config, args).await,
+        "milestone" => cmd_milestone(&config, args).await,
+        "notification" => cmd_notification(&config, args).await,
         "pr" => cmd_pr(&config, args).await,
         "actions" => cmd_actions(&config, args).await,
         "provider" => cmd_provider(&config, args).await,
         "secret" => cmd_secret(&config, args).await,
         "org" => cmd_org(&config, args).await,
         "activity" => cmd_activity(&config, args).await,
+        "agent" => cmd_agent(&config, args).await,
         // Backward-compatible Stage 8 aliases.
         "init" => cmd_repo(&config, prepend("init", args)).await,
         "status" => cmd_repo(&config, prepend("status", args)).await,
@@ -54,6 +63,85 @@ async fn main() -> Result<()> {
 fn prepend(cmd: &str, mut args: Vec<String>) -> Vec<String> {
     args.insert(0, cmd.to_string());
     args
+}
+
+// ---------------------------------------------------------------------------
+// auth
+// ---------------------------------------------------------------------------
+
+async fn cmd_auth(config: &Config, mut args: Vec<String>) -> Result<()> {
+    let Some(sub) = args.first().cloned() else {
+        bail!("usage: clotho auth <whoami|token> ...");
+    };
+    args.remove(0);
+    match sub.as_str() {
+        "whoami" => {
+            let body: Value =
+                request_json(config, reqwest::Method::GET, "/api/v1/me", None).await?;
+            emit(config, &body, || {
+                let user = &body["user"];
+                println!(
+                    "{} <{}> ({})",
+                    user["name"].as_str().unwrap_or("?"),
+                    user["email"].as_str().unwrap_or(""),
+                    user["id"].as_str().unwrap_or("")
+                );
+            })
+        }
+        "token" => {
+            let Some(action) = args.first().cloned() else {
+                bail!("usage: clotho auth token <create|list|revoke> ...");
+            };
+            args.remove(0);
+            match action.as_str() {
+                "create" => {
+                    let name = take_option(&mut args, "--name").unwrap_or_default();
+                    let body = request_json(
+                        config,
+                        reqwest::Method::POST,
+                        "/api/v1/tokens",
+                        Some(json!({ "name": name })),
+                    )
+                    .await?;
+                    emit(config, &body, || {
+                        println!(
+                            "token {} (prefix {}) — save this value, it is shown once:\n{}",
+                            body["id"].as_str().unwrap_or("?"),
+                            body["token_prefix"].as_str().unwrap_or(""),
+                            body["token"].as_str().unwrap_or("")
+                        );
+                    })
+                }
+                "list" => {
+                    let body: Value =
+                        request_json(config, reqwest::Method::GET, "/api/v1/tokens", None).await?;
+                    emit(config, &body, || {
+                        for t in body["tokens"].as_array().into_iter().flatten() {
+                            println!(
+                                "{}  {}  {}",
+                                t["id"].as_str().unwrap_or("?"),
+                                t["token_prefix"].as_str().unwrap_or(""),
+                                t["name"].as_str().unwrap_or("")
+                            );
+                        }
+                    })
+                }
+                "revoke" => {
+                    let id = require_one(&args, "clotho auth token revoke <id>")?;
+                    request_value(
+                        config,
+                        reqwest::Method::DELETE,
+                        &format!("/api/v1/tokens/{id}"),
+                        None,
+                    )
+                    .await?;
+                    emit(config, &json!(null), || println!("revoked {id}"))
+                }
+                other => bail!("unknown auth token subcommand {other:?}"),
+            }
+        }
+        other => bail!("unknown auth subcommand {other:?}"),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -127,10 +215,7 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
                     "main {}",
                     short(detail["main_commit_id"].as_str().unwrap_or(""))
                 );
-                println!(
-                    "heads {}",
-                    detail["heads"].as_array().map_or(0, Vec::len)
-                );
+                println!("heads {}", detail["heads"].as_array().map_or(0, Vec::len));
                 println!("files {files}");
             })
         }
@@ -191,7 +276,133 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
             .await?;
             emit(config, &body, || print_submit(&body))
         }
+        "update" => {
+            let repo = require_one(&args, "clotho repo update <name>")?;
+            let description = take_option(&mut args, "--description");
+            let visibility = take_option(&mut args, "--visibility");
+            let default_branch = take_option(&mut args, "--default-branch");
+            if description.is_none() && visibility.is_none() && default_branch.is_none() {
+                bail!("usage: clotho repo update <name> [--description] [--visibility] [--default-branch]");
+            }
+            let mut patch = serde_json::Map::new();
+            if let Some(d) = description {
+                patch.insert("description".into(), json!(d));
+            }
+            if let Some(v) = visibility {
+                patch.insert("visibility".into(), json!(v));
+            }
+            if let Some(b) = default_branch {
+                patch.insert("default_branch".into(), json!(b));
+            }
+            let body = request_json(
+                config,
+                reqwest::Method::PATCH,
+                &format!("/api/v1/repos/{repo}"),
+                Some(json!(patch)),
+            )
+            .await?;
+            emit(config, &body, || {
+                println!(
+                    "updated {} visibility={} branch={}",
+                    body["name"].as_str().unwrap_or(&repo),
+                    body["visibility"].as_str().unwrap_or(""),
+                    body["default_branch"].as_str().unwrap_or("")
+                );
+            })
+        }
+        "delete" => {
+            let repo = require_one(&args, "clotho repo delete <name>")?;
+            let yes = take_flag(&mut args, "--yes");
+            if !yes {
+                bail!("refusing to delete {repo} without --yes");
+            }
+            request_value(
+                config,
+                reqwest::Method::DELETE,
+                &format!("/api/v1/repos/{repo}"),
+                None,
+            )
+            .await?;
+            emit(config, &json!(null), || println!("deleted {repo}"))
+        }
+        "merge-policy" => cmd_repo_merge_policy(config, args).await,
         other => bail!("unknown repo subcommand {other:?}"),
+    }
+}
+
+async fn cmd_repo_merge_policy(config: &Config, mut args: Vec<String>) -> Result<()> {
+    let Some(sub) = args.first().cloned() else {
+        bail!(
+            "usage: clotho repo merge-policy <get|set> <repo> \
+             [--require-actions] [--block-conflicted] [--approvals N] [--protect-default]"
+        );
+    };
+    args.remove(0);
+    match sub.as_str() {
+        "get" => {
+            let repo = require_one(&args, "clotho repo merge-policy get <repo>")?;
+            let body: Value = request_json(
+                config,
+                reqwest::Method::GET,
+                &format!("/api/v1/repos/{repo}/merge-policy"),
+                None,
+            )
+            .await?;
+            emit(config, &body, || {
+                println!(
+                    "require_actions={} block_conflicted={} approvals={} protect_default={}",
+                    body["require_passing_actions"].as_bool().unwrap_or(false),
+                    body["block_merge_when_conflicted"]
+                        .as_bool()
+                        .unwrap_or(true),
+                    body["require_review_approvals"].as_i64().unwrap_or(0),
+                    body["protect_default_branch"].as_bool().unwrap_or(false),
+                );
+            })
+        }
+        "set" => {
+            let repo = require_one(&args, "clotho repo merge-policy set <repo>")?;
+            let require_actions = take_flag(&mut args, "--require-actions");
+            let block_conflicted = take_flag(&mut args, "--block-conflicted");
+            let no_block_conflicted = take_flag(&mut args, "--no-block-conflicted");
+            let approvals = take_option(&mut args, "--approvals");
+            let protect_default = take_flag(&mut args, "--protect-default");
+            let mut patch = serde_json::Map::new();
+            if require_actions {
+                patch.insert("require_passing_actions".into(), json!(true));
+            }
+            if block_conflicted {
+                patch.insert("block_merge_when_conflicted".into(), json!(true));
+            }
+            if no_block_conflicted {
+                patch.insert("block_merge_when_conflicted".into(), json!(false));
+            }
+            if let Some(n) = approvals {
+                let n: i32 = n.parse().context("--approvals must be an integer")?;
+                patch.insert("require_review_approvals".into(), json!(n));
+            }
+            if protect_default {
+                patch.insert("protect_default_branch".into(), json!(true));
+            }
+            if patch.is_empty() {
+                bail!(
+                    "usage: clotho repo merge-policy set <repo> \
+                     [--require-actions] [--block-conflicted|--no-block-conflicted] \
+                     [--approvals N] [--protect-default]"
+                );
+            }
+            let body = request_json(
+                config,
+                reqwest::Method::PUT,
+                &format!("/api/v1/repos/{repo}/merge-policy"),
+                Some(json!(patch)),
+            )
+            .await?;
+            emit(config, &body, || {
+                println!("updated merge policy for {repo}");
+            })
+        }
+        other => bail!("unknown merge-policy subcommand {other:?}"),
     }
 }
 
@@ -293,7 +504,7 @@ fn print_submit(result: &Value) {
 
 async fn cmd_issue(config: &Config, mut args: Vec<String>) -> Result<()> {
     let Some(sub) = args.first().cloned() else {
-        bail!("usage: clotho issue <list|create|get|comment> ...");
+        bail!("usage: clotho issue <list|create|get|comment|update> ...");
     };
     args.remove(0);
     match sub.as_str() {
@@ -324,25 +535,99 @@ async fn cmd_issue(config: &Config, mut args: Vec<String>) -> Result<()> {
         }
         "create" => {
             if args.is_empty() {
-                bail!("usage: clotho issue create <repo> --title <title> [--body <body>]");
+                bail!("usage: clotho issue create <repo> --title <title> [--body <body>] [--label <name>]... [--assignee <login>]... [--milestone <id>]");
             }
             let repo = args.remove(0);
             let title = take_option(&mut args, "--title")
                 .context("issue title is required: --title <title>")?;
             let body_text = take_option(&mut args, "--body").unwrap_or_default();
+            let labels = take_repeated_str(&mut args, "--label");
+            let assignees = take_repeated_str(&mut args, "--assignee");
+            let milestone = take_option(&mut args, "--milestone");
             if !args.is_empty() {
                 bail!("unrecognized arguments: {}", args.join(" "));
+            }
+            let mut payload = json!({
+                "title": title,
+                "body": body_text,
+                "labels": labels,
+                "assignees": assignees,
+            });
+            if let Some(milestone) = milestone {
+                payload["milestone"] = json!(milestone
+                    .parse::<i64>()
+                    .context("milestone must be an integer")?);
             }
             let body = request_value(
                 config,
                 reqwest::Method::POST,
                 &format!("/api/v1/repos/{repo}/issues"),
-                Some(json!({ "title": title, "body": body_text })),
+                Some(payload),
             )
             .await?;
             emit(config, &body, || {
                 println!(
                     "created issue #{} {}",
+                    body["number"].as_i64().unwrap_or(0),
+                    body["html_url"].as_str().unwrap_or("")
+                );
+            })
+        }
+        "update" => {
+            if args.len() < 2 {
+                bail!("usage: clotho issue update <repo> <number> [--title <t>] [--body <b>] [--state open|closed] [--label <name>]... [--assignee <login>]... [--milestone <id>|--clear-milestone]");
+            }
+            let repo = args.remove(0);
+            let number = args.remove(0);
+            let title = take_option(&mut args, "--title");
+            let body_text = take_option(&mut args, "--body");
+            let state = take_option(&mut args, "--state");
+            let labels = take_repeated_str(&mut args, "--label");
+            let assignees = take_repeated_str(&mut args, "--assignee");
+            let clear_milestone = take_flag(&mut args, "--clear-milestone");
+            let milestone = take_option(&mut args, "--milestone");
+            if !args.is_empty() {
+                bail!("unrecognized arguments: {}", args.join(" "));
+            }
+            let mut payload = serde_json::Map::new();
+            if let Some(title) = title {
+                payload.insert("title".into(), json!(title));
+            }
+            if let Some(body_text) = body_text {
+                payload.insert("body".into(), json!(body_text));
+            }
+            if let Some(state) = state {
+                payload.insert("state".into(), json!(state));
+            }
+            if !labels.is_empty() {
+                payload.insert("labels".into(), json!(labels));
+            }
+            if !assignees.is_empty() {
+                payload.insert("assignees".into(), json!(assignees));
+            }
+            if clear_milestone {
+                payload.insert("milestone".into(), Value::Null);
+            } else if let Some(milestone) = milestone {
+                payload.insert(
+                    "milestone".into(),
+                    json!(milestone
+                        .parse::<i64>()
+                        .context("milestone must be an integer")?),
+                );
+            }
+            if payload.is_empty() {
+                bail!("at least one update field is required");
+            }
+            let body = request_value(
+                config,
+                reqwest::Method::PATCH,
+                &format!("/api/v1/repos/{repo}/issues/{number}"),
+                Some(Value::Object(payload)),
+            )
+            .await?;
+            emit(config, &body, || {
+                println!(
+                    "updated issue #{} {}",
                     body["number"].as_i64().unwrap_or(0),
                     body["html_url"].as_str().unwrap_or("")
                 );
@@ -399,6 +684,184 @@ async fn cmd_issue(config: &Config, mut args: Vec<String>) -> Result<()> {
             })
         }
         other => bail!("unknown issue subcommand {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// label
+// ---------------------------------------------------------------------------
+
+async fn cmd_label(config: &Config, mut args: Vec<String>) -> Result<()> {
+    let Some(sub) = args.first().cloned() else {
+        bail!("usage: clotho label <list|create> ...");
+    };
+    args.remove(0);
+    match sub.as_str() {
+        "list" => {
+            let repo = require_one(&args, "clotho label list <repo>")?;
+            let body: Value = request_json(
+                config,
+                reqwest::Method::GET,
+                &format!("/api/v1/repos/{repo}/labels"),
+                None,
+            )
+            .await?;
+            emit(config, &body, || {
+                for label in body["labels"].as_array().into_iter().flatten() {
+                    println!(
+                        "{} {} {}",
+                        label["name"].as_str().unwrap_or("?"),
+                        label["color"].as_str().unwrap_or(""),
+                        label["description"].as_str().unwrap_or("")
+                    );
+                }
+            })
+        }
+        "create" => {
+            if args.is_empty() {
+                bail!("usage: clotho label create <repo> --name <name> --color <hex> [--description <text>]");
+            }
+            let repo = args.remove(0);
+            let name = take_option(&mut args, "--name")
+                .context("label name is required: --name <name>")?;
+            let color = take_option(&mut args, "--color")
+                .context("label color is required: --color <hex>")?;
+            let description = take_option(&mut args, "--description").unwrap_or_default();
+            if !args.is_empty() {
+                bail!("unrecognized arguments: {}", args.join(" "));
+            }
+            let body = request_value(
+                config,
+                reqwest::Method::POST,
+                &format!("/api/v1/repos/{repo}/labels"),
+                Some(json!({ "name": name, "color": color, "description": description })),
+            )
+            .await?;
+            emit(config, &body, || {
+                println!(
+                    "created label {} ({})",
+                    body["name"].as_str().unwrap_or("?"),
+                    body["color"].as_str().unwrap_or("")
+                );
+            })
+        }
+        other => bail!("unknown label subcommand {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// milestone
+// ---------------------------------------------------------------------------
+
+async fn cmd_milestone(config: &Config, mut args: Vec<String>) -> Result<()> {
+    let Some(sub) = args.first().cloned() else {
+        bail!("usage: clotho milestone <list|create> ...");
+    };
+    args.remove(0);
+    match sub.as_str() {
+        "list" => {
+            let repo = require_one(&args, "clotho milestone list <repo>")?;
+            let body: Value = request_json(
+                config,
+                reqwest::Method::GET,
+                &format!("/api/v1/repos/{repo}/milestones"),
+                None,
+            )
+            .await?;
+            emit(config, &body, || {
+                for ms in body["milestones"].as_array().into_iter().flatten() {
+                    println!(
+                        "#{} {} {} {}",
+                        ms["id"].as_i64().unwrap_or(0),
+                        ms["state"].as_str().unwrap_or(""),
+                        ms["title"].as_str().unwrap_or("?"),
+                        ms["due_on"].as_str().unwrap_or("")
+                    );
+                }
+            })
+        }
+        "create" => {
+            if args.is_empty() {
+                bail!("usage: clotho milestone create <repo> --title <title> [--description <text>] [--due-on <iso8601>]");
+            }
+            let repo = args.remove(0);
+            let title = take_option(&mut args, "--title")
+                .context("milestone title is required: --title <title>")?;
+            let description = take_option(&mut args, "--description").unwrap_or_default();
+            let due_on = take_option(&mut args, "--due-on");
+            if !args.is_empty() {
+                bail!("unrecognized arguments: {}", args.join(" "));
+            }
+            let mut payload = json!({ "title": title, "description": description });
+            if let Some(due_on) = due_on {
+                payload["due_on"] = json!(due_on);
+            }
+            let body = request_value(
+                config,
+                reqwest::Method::POST,
+                &format!("/api/v1/repos/{repo}/milestones"),
+                Some(payload),
+            )
+            .await?;
+            emit(config, &body, || {
+                println!(
+                    "created milestone #{} {}",
+                    body["id"].as_i64().unwrap_or(0),
+                    body["title"].as_str().unwrap_or("?")
+                );
+            })
+        }
+        other => bail!("unknown milestone subcommand {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// notification
+// ---------------------------------------------------------------------------
+
+async fn cmd_notification(config: &Config, mut args: Vec<String>) -> Result<()> {
+    let Some(sub) = args.first().cloned() else {
+        bail!("usage: clotho notification <list|read> ...");
+    };
+    args.remove(0);
+    match sub.as_str() {
+        "list" => {
+            let unread = take_flag(&mut args, "--unread");
+            if !args.is_empty() {
+                bail!("usage: clotho notification list [--unread]");
+            }
+            let mut path = "/api/v1/notifications".to_string();
+            if unread {
+                path.push_str("?unread=true");
+            }
+            let body: Value = request_json(config, reqwest::Method::GET, &path, None).await?;
+            emit(config, &body, || {
+                println!("unread: {}", body["unread_count"].as_i64().unwrap_or(0));
+                for n in body["notifications"].as_array().into_iter().flatten() {
+                    println!(
+                        "[{}] {} — {}",
+                        n["kind"].as_str().unwrap_or("?"),
+                        n["title"].as_str().unwrap_or(""),
+                        n["href"].as_str().unwrap_or("")
+                    );
+                }
+            })
+        }
+        "read" => {
+            let all = take_flag(&mut args, "--all");
+            if !args.is_empty() {
+                bail!("usage: clotho notification read [--all]");
+            }
+            let body = request_value(
+                config,
+                reqwest::Method::POST,
+                "/api/v1/notifications/mark-read",
+                Some(json!({ "all": all })),
+            )
+            .await?;
+            emit(config, &body, || println!("marked read"))
+        }
+        other => bail!("unknown notification subcommand {other:?}"),
     }
 }
 
@@ -538,8 +1001,7 @@ async fn cmd_pr(config: &Config, mut args: Vec<String>) -> Result<()> {
             }
             let repo = args.remove(0);
             let number = args.remove(0);
-            let event =
-                take_option(&mut args, "--event").unwrap_or_else(|| "COMMENT".into());
+            let event = take_option(&mut args, "--event").unwrap_or_else(|| "COMMENT".into());
             let body_text = take_option(&mut args, "--body").unwrap_or_default();
             let body = request_value(
                 config,
@@ -709,18 +1171,16 @@ async fn cmd_actions(config: &Config, mut args: Vec<String>) -> Result<()> {
             .await?;
             emit(config, &body, || {
                 print!("{}", body["text"].as_str().unwrap_or(""));
-                if !body["text"]
-                    .as_str()
-                    .unwrap_or("")
-                    .ends_with('\n')
-                {
+                if !body["text"].as_str().unwrap_or("").ends_with('\n') {
                     println!();
                 }
             })
         }
         "config" => {
             if args.is_empty() {
-                bail!("usage: clotho actions config <repo> [--provider <id>] [--enabled true|false]");
+                bail!(
+                    "usage: clotho actions config <repo> [--provider <id>] [--enabled true|false]"
+                );
             }
             let repo = args.remove(0);
             let provider = take_option(&mut args, "--provider");
@@ -787,13 +1247,24 @@ async fn cmd_provider(config: &Config, mut args: Vec<String>) -> Result<()> {
     args.remove(0);
     match sub.as_str() {
         "list" => {
-            let body: Value =
-                request_json(config, reqwest::Method::GET, "/api/v1/providers", None).await?;
+            let layer = take_option(&mut args, "--layer");
+            let all = take_flag(&mut args, "--all");
+            let path = if let Some(layer) = layer {
+                format!("/api/v1/providers?layer={layer}")
+            } else if all {
+                "/api/v1/providers?all=true".to_string()
+            } else {
+                "/api/v1/providers".to_string()
+            };
+            let body: Value = request_json(config, reqwest::Method::GET, &path, None).await?;
             emit(config, &body, || {
                 println!(
                     "default {}",
                     body["default_provider_id"].as_str().unwrap_or("")
                 );
+                if let Some(layer) = body["layer"].as_str() {
+                    println!("layer {layer}");
+                }
                 for p in body["providers"].as_array().into_iter().flatten() {
                     let configured = if p["configured"].as_bool().unwrap_or(false) {
                         "configured"
@@ -801,9 +1272,15 @@ async fn cmd_provider(config: &Config, mut args: Vec<String>) -> Result<()> {
                         "not-configured"
                     };
                     let reason = p["configured_reason"].as_str().unwrap_or("");
+                    let layer = p["layer"].as_str().unwrap_or("");
                     println!(
-                        "{}  {}  {}  {}{}",
+                        "{}{}  {}  {}  {}{}",
                         p["id"].as_str().unwrap_or("?"),
+                        if layer.is_empty() {
+                            String::new()
+                        } else {
+                            format!("[{layer}]")
+                        },
                         p["kind"].as_str().unwrap_or(""),
                         if p["enabled"].as_bool().unwrap_or(false) {
                             "enabled"
@@ -840,9 +1317,7 @@ async fn cmd_provider(config: &Config, mut args: Vec<String>) -> Result<()> {
         }
         "connect" => {
             if args.is_empty() {
-                bail!(
-                    "usage: clotho provider connect <id> --api-key <key> [--org <org>]"
-                );
+                bail!("usage: clotho provider connect <id> --api-key <key> [--org <org>]");
             }
             let id = args.remove(0);
             let api_key = take_option(&mut args, "--api-key")
@@ -903,8 +1378,8 @@ async fn cmd_secret(config: &Config, mut args: Vec<String>) -> Result<()> {
             let owner = args.remove(0);
             let secret_name =
                 take_option(&mut args, "--name").context("secret name required: --name <name>")?;
-            let value =
-                take_option(&mut args, "--value").context("secret value required: --value <val>")?;
+            let value = take_option(&mut args, "--value")
+                .context("secret value required: --value <val>")?;
             let description = take_option(&mut args, "--description").unwrap_or_default();
             let path = secret_list_path(&scope, &owner)?;
             let body = request_value(
@@ -946,8 +1421,7 @@ async fn cmd_secret(config: &Config, mut args: Vec<String>) -> Result<()> {
                 bail!("usage: clotho secret delete <org|repo> <owner> <secret-name>");
             }
             let path = secret_item_path(&args[0], &args[1], &args[2])?;
-            let body =
-                request_value(config, reqwest::Method::DELETE, &path, None).await?;
+            let body = request_value(config, reqwest::Method::DELETE, &path, None).await?;
             emit(config, &json!({ "deleted": true, "path": path }), || {
                 println!("deleted {}", args[2]);
                 let _ = body;
@@ -970,6 +1444,145 @@ fn secret_item_path(scope: &str, owner: &str, secret: &str) -> Result<String> {
         "org" => Ok(format!("/api/v1/orgs/{owner}/secrets/{secret}")),
         "repo" => Ok(format!("/api/v1/repos/{owner}/secrets/{secret}")),
         other => bail!("scope must be org or repo, got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// agent identity admin (Slice C)
+// ---------------------------------------------------------------------------
+
+fn parse_scope_list(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+async fn cmd_agent(config: &Config, mut args: Vec<String>) -> Result<()> {
+    let Some(sub) = args.first().cloned() else {
+        bail!("usage: clotho agent <list|create|tokens|mint|revoke|audit> ...");
+    };
+    args.remove(0);
+    match sub.as_str() {
+        "list" => {
+            let body: Value =
+                request_json(config, reqwest::Method::GET, "/api/v1/agents", None).await?;
+            emit(config, &body, || {
+                for agent in body["agents"].as_array().into_iter().flatten() {
+                    println!(
+                        "{}  {}",
+                        agent["name"].as_str().unwrap_or("?"),
+                        agent["description"].as_str().unwrap_or("")
+                    );
+                }
+            })
+        }
+        "create" => {
+            if args.is_empty() {
+                bail!("usage: clotho agent create <name> [--description <text>]");
+            }
+            let name = args.remove(0);
+            let description = take_option(&mut args, "--description").unwrap_or_default();
+            let body = request_json(
+                config,
+                reqwest::Method::POST,
+                "/api/v1/agents",
+                Some(json!({ "name": name, "description": description })),
+            )
+            .await?;
+            emit(config, &body, || {
+                println!(
+                    "created agent {} ({})",
+                    body["name"].as_str().unwrap_or("?"),
+                    body["id"].as_str().unwrap_or("")
+                );
+            })
+        }
+        "tokens" => {
+            let name = require_one(&args, "clotho agent tokens <name>")?;
+            let path = format!("/api/v1/agents/{name}/tokens");
+            let body: Value = request_json(config, reqwest::Method::GET, &path, None).await?;
+            emit(config, &body, || {
+                for token in body["tokens"].as_array().into_iter().flatten() {
+                    let revoked = token["revoked_at"].as_str().is_some();
+                    println!(
+                        "{}  {}  repos={}  tools={}{}",
+                        token["id"].as_str().unwrap_or("?"),
+                        token["token_prefix"].as_str().unwrap_or(""),
+                        serde_json::to_string(&token["allowed_repos"]).unwrap_or_default(),
+                        serde_json::to_string(&token["allowed_tools"]).unwrap_or_default(),
+                        if revoked { "  (revoked)" } else { "" }
+                    );
+                }
+            })
+        }
+        "mint" => {
+            if args.is_empty() {
+                bail!("usage: clotho agent mint <name> --repos <list> --tools <list>");
+            }
+            let name = args.remove(0);
+            let repos_raw = take_option(&mut args, "--repos")
+                .ok_or_else(|| anyhow::anyhow!("--repos is required"))?;
+            let tools_raw = take_option(&mut args, "--tools")
+                .ok_or_else(|| anyhow::anyhow!("--tools is required"))?;
+            let expires_secs = take_option(&mut args, "--expires-secs")
+                .map(|s| s.parse::<i64>())
+                .transpose()?;
+            let path = format!("/api/v1/agents/{name}/tokens");
+            let mut payload = json!({
+                "allowed_repos": parse_scope_list(&repos_raw),
+                "allowed_tools": parse_scope_list(&tools_raw),
+            });
+            if let Some(secs) = expires_secs {
+                payload["expires_in_secs"] = json!(secs);
+            }
+            let body = request_json(config, reqwest::Method::POST, &path, Some(payload)).await?;
+            emit(config, &body, || {
+                println!(
+                    "token {} for agent {} — save this value, it is shown once:\n{}",
+                    body["token_id"].as_str().unwrap_or("?"),
+                    body["agent"].as_str().unwrap_or(&name),
+                    body["token"].as_str().unwrap_or("")
+                );
+            })
+        }
+        "revoke" => {
+            let (name, token_id) = require_two(&args, "clotho agent revoke <name> <token_id>")?;
+            let path = format!("/api/v1/agents/{name}/tokens/{token_id}");
+            let _ = request_value(config, reqwest::Method::DELETE, &path, None).await?;
+            emit(
+                config,
+                &json!({ "revoked": token_id, "agent": name }),
+                || {
+                    println!("revoked token {token_id} for agent {name}");
+                },
+            )
+        }
+        "audit" => {
+            if args.is_empty() {
+                bail!("usage: clotho agent audit <name> [--limit N]");
+            }
+            let name = args.remove(0);
+            let limit = take_option(&mut args, "--limit")
+                .map(|s| s.parse::<i64>())
+                .transpose()?
+                .unwrap_or(50);
+            let path = format!("/api/v1/agents/{name}/audit?limit={limit}");
+            let body: Value = request_json(config, reqwest::Method::GET, &path, None).await?;
+            emit(config, &body, || {
+                for entry in body["entries"].as_array().into_iter().flatten() {
+                    println!(
+                        "{}  {}  {}  {}  {}",
+                        entry["occurred_at"].as_str().unwrap_or(""),
+                        entry["tool"].as_str().unwrap_or("?"),
+                        entry["repo"].as_str().unwrap_or(""),
+                        entry["status"].as_str().unwrap_or("?"),
+                        entry["token_id"].as_str().unwrap_or("")
+                    );
+                }
+            })
+        }
+        other => bail!("unknown agent subcommand {other:?}"),
     }
 }
 
@@ -1007,8 +1620,7 @@ async fn cmd_org(config: &Config, mut args: Vec<String>) -> Result<()> {
                 payload["display_name"] = json!(d);
             }
             let body =
-                request_value(config, reqwest::Method::POST, "/api/v1/orgs", Some(payload))
-                    .await?;
+                request_value(config, reqwest::Method::POST, "/api/v1/orgs", Some(payload)).await?;
             emit(config, &body, || {
                 println!("created org {}", body["name"].as_str().unwrap_or(&name));
             })
@@ -1100,16 +1712,27 @@ fn is_executable(_path: &Path) -> bool {
 fn usage() {
     eprintln!(
         "usage:
-  clotho [--api <url>] [--json] <command> ...
+  clotho [--api <url>] [--token <tok>] [--json] <command> ...
 
   Global:
     --api <url>     API gateway (default $CLOTHO_API_URL or http://localhost:8080)
+    --token <tok>   Bearer token (default $CLOTHO_TOKEN)
     --json          Machine-readable JSON on stdout
+
+  auth
+    clotho auth whoami
+    clotho auth token create [--name <label>]
+    clotho auth token list
+    clotho auth token revoke <id>
 
   repo
     clotho repo init <name>
     clotho repo list
     clotho repo status <repo>
+    clotho repo update <name> [--description] [--visibility] [--default-branch]
+    clotho repo merge-policy get <repo>
+    clotho repo merge-policy set <repo> [--require-actions] [--block-conflicted|--no-block-conflicted] [--approvals N] [--protect-default]
+    clotho repo delete <name> [--yes]
     clotho repo log <repo>
     clotho repo tree <repo>
     clotho repo commit <repo> -m <msg> --file <path> [...] [--submit]
@@ -1117,9 +1740,22 @@ fn usage() {
 
   issue
     clotho issue list <repo> [open|closed|all]
-    clotho issue create <repo> --title <t> [--body <b>]
+    clotho issue create <repo> --title <t> [--body <b>] [--label <name>]... [--assignee <login>]... [--milestone <id>]
+    clotho issue update <repo> <n> [--title <t>] [--body <b>] [--state open|closed] [--label <name>]... [--assignee <login>]... [--milestone <id>|--clear-milestone]
     clotho issue get <repo> <number>
     clotho issue comment <repo> <number> --body <text>
+
+  label
+    clotho label list <repo>
+    clotho label create <repo> --name <name> --color <hex> [--description <text>]
+
+  milestone
+    clotho milestone list <repo>
+    clotho milestone create <repo> --title <title> [--description <text>] [--due-on <iso8601>]
+
+  notification
+    clotho notification list [--unread]
+    clotho notification read [--all]
 
   pr
     clotho pr list <repo> [open|closed|all]
@@ -1138,7 +1774,7 @@ fn usage() {
     clotho actions config <repo> [--provider <id>] [--enabled true|false]
 
   provider
-    clotho provider list
+    clotho provider list [--layer compute|storage|network|auth] [--all]
     clotho provider get <id>
     clotho provider connect <id> --api-key <key> [--org <org>]
 
@@ -1151,6 +1787,14 @@ fn usage() {
   org / activity
     clotho org list|create|get|repos ...
     clotho activity [--limit N]
+
+  agent   (requires org admin or bootstrap; CLOTHO_AGENT_ADMIN_TOKEN on gateway)
+    clotho agent list
+    clotho agent create <name> [--description <text>]
+    clotho agent tokens <name>
+    clotho agent mint <name> --repos <a,b|*> --tools <a,b|*> [--expires-secs N]
+    clotho agent revoke <name> <token_id>
+    clotho agent audit <name> [--limit N]
 
   Stage 8 aliases (still work): init, status, log, commit, submit, pr <repo>"
     );

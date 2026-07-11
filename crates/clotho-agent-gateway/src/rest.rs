@@ -62,9 +62,8 @@ impl RestClient {
             return Err(map_status(status, &format!("{method} {path} failed")));
         }
 
-        let value: Value = serde_json::from_str(&text).unwrap_or_else(|_| {
-            Value::String(text.clone())
-        });
+        let value: Value =
+            serde_json::from_str(&text).unwrap_or_else(|_| Value::String(text.clone()));
 
         if !status.is_success() {
             let msg = value

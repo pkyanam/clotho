@@ -69,6 +69,28 @@ pub struct Org {
     pub created_at: DateTime<Utc>,
 }
 
+/// Public org shape — never exposes internal git owner field names.
+#[derive(Clone, Debug, Serialize)]
+pub struct OrgPublic {
+    pub id: String,
+    pub name: String,
+    pub display_name: String,
+    pub created_by: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<Org> for OrgPublic {
+    fn from(o: Org) -> Self {
+        Self {
+            id: o.id,
+            name: o.name,
+            display_name: o.display_name,
+            created_by: o.created_by,
+            created_at: o.created_at,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
 pub struct OrgMembership {
     pub org_id: String,
@@ -144,12 +166,12 @@ pub struct UserListResponse {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct OrgListResponse {
-    pub orgs: Vec<Org>,
+    pub orgs: Vec<OrgPublic>,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct OrgDetailResponse {
-    pub org: Org,
+    pub org: OrgPublic,
     pub members: Vec<OrgMembership>,
 }
 
@@ -163,8 +185,18 @@ pub struct CreateOrgRequest {
     pub name: String,
     #[serde(default)]
     pub display_name: String,
+    #[serde(default, alias = "forgejo_owner")]
+    pub git_owner: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct UpdateRepoRequest {
     #[serde(default)]
-    pub forgejo_owner: String,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub visibility: Option<String>,
+    #[serde(default)]
+    pub default_branch: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -272,6 +304,8 @@ pub async fn ensure_bootstrap(pool: &PgPool, b: &Bootstrap) -> Result<(), ApiErr
     .await
     .map_err(|e| ApiError::Internal(format!("bootstrap membership insert: {e}")))?;
 
+    crate::auth::ensure_bootstrap_token(pool, &b.user_id).await?;
+
     Ok(())
 }
 
@@ -291,8 +325,9 @@ pub async fn list_orgs(pool: &PgPool) -> Result<Vec<Org>, ApiError> {
 
 pub async fn create_org(
     pool: &PgPool,
-    b: &Bootstrap,
+    actor_id: &str,
     req: &CreateOrgRequest,
+    default_git_owner: &str,
 ) -> Result<Org, ApiError> {
     valid_name(&req.name)?;
     let name = req.name.trim().to_lowercase();
@@ -301,10 +336,10 @@ pub async fn create_org(
     } else {
         req.display_name.trim().into()
     };
-    let forgejo_owner = if req.forgejo_owner.is_empty() {
-        b.forgejo_owner.clone()
+    let forgejo_owner = if req.git_owner.is_empty() {
+        default_git_owner.to_string()
     } else {
-        req.forgejo_owner.trim().into()
+        req.git_owner.trim().into()
     };
     let id = slug(&name);
 
@@ -319,7 +354,7 @@ pub async fn create_org(
     .bind(&name)
     .bind(&display_name)
     .bind(&forgejo_owner)
-    .bind(&b.user_id)
+    .bind(actor_id)
     .fetch_one(pool)
     .await
     .map_err(|e| {
@@ -332,7 +367,7 @@ pub async fn create_org(
 
     sqlx::query("insert into org_memberships (org_id, user_id, role) values ($1, $2, 'admin')")
         .bind(&id)
-        .bind(&b.user_id)
+        .bind(actor_id)
         .execute(pool)
         .await
         .map_err(|e| ApiError::Internal(format!("create org membership: {e}")))?;
@@ -340,7 +375,7 @@ pub async fn create_org(
     log_activity(
         pool,
         ActivityEventInput {
-            actor_id: b.user_id.clone(),
+            actor_id: actor_id.to_string(),
             org_id: Some(id.clone()),
             repo_id: None,
             event_type: "org.created".into(),
@@ -496,7 +531,7 @@ pub async fn resolve_org(
 
 pub async fn insert_repo(
     pool: &PgPool,
-    b: &Bootstrap,
+    actor_id: &str,
     req: &CreateRepoRequest,
     (org_id, org_name, forgejo_owner): &(String, String, String),
     forgejo_repo: &RepoInfo,
@@ -526,7 +561,7 @@ pub async fn insert_repo(
     .bind(forgejo_owner)
     .bind(forgejo_repo.id)
     .bind(&full_name)
-    .bind(&b.user_id)
+    .bind(actor_id)
     .fetch_one(pool)
     .await
     .map_err(|e| {
@@ -559,7 +594,7 @@ pub async fn insert_repo(
         "insert into repo_permissions (repo_id, user_id, permission) values ($1, $2, 'admin')",
     )
     .bind(&repo.id)
-    .bind(&b.user_id)
+    .bind(actor_id)
     .execute(pool)
     .await
     .map_err(|e| ApiError::Internal(format!("insert repo permissions: {e}")))?;
@@ -567,7 +602,7 @@ pub async fn insert_repo(
     log_activity(
         pool,
         ActivityEventInput {
-            actor_id: b.user_id.clone(),
+            actor_id: actor_id.to_string(),
             org_id: Some(org_id.clone()),
             repo_id: Some(repo.id.clone()),
             event_type: "repo.created".into(),
@@ -620,21 +655,232 @@ pub async fn list_activity(pool: &PgPool, limit: i64) -> Result<Vec<ActivityEven
     .map_err(|e| ApiError::Internal(format!("list activity: {e}")))
 }
 
+fn org_role_rank(role: &str) -> i32 {
+    match role {
+        "admin" => 2,
+        "member" => 1,
+        _ => 0,
+    }
+}
+
+fn repo_perm_rank(perm: &str) -> i32 {
+    match perm {
+        "admin" => 3,
+        "write" => 2,
+        "read" => 1,
+        _ => 0,
+    }
+}
+
+/// Require at least `min_role` (`admin` > `member`) in the org.
+pub async fn require_org_role(
+    pool: &PgPool,
+    org_id: &str,
+    user_id: &str,
+    min_role: &str,
+) -> Result<(), ApiError> {
+    let min = org_role_rank(min_role);
+    let row = sqlx::query("select role from org_memberships where org_id = $1 and user_id = $2")
+        .bind(org_id)
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| ApiError::Internal(format!("org role lookup: {e}")))?;
+    let Some(row) = row else {
+        return Err(ApiError::Forbidden(format!("requires org {min_role} role")));
+    };
+    let role: String = row.get("role");
+    if org_role_rank(&role) < min {
+        return Err(ApiError::Forbidden(format!(
+            "requires org {min_role} role (have {role})"
+        )));
+    }
+    Ok(())
+}
+
+/// Require repo permission (`admin` > `write` > `read`). Org admins are granted.
+pub async fn require_repo_permission(
+    pool: &PgPool,
+    repo_name: &str,
+    user_id: &str,
+    min_perm: &str,
+) -> Result<RepoWithOrg, ApiError> {
+    let clotho = get_repo_with_org(pool, repo_name)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("repo {repo_name:?} not found")))?;
+    let min = repo_perm_rank(min_perm);
+
+    let org_role =
+        sqlx::query("select role from org_memberships where org_id = $1 and user_id = $2")
+            .bind(&clotho.repo.org_id)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| ApiError::Internal(format!("org role lookup: {e}")))?;
+    if let Some(row) = org_role {
+        let role: String = row.get("role");
+        if org_role_rank(&role) >= org_role_rank("admin") {
+            return Ok(clotho);
+        }
+    }
+
+    let perm_row =
+        sqlx::query("select permission from repo_permissions where repo_id = $1 and user_id = $2")
+            .bind(&clotho.repo.id)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| ApiError::Internal(format!("repo permission lookup: {e}")))?;
+    let Some(row) = perm_row else {
+        return Err(ApiError::Forbidden(format!(
+            "requires repo {min_perm} permission"
+        )));
+    };
+    let perm: String = row.get("permission");
+    if repo_perm_rank(&perm) < min {
+        return Err(ApiError::Forbidden(format!(
+            "requires repo {min_perm} permission (have {perm})"
+        )));
+    }
+    Ok(clotho)
+}
+
+/// Require org admin or repo admin for destructive repo operations.
+pub async fn require_repo_admin(
+    pool: &PgPool,
+    repo_name: &str,
+    user_id: &str,
+) -> Result<RepoWithOrg, ApiError> {
+    let clotho = get_repo_with_org(pool, repo_name)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("repo {repo_name:?} not found")))?;
+
+    let org_role =
+        sqlx::query("select role from org_memberships where org_id = $1 and user_id = $2")
+            .bind(&clotho.repo.org_id)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| ApiError::Internal(format!("org role lookup: {e}")))?;
+    if let Some(row) = org_role {
+        let role: String = row.get("role");
+        if org_role_rank(&role) >= org_role_rank("admin") {
+            return Ok(clotho);
+        }
+    }
+
+    let perm_row =
+        sqlx::query("select permission from repo_permissions where repo_id = $1 and user_id = $2")
+            .bind(&clotho.repo.id)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| ApiError::Internal(format!("repo permission lookup: {e}")))?;
+    if let Some(row) = perm_row {
+        let perm: String = row.get("permission");
+        if repo_perm_rank(&perm) >= repo_perm_rank("admin") {
+            return Ok(clotho);
+        }
+    }
+
+    Err(ApiError::Forbidden(
+        "requires org admin or repo admin".into(),
+    ))
+}
+
+pub async fn update_repo_row(
+    pool: &PgPool,
+    repo_id: &str,
+    req: &UpdateRepoRequest,
+) -> Result<Repo, ApiError> {
+    let description = req.description.as_deref();
+    let visibility = req.visibility.as_deref();
+    let default_branch = req.default_branch.as_deref();
+
+    if description.is_none() && visibility.is_none() && default_branch.is_none() {
+        return Err(ApiError::InvalidRequest(
+            "at least one of description, visibility, or default_branch is required".into(),
+        ));
+    }
+
+    if let Some(v) = visibility {
+        if !matches!(v, "public" | "private" | "internal") {
+            return Err(ApiError::InvalidRequest(format!(
+                "visibility {v:?} must be public, private, or internal"
+            )));
+        }
+    }
+
+    let row = sqlx::query(
+        r#"
+        update repos set
+            description = coalesce($2, description),
+            visibility = coalesce($3, visibility),
+            default_branch = coalesce($4, default_branch),
+            updated_at = now()
+        where id = $1
+        returning id, org_id, name, description, visibility, default_branch,
+                forgejo_owner, forgejo_repo_id, forgejo_full_name,
+                created_by, created_at, updated_at
+        "#,
+    )
+    .bind(repo_id)
+    .bind(description)
+    .bind(visibility)
+    .bind(default_branch)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| ApiError::Internal(format!("update repo: {e}")))?
+    .ok_or_else(|| ApiError::NotFound("repo not found".into()))?;
+
+    Ok(Repo {
+        id: row.get("id"),
+        org_id: row.get("org_id"),
+        name: row.get("name"),
+        description: row.get("description"),
+        visibility: row.get("visibility"),
+        default_branch: row.get("default_branch"),
+        forgejo_owner: row.get("forgejo_owner"),
+        forgejo_repo_id: row.get("forgejo_repo_id"),
+        forgejo_full_name: row.get("forgejo_full_name"),
+        created_by: row.get("created_by"),
+        created_at: row.get::<DateTime<Utc>, _>("created_at"),
+        updated_at: row.get::<DateTime<Utc>, _>("updated_at"),
+    })
+}
+
+pub async fn delete_repo_row(pool: &PgPool, repo_id: &str) -> Result<(), ApiError> {
+    sqlx::query("delete from activity_events where repo_id = $1")
+        .bind(repo_id)
+        .execute(pool)
+        .await
+        .map_err(|e| ApiError::Internal(format!("delete repo activity: {e}")))?;
+    let result = sqlx::query("delete from repos where id = $1")
+        .bind(repo_id)
+        .execute(pool)
+        .await
+        .map_err(|e| ApiError::Internal(format!("delete repo: {e}")))?;
+    if result.rows_affected() == 0 {
+        return Err(ApiError::NotFound("repo not found".into()));
+    }
+    Ok(())
+}
+
 /// Build a Clotho-owned `RepoInfo` from the control-plane record, optionally
 /// overlaying live Forgejo collaboration metadata, and always adding gateway
 /// provider state and a clone URL.
 pub fn build_repo_info(
     clotho: &RepoWithOrg,
     forgejo: Option<&RepoInfo>,
-    base_url: &str,
+    public_git_url: &str,
     provider: &str,
     configured: bool,
 ) -> RepoInfo {
-    let base = base_url.trim_end_matches('/');
-    let owner = &clotho.repo.forgejo_owner;
+    let base = public_git_url.trim_end_matches('/');
+    let git_owner = &clotho.repo.forgejo_owner;
     let name = &clotho.repo.name;
-    let html_url = format!("{base}/{owner}/{name}");
-    let clone_url = format!("{base}/{owner}/{name}.git");
+    let html_url = format!("{base}/{git_owner}/{name}");
+    let clone_url = format!("{base}/{git_owner}/{name}.git");
     let mut info = forgejo.cloned().unwrap_or_default();
     info.id = clotho.repo.forgejo_repo_id.unwrap_or(info.id);
     info.clotho_id = clotho.repo.id.clone();
@@ -644,7 +890,7 @@ pub fn build_repo_info(
         .repo
         .forgejo_full_name
         .clone()
-        .unwrap_or_else(|| format!("{owner}/{name}"));
+        .unwrap_or_else(|| format!("{git_owner}/{name}"));
     info.html_url = html_url;
     info.clone_url = clone_url;
     info.default_branch = clotho.repo.default_branch.clone();
@@ -662,11 +908,11 @@ pub fn build_repo_info(
 pub fn fallback_repo_info(
     name: &str,
     owner: &str,
-    base_url: &str,
+    public_git_url: &str,
     provider: &str,
     configured: bool,
 ) -> RepoInfo {
-    let base = base_url.trim_end_matches('/');
+    let base = public_git_url.trim_end_matches('/');
     RepoInfo {
         id: 0,
         clotho_id: String::new(),
@@ -709,13 +955,16 @@ pub(crate) async fn list_orgs_handler(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<OrgListResponse>, ApiError> {
     let orgs = if let Some(pool) = &state.pool {
-        list_orgs(pool).await?
+        list_orgs(pool)
+            .await?
+            .into_iter()
+            .map(OrgPublic::from)
+            .collect()
     } else {
-        vec![Org {
+        vec![OrgPublic {
             id: state.bootstrap.org_id.clone(),
             name: state.bootstrap.org_name.clone(),
             display_name: state.bootstrap.org_display_name.clone(),
-            forgejo_owner: state.bootstrap.forgejo_owner.clone(),
             created_by: state.bootstrap.user_id.clone(),
             created_at: Utc::now(),
         }]
@@ -725,15 +974,17 @@ pub(crate) async fn list_orgs_handler(
 
 pub(crate) async fn create_org_handler(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<CreateOrgRequest>,
-) -> Result<(StatusCode, Json<Org>), ApiError> {
+) -> Result<(StatusCode, Json<OrgPublic>), ApiError> {
+    let auth = crate::auth::resolve_auth(&headers, &state).await?;
     let Some(pool) = &state.pool else {
         return Err(ApiError::Internal(
             "database is not configured; orgs require the control plane".into(),
         ));
     };
-    let org = create_org(pool, &state.bootstrap, &req).await?;
-    Ok((StatusCode::CREATED, Json(org)))
+    let org = create_org(pool, &auth.user_id, &req, &state.bootstrap.forgejo_owner).await?;
+    Ok((StatusCode::CREATED, Json(OrgPublic::from(org))))
 }
 
 pub(crate) async fn get_org_handler(
@@ -743,11 +994,10 @@ pub(crate) async fn get_org_handler(
     let Some(pool) = &state.pool else {
         if org == state.bootstrap.org_name || org == state.bootstrap.org_id {
             return Ok(Json(OrgDetailResponse {
-                org: Org {
+                org: OrgPublic {
                     id: state.bootstrap.org_id.clone(),
                     name: state.bootstrap.org_name.clone(),
                     display_name: state.bootstrap.org_display_name.clone(),
-                    forgejo_owner: state.bootstrap.forgejo_owner.clone(),
                     created_by: state.bootstrap.user_id.clone(),
                     created_at: Utc::now(),
                 },
@@ -763,7 +1013,10 @@ pub(crate) async fn get_org_handler(
         return Err(ApiError::NotFound(format!("org {org:?} not found")));
     };
     match get_org_with_members(pool, &org).await? {
-        Some(OrgWithMembers { org, members }) => Ok(Json(OrgDetailResponse { org, members })),
+        Some(OrgWithMembers { org, members }) => Ok(Json(OrgDetailResponse {
+            org: OrgPublic::from(org),
+            members,
+        })),
         None => Err(ApiError::NotFound(format!("org {org:?} not found"))),
     }
 }
@@ -774,7 +1027,7 @@ pub(crate) async fn list_org_repos_handler(
 ) -> Result<Json<crate::repos::RepoListResponse>, ApiError> {
     let provider = state.actions.default_provider();
     let configured = state.actions.provider_configured(&provider);
-    let base_url = state.forgejo.config().base_url.clone();
+    let base_url = state.public_git_url.clone();
 
     let mut repos = if let Some(pool) = &state.pool {
         let clotho = list_repos_for_org(pool, &org).await?;
@@ -925,9 +1178,11 @@ mod tests {
         let req = CreateOrgRequest {
             name: format!("testorg-{suffix}"),
             display_name: format!("Test Org {suffix}"),
-            forgejo_owner: "clotho".into(),
+            git_owner: "clotho".into(),
         };
-        let created = create_org(&pool, &b, &req).await.unwrap();
+        let created = create_org(&pool, &b.user_id, &req, &b.forgejo_owner)
+            .await
+            .unwrap();
         assert_eq!(created.display_name, req.display_name);
 
         let detail = get_org_with_members(&pool, &created.name)
@@ -961,7 +1216,7 @@ mod tests {
             ..Default::default()
         };
         let resolved = resolve_org(&pool, &b, &req.owner_org).await.unwrap();
-        let clotho = insert_repo(&pool, &b, &req, &resolved, &forgejo)
+        let clotho = insert_repo(&pool, &b.user_id, &req, &resolved, &forgejo)
             .await
             .unwrap();
 

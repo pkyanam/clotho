@@ -9,10 +9,11 @@ use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get};
 use axum::{Json, Router};
 use chrono::{Duration, Utc};
 use serde_json::json;
+use uuid::Uuid;
 
 use crate::identity::{sha256, IdentityError, IdentityStore};
 
@@ -24,8 +25,16 @@ pub struct AdminState {
 
 pub fn router(state: Arc<AdminState>) -> Router {
     Router::new()
-        .route("/admin/v1/agents", post(create_agent))
-        .route("/admin/v1/agents/{name}/tokens", post(mint_token))
+        .route("/admin/v1/agents", get(list_agents).post(create_agent))
+        .route("/admin/v1/agents/{name}", get(get_agent))
+        .route(
+            "/admin/v1/agents/{name}/tokens",
+            get(list_tokens).post(mint_token),
+        )
+        .route(
+            "/admin/v1/agents/{name}/tokens/{token_id}",
+            delete(revoke_token).patch(update_token_scopes),
+        )
         .route("/admin/v1/agents/{name}/audit", get(audit_log))
         .route("/admin/v1/repos/{repo}/sessions", get(repo_sessions))
         .layer(axum::middleware::from_fn_with_state(
@@ -63,11 +72,39 @@ fn error(status: StatusCode, message: impl std::fmt::Display) -> Response {
 
 fn identity_error(err: IdentityError) -> Response {
     let status = match &err {
-        IdentityError::AgentNotFound(_) => StatusCode::NOT_FOUND,
+        IdentityError::AgentNotFound(_) | IdentityError::TokenNotFound(_, _) => {
+            StatusCode::NOT_FOUND
+        }
         IdentityError::AgentExists(_) => StatusCode::CONFLICT,
         IdentityError::Db(_) => StatusCode::INTERNAL_SERVER_ERROR,
     };
     error(status, err)
+}
+
+#[derive(serde::Deserialize)]
+struct ListAgentsQuery {
+    #[serde(default)]
+    include_disabled: bool,
+}
+
+async fn list_agents(
+    State(state): State<Arc<AdminState>>,
+    Query(query): Query<ListAgentsQuery>,
+) -> Response {
+    match state.identity.list_agents(query.include_disabled).await {
+        Ok(agents) => Json(json!({ "agents": agents })).into_response(),
+        Err(err) => identity_error(err),
+    }
+}
+
+async fn get_agent(State(state): State<Arc<AdminState>>, Path(name): Path<String>) -> Response {
+    match state.identity.get_agent(&name).await {
+        Ok(agent) => match state.identity.list_tokens(&name).await {
+            Ok(tokens) => Json(json!({ "agent": agent, "tokens": tokens })).into_response(),
+            Err(err) => identity_error(err),
+        },
+        Err(err) => identity_error(err),
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -121,6 +158,50 @@ async fn mint_token(
             tracing::info!(agent = %name, token_id = %minted.token_id, "agent token minted");
             (StatusCode::CREATED, Json(minted)).into_response()
         }
+        Err(err) => identity_error(err),
+    }
+}
+
+async fn list_tokens(State(state): State<Arc<AdminState>>, Path(name): Path<String>) -> Response {
+    match state.identity.list_tokens(&name).await {
+        Ok(tokens) => Json(json!({ "tokens": tokens })).into_response(),
+        Err(err) => identity_error(err),
+    }
+}
+
+async fn revoke_token(
+    State(state): State<Arc<AdminState>>,
+    Path((name, token_id)): Path<(String, Uuid)>,
+) -> Response {
+    match state.identity.revoke_token(&name, token_id).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => identity_error(err),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateTokenScopesRequest {
+    allowed_repos: Option<Vec<String>>,
+    allowed_tools: Option<Vec<String>>,
+}
+
+async fn update_token_scopes(
+    State(state): State<Arc<AdminState>>,
+    Path((name, token_id)): Path<(String, Uuid)>,
+    Json(req): Json<UpdateTokenScopesRequest>,
+) -> Response {
+    if req.allowed_repos.is_none() && req.allowed_tools.is_none() {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "at least one of allowed_repos or allowed_tools is required",
+        );
+    }
+    match state
+        .identity
+        .update_token_scopes(&name, token_id, req.allowed_repos, req.allowed_tools)
+        .await
+    {
+        Ok(token) => Json(token).into_response(),
         Err(err) => identity_error(err),
     }
 }

@@ -21,6 +21,11 @@ export default function SettingsHubPage() {
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <SettingsCard
+          href="/settings/appearance"
+          title="appearance"
+          body="color scheme — system, dark, or light. dark is the default clotho look."
+        />
+        <SettingsCard
           href="/settings/compute"
           title="compute"
           body="providers, defaults, and connection status for Actions and sandboxes."

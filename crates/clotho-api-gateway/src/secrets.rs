@@ -8,7 +8,7 @@ use std::sync::Arc;
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::auth;
 use crate::control::{self, ActivityEventInput};
 use crate::error::ApiError;
 use crate::AppState;
@@ -274,12 +275,15 @@ async fn list_org_secrets(
 
 async fn create_org_secret(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(org): Path<String>,
     Json(body): Json<UpsertSecretRequest>,
 ) -> Result<(StatusCode, Json<SecretMeta>), ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = require_pool(&state)?;
     let crypto = require_crypto(&state)?;
     let org_row = control::get_org(pool, &org).await?;
+    control::require_org_role(pool, &org_row.id, &auth.user_id, "admin").await?;
     valid_secret_name(&body.name)?;
     if body.value.is_empty() {
         return Err(ApiError::InvalidRequest("secret value is required".into()));
@@ -292,14 +296,14 @@ async fn create_org_secret(
         &name,
         &body.value,
         body.description.trim(),
-        &state.bootstrap.user_id,
+        &auth.user_id,
         true,
     )
     .await?;
     control::log_activity(
         pool,
         ActivityEventInput {
-            actor_id: state.bootstrap.user_id.clone(),
+            actor_id: auth.user_id.clone(),
             org_id: Some(org_row.id),
             repo_id: None,
             event_type: "secret.created".into(),
@@ -322,12 +326,15 @@ async fn get_org_secret(
 
 async fn patch_org_secret(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((org, name)): Path<(String, String)>,
     Json(body): Json<PatchSecretRequest>,
 ) -> Result<Json<SecretMeta>, ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = require_pool(&state)?;
     let crypto = require_crypto(&state)?;
     let org_row = control::get_org(pool, &org).await?;
+    control::require_org_role(pool, &org_row.id, &auth.user_id, "admin").await?;
     let existing = get_by_org_name(pool, &org_row.id, &name).await?;
     let description = body
         .description
@@ -354,7 +361,7 @@ async fn patch_org_secret(
             &name,
             value,
             description,
-            &state.bootstrap.user_id,
+            &auth.user_id,
             false,
         )
         .await?
@@ -362,7 +369,7 @@ async fn patch_org_secret(
     control::log_activity(
         pool,
         ActivityEventInput {
-            actor_id: state.bootstrap.user_id.clone(),
+            actor_id: auth.user_id.clone(),
             org_id: Some(org_row.id),
             repo_id: None,
             event_type: "secret.updated".into(),
@@ -375,10 +382,13 @@ async fn patch_org_secret(
 
 async fn delete_org_secret(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((org, name)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = require_pool(&state)?;
     let org_row = control::get_org(pool, &org).await?;
+    control::require_org_role(pool, &org_row.id, &auth.user_id, "admin").await?;
     let deleted = delete_by_org_name(pool, &org_row.id, &name).await?;
     if !deleted {
         return Err(ApiError::NotFound(format!("secret {name:?} not found")));
@@ -386,7 +396,7 @@ async fn delete_org_secret(
     control::log_activity(
         pool,
         ActivityEventInput {
-            actor_id: state.bootstrap.user_id.clone(),
+            actor_id: auth.user_id.clone(),
             org_id: Some(org_row.id),
             repo_id: None,
             event_type: "secret.deleted".into(),
@@ -413,12 +423,14 @@ async fn list_repo_secrets(
 
 async fn create_repo_secret(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(repo): Path<String>,
     Json(body): Json<UpsertSecretRequest>,
 ) -> Result<(StatusCode, Json<SecretMeta>), ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = require_pool(&state)?;
     let crypto = require_crypto(&state)?;
-    let repo_row = control::get_repo_by_name(pool, &repo).await?;
+    let clotho = control::require_repo_admin(pool, &repo, &auth.user_id).await?;
     valid_secret_name(&body.name)?;
     if body.value.is_empty() {
         return Err(ApiError::InvalidRequest("secret value is required".into()));
@@ -427,21 +439,21 @@ async fn create_repo_secret(
     let meta = upsert_repo_secret(
         pool,
         crypto,
-        &repo_row.org_id,
-        &repo_row.id,
+        &clotho.repo.org_id,
+        &clotho.repo.id,
         &name,
         &body.value,
         body.description.trim(),
-        &state.bootstrap.user_id,
+        &auth.user_id,
         true,
     )
     .await?;
     control::log_activity(
         pool,
         ActivityEventInput {
-            actor_id: state.bootstrap.user_id.clone(),
-            org_id: Some(repo_row.org_id),
-            repo_id: Some(repo_row.id),
+            actor_id: auth.user_id.clone(),
+            org_id: Some(clotho.repo.org_id),
+            repo_id: Some(clotho.repo.id),
             event_type: "secret.created".into(),
             payload: serde_json::json!({"scope": "repo", "name": name, "repo": repo}),
         },
@@ -462,13 +474,15 @@ async fn get_repo_secret(
 
 async fn patch_repo_secret(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((repo, name)): Path<(String, String)>,
     Json(body): Json<PatchSecretRequest>,
 ) -> Result<Json<SecretMeta>, ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = require_pool(&state)?;
     let crypto = require_crypto(&state)?;
-    let repo_row = control::get_repo_by_name(pool, &repo).await?;
-    let existing = get_by_repo_name(pool, &repo_row.id, &name).await?;
+    let clotho = control::require_repo_admin(pool, &repo, &auth.user_id).await?;
+    let existing = get_by_repo_name(pool, &clotho.repo.id, &name).await?;
     let description = body
         .description
         .as_deref()
@@ -489,12 +503,12 @@ async fn patch_repo_secret(
         upsert_repo_secret(
             pool,
             crypto,
-            &repo_row.org_id,
-            &repo_row.id,
+            &clotho.repo.org_id,
+            &clotho.repo.id,
             &name,
             value,
             description,
-            &state.bootstrap.user_id,
+            &auth.user_id,
             false,
         )
         .await?
@@ -502,9 +516,9 @@ async fn patch_repo_secret(
     control::log_activity(
         pool,
         ActivityEventInput {
-            actor_id: state.bootstrap.user_id.clone(),
-            org_id: Some(repo_row.org_id),
-            repo_id: Some(repo_row.id),
+            actor_id: auth.user_id.clone(),
+            org_id: Some(clotho.repo.org_id),
+            repo_id: Some(clotho.repo.id),
             event_type: "secret.updated".into(),
             payload: serde_json::json!({"scope": "repo", "name": name, "repo": repo}),
         },
@@ -515,20 +529,22 @@ async fn patch_repo_secret(
 
 async fn delete_repo_secret(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((repo, name)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = require_pool(&state)?;
-    let repo_row = control::get_repo_by_name(pool, &repo).await?;
-    let deleted = delete_by_repo_name(pool, &repo_row.id, &name).await?;
+    let clotho = control::require_repo_admin(pool, &repo, &auth.user_id).await?;
+    let deleted = delete_by_repo_name(pool, &clotho.repo.id, &name).await?;
     if !deleted {
         return Err(ApiError::NotFound(format!("secret {name:?} not found")));
     }
     control::log_activity(
         pool,
         ActivityEventInput {
-            actor_id: state.bootstrap.user_id.clone(),
-            org_id: Some(repo_row.org_id),
-            repo_id: Some(repo_row.id),
+            actor_id: auth.user_id.clone(),
+            org_id: Some(clotho.repo.org_id),
+            repo_id: Some(clotho.repo.id),
             event_type: "secret.deleted".into(),
             payload: serde_json::json!({"scope": "repo", "name": name, "repo": repo}),
         },
@@ -543,9 +559,11 @@ async fn delete_repo_secret(
 
 async fn connect_provider(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(provider): Path<String>,
     Json(body): Json<ConnectProviderRequest>,
 ) -> Result<Json<SecretMeta>, ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = require_pool(&state)?;
     let crypto = require_crypto(&state)?;
     let provider_id = provider.to_lowercase();
@@ -555,21 +573,16 @@ async fn connect_provider(
         body.org.trim().to_string()
     };
     let org_row = control::get_org(pool, &org_name).await?;
+    control::require_org_role(pool, &org_row.id, &auth.user_id, "admin").await?;
 
     // ComputeSDK: store credentials for any catalogued upstream.
     if provider_id == "computesdk" {
-        let meta = connect_computesdk_upstream(
-            pool,
-            crypto,
-            &org_row.id,
-            &state.bootstrap.user_id,
-            &body,
-        )
-        .await?;
+        let meta =
+            connect_computesdk_upstream(pool, crypto, &org_row.id, &auth.user_id, &body).await?;
         control::log_activity(
             pool,
             ActivityEventInput {
-                actor_id: state.bootstrap.user_id.clone(),
+                actor_id: auth.user_id.clone(),
                 org_id: Some(org_row.id),
                 repo_id: None,
                 event_type: "provider.connected".into(),
@@ -606,14 +619,14 @@ async fn connect_provider(
         secret_name,
         body.api_key.trim(),
         description,
-        &state.bootstrap.user_id,
+        &auth.user_id,
         false,
     )
     .await?;
     control::log_activity(
         pool,
         ActivityEventInput {
-            actor_id: state.bootstrap.user_id.clone(),
+            actor_id: auth.user_id.clone(),
             org_id: Some(org_row.id),
             repo_id: None,
             event_type: "provider.connected".into(),
@@ -630,9 +643,11 @@ async fn connect_provider(
 /// Remove Clotho-stored credentials for a provider (metadata only; no values).
 async fn disconnect_provider(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(provider): Path<String>,
     Query(query): Query<DisconnectQuery>,
 ) -> Result<Json<DisconnectProviderResponse>, ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = require_pool(&state)?;
     let provider_id = provider.to_lowercase();
     let names = provider_secret_names(&provider_id);
@@ -647,6 +662,7 @@ async fn disconnect_provider(
         query.org.trim().to_string()
     };
     let org_row = control::get_org(pool, &org_name).await?;
+    control::require_org_role(pool, &org_row.id, &auth.user_id, "admin").await?;
     let mut deleted_secrets = Vec::new();
     for name in names {
         if delete_by_org_name(pool, &org_row.id, name).await? {
@@ -661,7 +677,7 @@ async fn disconnect_provider(
     control::log_activity(
         pool,
         ActivityEventInput {
-            actor_id: state.bootstrap.user_id.clone(),
+            actor_id: auth.user_id.clone(),
             org_id: Some(org_row.id),
             repo_id: None,
             event_type: "provider.disconnected".into(),
@@ -772,7 +788,10 @@ async fn connect_computesdk_upstream(
             // Infer from credential keys or default e2b when only api_key set.
             if creds.contains_key("MODAL_TOKEN_ID") || creds.contains_key("modal_token_id") {
                 "modal".into()
-            } else if creds.keys().any(|k| k.to_uppercase().starts_with("VERCEL_")) {
+            } else if creds
+                .keys()
+                .any(|k| k.to_uppercase().starts_with("VERCEL_"))
+            {
                 "vercel".into()
             } else if !body.api_key.trim().is_empty() && creds.is_empty() {
                 "e2b".into()
@@ -837,25 +856,14 @@ async fn connect_computesdk_upstream(
     let mut last_meta = None;
     for (name, value) in &normalized {
         let desc = format!("ComputeSDK {} ({})", spec.name, name);
-        let meta = upsert_org_secret(
-            pool,
-            crypto,
-            org_id,
-            name,
-            value,
-            &desc,
-            user_id,
-            false,
-        )
-        .await?;
+        let meta =
+            upsert_org_secret(pool, crypto, org_id, name, value, &desc, user_id, false).await?;
         last_meta = Some(meta);
     }
     last_meta.ok_or_else(|| ApiError::Internal("no secrets written".into()))
 }
 
-fn infer_upstream_from_keys(
-    creds: &std::collections::HashMap<String, String>,
-) -> Option<String> {
+fn infer_upstream_from_keys(creds: &std::collections::HashMap<String, String>) -> Option<String> {
     let keys: std::collections::HashSet<String> = creds
         .keys()
         .map(|k| k.to_uppercase().replace('-', "_"))
@@ -914,10 +922,7 @@ async fn resolve_named_secret(
 }
 
 /// Whether a provider has a Clotho-stored credential (settings overlay).
-pub async fn provider_secret_configured(
-    state: &AppState,
-    provider_id: &str,
-) -> Option<SecretMeta> {
+pub async fn provider_secret_configured(state: &AppState, provider_id: &str) -> Option<SecretMeta> {
     let pool = state.pool.as_ref()?;
     let names = provider_secret_names(provider_id);
     if names.is_empty() {
@@ -1000,11 +1005,7 @@ async fn list_by_repo(pool: &PgPool, repo_id: &str) -> Result<Vec<SecretMeta>, A
     .map_err(|e| ApiError::Internal(format!("list repo secrets: {e}")))
 }
 
-async fn get_by_org_name(
-    pool: &PgPool,
-    org_id: &str,
-    name: &str,
-) -> Result<SecretMeta, ApiError> {
+async fn get_by_org_name(pool: &PgPool, org_id: &str, name: &str) -> Result<SecretMeta, ApiError> {
     sqlx::query_as::<_, SecretMeta>(
         r#"
         select id, scope, org_id, repo_id, name, description, value_last4,

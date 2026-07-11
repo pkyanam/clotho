@@ -6,7 +6,7 @@ import { conflictLineKind } from "src/lib/conflicts";
 /**
  * The structured diff, rendered for humans: per file, the symbol-level
  * changes clotho-diff extracted (the same object agents consume through
- * diff_symbol — docs/prd.md §2) above the line hunks. Unresolved jj
+ * diff_symbol — docs/prd.md §2) above the line hunks. Unresolved
  * conflicts are flagged per file and their marker lines styled, never
  * hidden (ADR-0006).
  */
@@ -30,15 +30,15 @@ export function DiffView({ files }: { files: FileDiff[] }) {
           </header>
 
           {file.conflicted && (
-            <p className="border-b border-kumo-hairline px-4 py-2 text-xs text-kumo-subtle">
-              unresolved jj conflict — landed as a first-class object, main kept
-              moving. the hunks below contain jj&apos;s materialization of every
-              side; resolve it with a follow-up commit.
+            <p className="border-b border-kumo-hairline px-4 py-2 text-[0.8125rem] text-kumo-inactive">
+              unresolved conflict — recorded as a first-class object, main kept
+              moving. the hunks below show every side of the conflict; resolve
+              it with a follow-up commit.
             </p>
           )}
 
           {file.symbols.length > 0 && (
-            <ul className="flex flex-wrap gap-x-5 gap-y-1 border-b border-kumo-hairline px-4 py-2 text-xs text-kumo-subtle">
+            <ul className="flex flex-wrap gap-x-5 gap-y-1 border-b border-kumo-hairline px-4 py-2 text-[0.8125rem] text-kumo-default">
               {file.symbols.map((symbol) => (
                 <li key={`${symbol.kind}:${symbol.name}`}>
                   <span className="text-kumo-inactive">
@@ -58,17 +58,17 @@ export function DiffView({ files }: { files: FileDiff[] }) {
           )}
 
           {file.binary ? (
-            <p className="px-4 py-3 text-xs text-kumo-inactive">
+            <p className="px-4 py-3 text-[0.8125rem] text-kumo-inactive">
               binary file — no text diff.
             </p>
           ) : (
             file.hunks.map((hunk, hunkIndex) => (
               <div key={hunkIndex}>
-                <div className="border-b border-kumo-hairline bg-kumo-base px-4 py-1 text-xs text-kumo-inactive">
+                <div className="border-b border-kumo-hairline bg-kumo-base px-4 py-1 text-[0.8125rem] text-kumo-inactive">
                   @@ -{hunk.old_start},{hunk.old_lines} +{hunk.new_start},
                   {hunk.new_lines} @@
                 </div>
-                <pre className="overflow-x-auto text-xs leading-relaxed">
+                <pre className="overflow-x-auto text-[0.8125rem] leading-relaxed">
                   {hunk.lines.map((line, lineIndex) => {
                     const marker =
                       file.conflicted && conflictLineKind(line.text);

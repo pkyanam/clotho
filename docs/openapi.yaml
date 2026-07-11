@@ -6,9 +6,19 @@ info:
     use MCP tools that call this same edge; the web app and `@clotho/sdk-js`
     share it. Errors use `{ "error": "..." }` with 4xx/5xx status codes.
 
-    **Auth (prototype):** most routes are unauthenticated. Agent admin lives on
-    the agent-gateway (`/admin/v1/*`), not this edge. Secrets master key is
-    server-side only (`CLOTHO_SECRETS_MASTER_KEY`).
+    **Auth:** pluggable `AuthProvider` (ADR-0018). Default `bootstrap` accepts
+    `Authorization: Bearer clotho_tok_…` and, when `CLOTHO_AUTH_REQUIRED=false`,
+    falls back to a bootstrap actor. Managed profiles set
+    `CLOTHO_AUTH_REQUIRED=true` and `CLOTHO_AUTH_PROVIDER=clerk` (Clerk session
+    JWT / org API keys; Clotho `clotho_tok_…` still accepted — §11 #7).
+    Mint Clotho tokens with `POST /api/v1/tokens` or `clotho auth token create`.
+    Agents never use Clerk — MCP uses scoped `clotho_agt_…` tokens minted via
+    human-only `/api/v1/agents/*` (ADR-0016). Secrets master key is server-side
+    only (`CLOTHO_SECRETS_MASTER_KEY`).
+
+    **Provider Fabric (Stage 17):** `GET /api/v1/providers?layer=compute|storage|network|auth`
+    (omit `layer` for compute-only backward compatibility; `?all=true` for every
+    layer). Storage/network are honest stubs until Stages 18–19.
   version: 0.1.0
   license:
     name: Apache-2.0
@@ -18,10 +28,12 @@ servers:
     description: Local dev stack (`just dev`)
 
 tags:
+  - name: auth
   - name: health
   - name: control
   - name: repos
   - name: issues
+  - name: notifications
   - name: pulls
   - name: actions
   - name: providers
@@ -109,8 +121,9 @@ paths:
                   type: string
                 display_name:
                   type: string
-                forgejo_owner:
+                git_owner:
                   type: string
+                  description: Git clone-path owner (input alias forgejo_owner accepted)
       responses:
         "201":
           description: Created
@@ -241,6 +254,93 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/me:
+    get:
+      tags: [auth]
+      operationId: getMe
+      summary: Current authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/tokens:
+    get:
+      tags: [auth]
+      operationId: listTokens
+      summary: List API tokens (metadata only)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Token list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tokens]
+                properties:
+                  tokens:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ApiTokenMeta"
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [auth]
+      operationId: createToken
+      summary: Mint a new API token (plaintext shown once)
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        "201":
+          description: Created token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedApiToken"
+        "401":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/tokens/{id}:
+    delete:
+      tags: [auth]
+      operationId: revokeToken
+      summary: Revoke an API token
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Revoked
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
   /api/v1/repos/{name}:
     get:
       tags: [repos]
@@ -255,6 +355,60 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RepoDetail"
+        "404":
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [repos]
+      operationId: updateRepo
+      summary: Update repo settings (description, visibility, default branch)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                description:
+                  type: string
+                visibility:
+                  type: string
+                  enum: [public, private, internal]
+                default_branch:
+                  type: string
+      responses:
+        "200":
+          description: Updated repo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepoDetail"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [repos]
+      operationId: deleteRepo
+      summary: Delete repo (control plane + collab shell)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
 
@@ -444,6 +598,20 @@ paths:
             type: string
             enum: [open, closed, all]
             default: open
+        - name: labels
+          in: query
+          description: Comma-separated label names
+          schema:
+            type: string
+        - name: assignee
+          in: query
+          schema:
+            type: string
+        - name: milestone
+          in: query
+          schema:
+            type: integer
+            format: int64
       responses:
         "200":
           description: Issues
@@ -468,13 +636,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [title]
-              properties:
-                title:
-                  type: string
-                body:
-                  type: string
+              $ref: "#/components/schemas/CreateIssue"
       responses:
         "201":
           description: Created
@@ -502,6 +664,28 @@ paths:
                 $ref: "#/components/schemas/IssueDetail"
         "404":
           $ref: "#/components/responses/Error"
+    patch:
+      tags: [issues]
+      operationId: updateIssue
+      summary: Update an issue
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - $ref: "#/components/parameters/issueNumber"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateIssue"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issue"
+        "400":
+          $ref: "#/components/responses/Error"
 
   /api/v1/repos/{name}/issues/{number}/comments:
     post:
@@ -528,6 +712,165 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Comment"
+
+  /api/v1/repos/{name}/labels:
+    get:
+      tags: [issues]
+      operationId: listLabels
+      summary: List repository labels
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      responses:
+        "200":
+          description: Labels
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [labels]
+                properties:
+                  labels:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Label"
+    post:
+      tags: [issues]
+      operationId: createLabel
+      summary: Create a repository label
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLabel"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Label"
+
+  /api/v1/repos/{name}/milestones:
+    get:
+      tags: [issues]
+      operationId: listMilestones
+      summary: List repository milestones
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      responses:
+        "200":
+          description: Milestones
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [milestones]
+                properties:
+                  milestones:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Milestone"
+    post:
+      tags: [issues]
+      operationId: createMilestone
+      summary: Create a repository milestone
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMilestone"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Milestone"
+
+  /api/v1/notifications:
+    get:
+      tags: [notifications]
+      operationId: listNotifications
+      summary: List notifications for the current user
+      parameters:
+        - name: unread
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationList"
+
+  /api/v1/notifications/mark-read:
+    post:
+      tags: [notifications]
+      operationId: markNotificationsRead
+      summary: Mark notifications as read
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkNotificationsRead"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+
+  /api/v1/repos/{name}/merge-policy:
+    get:
+      tags: [repos]
+      operationId: getMergePolicy
+      summary: Repository merge policy
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      responses:
+        "200":
+          description: Policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergePolicy"
+    put:
+      tags: [repos]
+      operationId: updateMergePolicy
+      summary: Update repository merge policy (repo admin)
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMergePolicyRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergePolicy"
 
   /api/v1/repos/{name}/pulls:
     get:
@@ -603,6 +946,26 @@ paths:
                 $ref: "#/components/schemas/Pull"
 
   /api/v1/repos/{name}/pulls/{number}/comments:
+    get:
+      tags: [pulls]
+      operationId: listPullComments
+      summary: List pull request comments (threaded when upstream supports replies)
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - $ref: "#/components/parameters/pullNumber"
+      responses:
+        "200":
+          description: Comments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [comments]
+                properties:
+                  comments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Comment"
     post:
       tags: [pulls]
       operationId: commentOnPull
@@ -620,6 +983,9 @@ paths:
               properties:
                 body:
                   type: string
+                in_reply_to:
+                  type: integer
+                  description: Optional parent comment id for threaded replies
       responses:
         "201":
           description: Created
@@ -629,6 +995,26 @@ paths:
                 $ref: "#/components/schemas/Comment"
 
   /api/v1/repos/{name}/pulls/{number}/reviews:
+    get:
+      tags: [pulls]
+      operationId: listPullReviews
+      summary: List submitted pull request reviews
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - $ref: "#/components/parameters/pullNumber"
+      responses:
+        "200":
+          description: Reviews
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reviews]
+                properties:
+                  reviews:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Review"
     post:
       tags: [pulls]
       operationId: reviewPull
@@ -686,6 +1072,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Pull"
+        "409":
+          description: Merge blocked by policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
 
   /api/v1/repos/{name}/pulls/{number}/diff:
     get:
@@ -877,29 +1269,61 @@ paths:
     get:
       tags: [providers]
       operationId: listProviders
-      summary: Compute provider registry
+      summary: Provider Fabric registry (compute by default)
+      description: |
+        Without `layer`, returns the compute provider registry (Stage 12 shape).
+        With `layer=compute|storage|network|auth`, returns fabric metadata for
+        that layer. With `all=true`, returns every layer. Storage/network stubs
+        report `configured: false` until Stages 18–19 (ADR-0019).
+      parameters:
+        - name: layer
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [compute, storage, network, auth]
+          description: Fabric layer filter
+        - name: all
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: When true and layer omitted, include all fabric layers
       responses:
         "200":
           description: Providers
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProviderList"
+                oneOf:
+                  - $ref: "#/components/schemas/ProviderList"
+                  - $ref: "#/components/schemas/FabricProviderList"
+        "400":
+          $ref: "#/components/responses/Error"
 
   /api/v1/providers/{provider}:
     get:
       tags: [providers]
       operationId: getProvider
-      summary: One provider
+      summary: One provider (compute or fabric stub)
       parameters:
         - $ref: "#/components/parameters/provider"
+        - name: layer
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [compute, storage, network, auth]
       responses:
         "200":
           description: Provider
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Provider"
+                oneOf:
+                  - $ref: "#/components/schemas/Provider"
+                  - $ref: "#/components/schemas/FabricProvider"
         "404":
           $ref: "#/components/responses/Error"
 
@@ -1239,11 +1663,300 @@ paths:
         "204":
           description: Deleted
 
+  /api/v1/agents:
+    get:
+      tags: [agents]
+      operationId: listAgents
+      summary: List agent identities
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Agent list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agents]
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Agent"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [agents]
+      operationId: createAgent
+      summary: Create an agent identity
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/agents/{name}:
+    get:
+      tags: [agents]
+      operationId: getAgent
+      summary: Agent detail with token metadata
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentDetail"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/agents/{name}/tokens:
+    get:
+      tags: [agents]
+      operationId: listAgentTokens
+      summary: List agent tokens (metadata only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tokens
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tokens]
+                properties:
+                  tokens:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentTokenMeta"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [agents]
+      operationId: mintAgentToken
+      summary: Mint a scoped agent token (plaintext shown once)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [allowed_repos, allowed_tools]
+              properties:
+                allowed_repos:
+                  type: array
+                  items:
+                    type: string
+                allowed_tools:
+                  type: array
+                  items:
+                    type: string
+                expires_in_secs:
+                  type: integer
+      responses:
+        "201":
+          description: Minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MintedAgentToken"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/agents/{name}/tokens/{token_id}:
+    delete:
+      tags: [agents]
+      operationId: revokeAgentToken
+      summary: Revoke an agent token
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: token_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Revoked
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [agents]
+      operationId: updateAgentTokenScopes
+      summary: Update agent token scopes
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: token_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                allowed_repos:
+                  type: array
+                  items:
+                    type: string
+                allowed_tools:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentTokenMeta"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/agents/{name}/audit:
+    get:
+      tags: [agents]
+      operationId: agentAudit
+      summary: Recent audit log entries for an agent
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Audit entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentAuditEntry"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+
   /api/v1/repos/{name}/agent-sessions:
     get:
       tags: [agents]
       operationId: listAgentSessions
       summary: Recent agent sessions on a repo
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/repoName"
         - name: limit
@@ -1332,6 +2045,12 @@ components:
       schema:
         type: string
 
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Human API token (`clotho_tok_…`)
+
   responses:
     Error:
       description: Error envelope
@@ -1378,12 +2097,48 @@ components:
           type: string
         display_name:
           type: string
-        forgejo_owner:
-          type: string
         created_by:
           type: string
         created_at:
           type: string
+    MeResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        token_id:
+          type: string
+          nullable: true
+    ApiTokenMeta:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        token_prefix:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+        last_used_at:
+          type: string
+          nullable: true
+        expires_at:
+          type: string
+          nullable: true
+    CreatedApiToken:
+      allOf:
+        - $ref: "#/components/schemas/ApiTokenMeta"
+        - type: object
+          required: [token]
+          properties:
+            token:
+              type: string
+              description: Plaintext token — shown once at creation
     OrgMembership:
       type: object
       properties:
@@ -1470,6 +2225,8 @@ components:
           type: string
         owner_org:
           type: string
+        description:
+          type: string
         visibility:
           type: string
         default_branch:
@@ -1484,7 +2241,7 @@ components:
           type: string
         initial_commit_id:
           type: string
-        forgejo:
+        info:
           $ref: "#/components/schemas/RepoInfo"
     Commit:
       type: object
@@ -1515,6 +2272,8 @@ components:
           type: string
         owner_org:
           type: string
+        description:
+          type: string
         visibility:
           type: string
         default_branch:
@@ -1525,7 +2284,7 @@ components:
           type: string
         configured:
           type: boolean
-        forgejo:
+        info:
           $ref: "#/components/schemas/RepoInfo"
         main_commit_id:
           type: string
@@ -1621,6 +2380,142 @@ components:
           type: string
         color:
           type: string
+    Label:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        color:
+          type: string
+        description:
+          type: string
+    Milestone:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        state:
+          type: string
+        description:
+          type: string
+        due_on:
+          type: string
+          nullable: true
+    CreateLabel:
+      type: object
+      required: [name, color]
+      properties:
+        name:
+          type: string
+        color:
+          type: string
+        description:
+          type: string
+    CreateMilestone:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        due_on:
+          type: string
+    CreateIssue:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        body:
+          type: string
+        labels:
+          type: array
+          items:
+            type: string
+        assignees:
+          type: array
+          items:
+            type: string
+        milestone:
+          type: integer
+          format: int64
+          nullable: true
+    UpdateIssue:
+      type: object
+      properties:
+        title:
+          type: string
+        body:
+          type: string
+        state:
+          type: string
+          enum: [open, closed]
+        labels:
+          type: array
+          items:
+            type: string
+        assignees:
+          type: array
+          items:
+            type: string
+        milestone:
+          type: integer
+          format: int64
+          nullable: true
+    Notification:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        user_id:
+          type: string
+        repo_name:
+          type: string
+          nullable: true
+        kind:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+        href:
+          type: string
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    NotificationList:
+      type: object
+      required: [notifications, unread_count]
+      properties:
+        notifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/Notification"
+        unread_count:
+          type: integer
+          format: int64
+    MarkNotificationsRead:
+      type: object
+      properties:
+        ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+        all:
+          type: boolean
     Issue:
       type: object
       properties:
@@ -1642,6 +2537,16 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/IssueLabel"
+        assignees:
+          type: array
+          items:
+            type: object
+            properties:
+              login:
+                type: string
+        milestone:
+          $ref: "#/components/schemas/Milestone"
+          nullable: true
         comments:
           type: integer
         html_url:
@@ -1668,6 +2573,58 @@ components:
           type: string
         updated_at:
           type: string
+        in_reply_to:
+          type: integer
+          nullable: true
+          description: Parent comment id when upstream supports threaded replies
+        pull_request_review_id:
+          type: integer
+          nullable: true
+    Review:
+      type: object
+      properties:
+        id:
+          type: integer
+        body:
+          type: string
+        user:
+          type: object
+          properties:
+            login:
+              type: string
+        state:
+          type: string
+          description: APPROVED, REQUEST_CHANGES, COMMENTED, or PENDING
+        html_url:
+          type: string
+        submitted_at:
+          type: string
+    MergePolicy:
+      type: object
+      properties:
+        require_passing_actions:
+          type: boolean
+        block_merge_when_conflicted:
+          type: boolean
+        require_review_approvals:
+          type: integer
+        protect_default_branch:
+          type: boolean
+          description: Stored for future direct-push protection; not fully enforced yet
+        updated_at:
+          type: string
+          format: date-time
+    UpdateMergePolicyRequest:
+      type: object
+      properties:
+        require_passing_actions:
+          type: boolean
+        block_merge_when_conflicted:
+          type: boolean
+        require_review_approvals:
+          type: integer
+        protect_default_branch:
+          type: boolean
     IssueDetail:
       type: object
       properties:
@@ -1907,6 +2864,43 @@ components:
             $ref: "#/components/schemas/Provider"
         default_provider_id:
           type: string
+    FabricProvider:
+      type: object
+      description: Shared Provider Fabric metadata (ADR-0019); never includes secrets
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        layer:
+          type: string
+          enum: [compute, storage, network, auth]
+        kind:
+          type: string
+        enabled:
+          type: boolean
+        configured:
+          type: boolean
+        configured_reason:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        notes:
+          type: string
+    FabricProviderList:
+      type: object
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/FabricProvider"
+        default_provider_id:
+          type: string
+        layer:
+          type: string
+          nullable: true
     SecretMeta:
       type: object
       description: Metadata only — never includes plaintext secret values
@@ -1952,3 +2946,97 @@ components:
           type: string
         tool_calls:
           type: integer
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        disabled_at:
+          type: string
+          format: date-time
+          nullable: true
+    AgentDetail:
+      type: object
+      required: [agent, tokens]
+      properties:
+        agent:
+          $ref: "#/components/schemas/Agent"
+        tokens:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentTokenMeta"
+    AgentTokenMeta:
+      type: object
+      description: Metadata only — never includes plaintext bearer tokens
+      properties:
+        id:
+          type: string
+          format: uuid
+        token_prefix:
+          type: string
+        allowed_repos:
+          type: array
+          items:
+            type: string
+        allowed_tools:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+    MintedAgentToken:
+      allOf:
+        - $ref: "#/components/schemas/AgentTokenMeta"
+        - type: object
+          required: [token, agent, token_id]
+          properties:
+            token:
+              type: string
+              description: Plaintext bearer token — shown once at mint time
+            token_id:
+              type: string
+              format: uuid
+            agent:
+              type: string
+    AgentAuditEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        agent_id:
+          type: string
+          format: uuid
+        token_id:
+          type: string
+          format: uuid
+        tool:
+          type: string
+        repo:
+          type: string
+        args_digest:
+          type: string
+        status:
+          type: string
+        error:
+          type: string
+          nullable: true
+        occurred_at:
+          type: string
+          format: date-time

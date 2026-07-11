@@ -19,7 +19,7 @@ export interface RepoInfo {
   /** Clotho control-plane id for the repo. */
   clotho_id: string;
   name: string;
-  /** Forgejo full name, e.g. `clotho/weave`. */
+  /** Full name, e.g. `clotho/weave`. */
   full_name: string;
   /** Clotho org name that owns this repo. */
   owner: string;
@@ -51,16 +51,17 @@ export interface Commit {
 
 export interface RepoDetail {
   name: string;
-  /** Forgejo/clone-path owner. */
+  /** Git clone-path owner. */
   owner: string;
   /** Clotho org that owns this repo. */
   owner_org: string;
+  description: string;
   visibility: string;
   default_branch: string;
   clone_url: string;
   provider: string;
   configured: boolean;
-  forgejo: RepoInfo;
+  info: RepoInfo;
   /** Commit the `main` bookmark points at; empty while main is unborn. */
   main_commit_id: string;
   /** All current heads — concurrent agents' anonymous heads included. */
@@ -69,10 +70,11 @@ export interface RepoDetail {
 
 export interface CreatedRepo {
   name: string;
-  /** Forgejo/clone-path owner. */
+  /** Git clone-path owner. */
   owner: string;
   /** Clotho org that owns this repo. */
   owner_org: string;
+  description: string;
   visibility: string;
   default_branch: string;
   clone_url: string;
@@ -80,7 +82,7 @@ export interface CreatedRepo {
   configured: boolean;
   operation_id: string;
   initial_commit_id: string;
-  forgejo: RepoInfo;
+  info: RepoInfo;
 }
 
 export interface CommitFileInput {
@@ -148,6 +150,21 @@ export interface IssueLabel {
   color: string;
 }
 
+export interface Label {
+  id: number;
+  name: string;
+  color: string;
+  description: string;
+}
+
+export interface Milestone {
+  id: number;
+  title: string;
+  state: string;
+  description: string;
+  due_on: string | null;
+}
+
 export interface Issue {
   number: number;
   title: string;
@@ -155,6 +172,8 @@ export interface Issue {
   state: string;
   user: { login: string };
   labels: IssueLabel[];
+  assignees: { login: string }[];
+  milestone: Milestone | null;
   comments: number;
   html_url: string;
   created_at: string;
@@ -168,11 +187,55 @@ export interface Comment {
   html_url: string;
   created_at: string;
   updated_at: string;
+  /** Parent comment id when upstream supports threaded replies. */
+  in_reply_to?: number | null;
+  pull_request_review_id?: number | null;
+}
+
+export interface Review {
+  id: number;
+  body: string;
+  user: { login: string };
+  state: string;
+  html_url: string;
+  submitted_at: string;
+}
+
+export interface MergePolicy {
+  require_passing_actions: boolean;
+  block_merge_when_conflicted: boolean;
+  require_review_approvals: number;
+  protect_default_branch: boolean;
+  updated_at: string;
+}
+
+export interface UpdateMergePolicyRequest {
+  require_passing_actions?: boolean;
+  block_merge_when_conflicted?: boolean;
+  require_review_approvals?: number;
+  protect_default_branch?: boolean;
 }
 
 export interface IssueDetail {
   issue: Issue;
   comments: Comment[];
+}
+
+export interface Notification {
+  id: number;
+  user_id: string;
+  repo_name: string | null;
+  kind: string;
+  title: string;
+  body: string;
+  href: string;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface NotificationList {
+  notifications: Notification[];
+  unread_count: number;
 }
 
 /** Clotho pull request summary from the collaboration facade. */
@@ -292,6 +355,27 @@ export interface ComputeProviderList {
   default_provider_id: string;
 }
 
+/** Provider Fabric layer (ADR-0019 / Stage 17). */
+export type ProviderLayer = "compute" | "storage" | "network" | "auth";
+
+export interface FabricProvider {
+  id: string;
+  name: string;
+  layer: ProviderLayer | string;
+  kind: string;
+  enabled: boolean;
+  configured: boolean;
+  configured_reason?: string;
+  capabilities: string[];
+  notes?: string;
+}
+
+export interface FabricProviderList {
+  providers: FabricProvider[];
+  default_provider_id: string;
+  layer?: string | null;
+}
+
 export type DiffLineKind = "context" | "add" | "del";
 
 export interface DiffLine {
@@ -360,6 +444,53 @@ export interface AgentSession {
   tool_calls: number;
 }
 
+/** Agent identity (non-human principal). */
+export interface Agent {
+  id: string;
+  name: string;
+  description: string;
+  created_at: string;
+  disabled_at?: string | null;
+}
+
+/** Agent token metadata — never includes plaintext secrets. */
+export interface AgentTokenMeta {
+  id: string;
+  token_prefix: string;
+  allowed_repos: string[];
+  allowed_tools: string[];
+  created_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+}
+
+/** Minted agent token — plaintext shown once at creation. */
+export interface MintedAgentToken {
+  token: string;
+  token_id: string;
+  agent: string;
+  allowed_repos: string[];
+  allowed_tools: string[];
+  expires_at: string | null;
+}
+
+export interface AgentDetail {
+  agent: Agent;
+  tokens: AgentTokenMeta[];
+}
+
+export interface AgentAuditEntry {
+  id: number;
+  agent_id: string;
+  token_id: string;
+  tool: string;
+  repo: string;
+  args_digest: string;
+  status: string;
+  error: string | null;
+  occurred_at: string;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -372,9 +503,36 @@ export interface Org {
   id: string;
   name: string;
   display_name: string;
-  forgejo_owner: string;
   created_by: string;
   created_at: string;
+}
+
+export interface UserMe {
+  id: string;
+  name: string;
+  email: string;
+  display_name: string;
+  created_at: string;
+}
+
+export interface MeResponse {
+  user: UserMe;
+  token_id: string | null;
+}
+
+export interface ApiTokenMeta {
+  id: string;
+  name: string;
+  token_prefix: string;
+  scopes: string[];
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+}
+
+export interface CreatedApiToken extends ApiTokenMeta {
+  /** Plaintext token — shown once at creation. */
+  token: string;
 }
 
 export interface OrgMembership {
@@ -428,6 +586,8 @@ export interface SecretMeta {
 export interface ClothoClientOptions {
   /** Base URL of the Clotho API gateway, e.g. http://localhost:8080 */
   baseUrl: string;
+  /** Bearer token for authenticated requests (CLOTHO_TOKEN). */
+  token?: string;
   fetch?: typeof fetch;
 }
 
@@ -443,15 +603,38 @@ export class ClothoApiError extends Error {
 
 export class ClothoClient {
   private readonly baseUrl: string;
+  private readonly token?: string;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: ClothoClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
+    this.token = options.token;
     this.fetchImpl = options.fetch ?? fetch;
   }
 
+  private headers(init?: RequestInit): HeadersInit {
+    const h: Record<string, string> = {};
+    if (this.token) {
+      h.authorization = `Bearer ${this.token}`;
+    }
+    const extra = init?.headers;
+    if (extra instanceof Headers) {
+      extra.forEach((v, k) => {
+        h[k] = v;
+      });
+    } else if (Array.isArray(extra)) {
+      for (const [k, v] of extra) h[k] = v;
+    } else if (extra && typeof extra === "object") {
+      Object.assign(h, extra);
+    }
+    return h;
+  }
+
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
-    const res = await this.fetchImpl(`${this.baseUrl}${path}`, init);
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      ...init,
+      headers: this.headers(init),
+    });
     if (!res.ok) {
       let message = `${init?.method ?? "GET"} ${path} failed: ${res.status}`;
       try {
@@ -474,7 +657,7 @@ export class ClothoClient {
     return this.request("/healthz");
   }
 
-  /** Provision a repo in clotho-vcs and Forgejo in one call (ADR-0003). */
+  /** Provision a repo in clotho-vcs and the collaboration facade in one call. */
   createRepo(
     name: string,
     options?: {
@@ -611,15 +794,39 @@ export class ClothoClient {
     );
   }
 
-  commentOnPull(name: string, number: number, body: string): Promise<Comment> {
+  commentOnPull(
+    name: string,
+    number: number,
+    body: string,
+    options?: { in_reply_to?: number },
+  ): Promise<Comment> {
     return this.request(
       `/api/v1/repos/${encodeURIComponent(name)}/pulls/${number}/comments`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ body }),
+        body: JSON.stringify({
+          body,
+          ...(options?.in_reply_to != null
+            ? { in_reply_to: options.in_reply_to }
+            : {}),
+        }),
       },
     );
+  }
+
+  async listPullComments(name: string, number: number): Promise<Comment[]> {
+    const { comments } = await this.request<{ comments: Comment[] }>(
+      `/api/v1/repos/${encodeURIComponent(name)}/pulls/${number}/comments`,
+    );
+    return comments;
+  }
+
+  async listPullReviews(name: string, number: number): Promise<Review[]> {
+    const { reviews } = await this.request<{ reviews: Review[] }>(
+      `/api/v1/repos/${encodeURIComponent(name)}/pulls/${number}/reviews`,
+    );
+    return reviews;
   }
 
   reviewPull(
@@ -662,21 +869,138 @@ export class ClothoClient {
   async issues(
     name: string,
     state: "open" | "closed" | "all" = "open",
+    filters?: {
+      labels?: string;
+      assignee?: string;
+      milestone?: number;
+    },
   ): Promise<Issue[]> {
     const { issues } = await this.request<{ issues: Issue[] }>(
-      `/api/v1/repos/${encodeURIComponent(name)}/issues${qs({ state })}`,
+      `/api/v1/repos/${encodeURIComponent(name)}/issues${qs({
+        state,
+        labels: filters?.labels,
+        assignee: filters?.assignee,
+        milestone: filters?.milestone,
+      })}`,
     );
     return issues;
   }
 
   createIssue(
     name: string,
-    options: { title: string; body?: string },
+    options: {
+      title: string;
+      body?: string;
+      labels?: string[];
+      assignees?: string[];
+      milestone?: number;
+    },
   ): Promise<Issue> {
     return this.request(`/api/v1/repos/${encodeURIComponent(name)}/issues`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: options.title, body: options.body ?? "" }),
+      body: JSON.stringify({
+        title: options.title,
+        body: options.body ?? "",
+        labels: options.labels ?? [],
+        assignees: options.assignees ?? [],
+        milestone: options.milestone,
+      }),
+    });
+  }
+
+  updateIssue(
+    name: string,
+    number: number,
+    options: {
+      title?: string;
+      body?: string;
+      state?: "open" | "closed";
+      labels?: string[];
+      assignees?: string[];
+      milestone?: number | null;
+    },
+  ): Promise<Issue> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/issues/${number}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(options),
+      },
+    );
+  }
+
+  async listLabels(name: string): Promise<Label[]> {
+    const { labels } = await this.request<{ labels: Label[] }>(
+      `/api/v1/repos/${encodeURIComponent(name)}/labels`,
+    );
+    return labels;
+  }
+
+  createLabel(
+    name: string,
+    options: { name: string; color: string; description?: string },
+  ): Promise<Label> {
+    return this.request(`/api/v1/repos/${encodeURIComponent(name)}/labels`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: options.name,
+        color: options.color,
+        description: options.description ?? "",
+      }),
+    });
+  }
+
+  async listMilestones(name: string): Promise<Milestone[]> {
+    const { milestones } = await this.request<{ milestones: Milestone[] }>(
+      `/api/v1/repos/${encodeURIComponent(name)}/milestones`,
+    );
+    return milestones;
+  }
+
+  createMilestone(
+    name: string,
+    options: { title: string; description?: string; due_on?: string },
+  ): Promise<Milestone> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/milestones`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: options.title,
+          description: options.description ?? "",
+          due_on: options.due_on,
+        }),
+      },
+    );
+  }
+
+  notifications(options?: {
+    unread?: boolean;
+    limit?: number;
+  }): Promise<NotificationList> {
+    return this.request(
+      `/api/v1/notifications${qs({
+        unread: options?.unread ? "true" : undefined,
+        limit: options?.limit,
+      })}`,
+    );
+  }
+
+  markNotificationsRead(options?: {
+    ids?: number[];
+    all?: boolean;
+  }): Promise<{ ok: boolean }> {
+    return this.request("/api/v1/notifications/mark-read", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ids: options?.ids ?? [],
+        all: options?.all ?? false,
+      }),
     });
   }
 
@@ -791,6 +1115,26 @@ export class ClothoClient {
     );
   }
 
+  getMergePolicy(name: string): Promise<MergePolicy> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/merge-policy`,
+    );
+  }
+
+  updateMergePolicy(
+    name: string,
+    policy: UpdateMergePolicyRequest,
+  ): Promise<MergePolicy> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/merge-policy`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(policy),
+      },
+    );
+  }
+
   /**
    * List compute providers from the CCI registry (Stage 12).
    * Prefers `/api/v1/providers`; falls back to the Stage 10 path.
@@ -821,6 +1165,34 @@ export class ClothoClient {
     }
   }
 
+  /**
+   * Provider Fabric list (Stage 17). Pass `layer` for auth/storage/network stubs,
+   * or `all: true` for every layer. Omit options for compute-only (same as
+   * {@link computeProviderList}).
+   */
+  listProviders(options?: {
+    layer?: ProviderLayer | string;
+    all?: boolean;
+  }): Promise<FabricProviderList | ComputeProviderList> {
+    return this.request(
+      `/api/v1/providers${qs({
+        layer: options?.layer,
+        all: options?.all ? "true" : undefined,
+      })}`,
+    );
+  }
+
+  getProvider(
+    provider: string,
+    options?: { layer?: ProviderLayer | string },
+  ): Promise<FabricProvider | ComputeProvider> {
+    return this.request(
+      `/api/v1/providers/${encodeURIComponent(provider)}${qs({
+        layer: options?.layer,
+      })}`,
+    );
+  }
+
   // Stage 11: users, orgs, activity, and org-scoped repos.
   async users(): Promise<User[]> {
     const { users } = await this.request<{ users: User[] }>("/api/v1/users");
@@ -834,7 +1206,7 @@ export class ClothoClient {
 
   createOrg(
     name: string,
-    options?: { displayName?: string; forgejoOwner?: string },
+    options?: { displayName?: string; gitOwner?: string },
   ): Promise<Org> {
     return this.request("/api/v1/orgs", {
       method: "POST",
@@ -842,7 +1214,7 @@ export class ClothoClient {
       body: JSON.stringify({
         name,
         display_name: options?.displayName,
-        forgejo_owner: options?.forgejoOwner,
+        git_owner: options?.gitOwner,
       }),
     });
   }
@@ -865,6 +1237,56 @@ export class ClothoClient {
     return events;
   }
 
+  me(): Promise<MeResponse> {
+    return this.request("/api/v1/me");
+  }
+
+  async listTokens(): Promise<ApiTokenMeta[]> {
+    const { tokens } = await this.request<{ tokens: ApiTokenMeta[] }>(
+      "/api/v1/tokens",
+    );
+    return tokens;
+  }
+
+  createToken(name?: string): Promise<CreatedApiToken> {
+    return this.request("/api/v1/tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: name ?? "" }),
+    });
+  }
+
+  async revokeToken(id: string): Promise<void> {
+    await this.request(`/api/v1/tokens/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  updateRepo(
+    name: string,
+    options: {
+      description?: string;
+      visibility?: "public" | "private" | "internal" | string;
+      defaultBranch?: string;
+    },
+  ): Promise<RepoDetail> {
+    return this.request(`/api/v1/repos/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        description: options.description,
+        visibility: options.visibility,
+        default_branch: options.defaultBranch,
+      }),
+    });
+  }
+
+  async deleteRepo(name: string): Promise<void> {
+    await this.request(`/api/v1/repos/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+  }
+
   /** Recent agent sessions on a repo (poll this for the presence panel). */
   async agentSessions(
     name: string,
@@ -877,6 +1299,99 @@ export class ClothoClient {
       })}`,
     );
     return sessions;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Agent identity admin (Slice C, ADR-0016)
+  // ---------------------------------------------------------------------------
+
+  async listAgents(): Promise<Agent[]> {
+    const { agents } = await this.request<{ agents: Agent[] }>("/api/v1/agents");
+    return agents;
+  }
+
+  createAgent(options: {
+    name: string;
+    description?: string;
+  }): Promise<Agent> {
+    return this.request("/api/v1/agents", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: options.name,
+        description: options.description ?? "",
+      }),
+    });
+  }
+
+  getAgent(name: string): Promise<AgentDetail> {
+    return this.request(`/api/v1/agents/${encodeURIComponent(name)}`);
+  }
+
+  mintAgentToken(
+    name: string,
+    options: {
+      allowedRepos: string[];
+      allowedTools: string[];
+      expiresInSecs?: number;
+    },
+  ): Promise<MintedAgentToken> {
+    return this.request(`/api/v1/agents/${encodeURIComponent(name)}/tokens`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        allowed_repos: options.allowedRepos,
+        allowed_tools: options.allowedTools,
+        expires_in_secs: options.expiresInSecs,
+      }),
+    });
+  }
+
+  async listAgentTokens(name: string): Promise<AgentTokenMeta[]> {
+    const { tokens } = await this.request<{ tokens: AgentTokenMeta[] }>(
+      `/api/v1/agents/${encodeURIComponent(name)}/tokens`,
+    );
+    return tokens;
+  }
+
+  async revokeAgentToken(name: string, tokenId: string): Promise<void> {
+    await this.request(
+      `/api/v1/agents/${encodeURIComponent(name)}/tokens/${encodeURIComponent(tokenId)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  updateAgentTokenScopes(
+    name: string,
+    tokenId: string,
+    options: {
+      allowedRepos?: string[];
+      allowedTools?: string[];
+    },
+  ): Promise<AgentTokenMeta> {
+    return this.request(
+      `/api/v1/agents/${encodeURIComponent(name)}/tokens/${encodeURIComponent(tokenId)}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          allowed_repos: options.allowedRepos,
+          allowed_tools: options.allowedTools,
+        }),
+      },
+    );
+  }
+
+  async agentAudit(
+    name: string,
+    options?: { limit?: number },
+  ): Promise<AgentAuditEntry[]> {
+    const { entries } = await this.request<{ entries: AgentAuditEntry[] }>(
+      `/api/v1/agents/${encodeURIComponent(name)}/audit${qs({
+        limit: options?.limit,
+      })}`,
+    );
+    return entries;
   }
 
   // ---------------------------------------------------------------------------

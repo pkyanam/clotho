@@ -84,9 +84,9 @@ async fn repo_created_through_clotho_api_is_a_real_forgejo_project() {
     let created: Value = response.json().await.unwrap();
     let owner = created["owner"].as_str().unwrap().to_string();
     let initial_commit = created["initial_commit_id"].as_str().unwrap().to_string();
-    assert_eq!(created["forgejo"]["default_branch"], "main");
-    assert_eq!(created["forgejo"]["has_issues"], true);
-    assert_eq!(created["forgejo"]["has_pull_requests"], true);
+    assert_eq!(created["info"]["default_branch"], "main");
+    assert_eq!(created["info"]["has_issues"], true);
+    assert_eq!(created["info"]["has_pull_requests"], true);
     let repo_api = format!("{}/api/v1/repos/{owner}/{name}", env.forgejo_url);
 
     // 2. Commit through the clotho-vcs gRPC API — no git CLI anywhere.

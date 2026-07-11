@@ -85,6 +85,13 @@ fn test_config() -> GatewayConfig {
             "CLOTHO_STAGE11_TEST_BOOTSTRAP_ORG_DISPLAY_NAME",
             "Clotho",
         ),
+        auth_required: false,
+        auth_provider: "bootstrap".into(),
+        clerk: None,
+        public_git_url: env_or(
+            "CLOTHO_STAGE11_TEST_PUBLIC_GIT_URL",
+            "http://localhost:13000",
+        ),
         forgejo: ForgejoConfig {
             base_url: env_or("CLOTHO_STAGE11_TEST_FORGEJO_URL", "http://localhost:13000"),
             owner: env_or("CLOTHO_STAGE11_TEST_FORGEJO_OWNER", "clotho"),
@@ -141,10 +148,10 @@ async fn control_plane_users_and_orgs() {
     let client = reqwest::Client::new();
 
     let users = get(&client, &url, "/api/v1/users").await;
-    assert!(users["users"].as_array().unwrap().len() >= 1);
+    assert!(!users["users"].as_array().unwrap().is_empty());
 
     let orgs = get(&client, &url, "/api/v1/orgs").await;
-    assert!(orgs["orgs"].as_array().unwrap().len() >= 1);
+    assert!(!orgs["orgs"].as_array().unwrap().is_empty());
 
     let suffix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -155,7 +162,7 @@ async fn control_plane_users_and_orgs() {
         &client,
         &url,
         "/api/v1/orgs",
-        json!({"name": name, "display_name": format!("Stage 11 {suffix}"), "forgejo_owner": "clotho"}),
+        json!({"name": name, "display_name": format!("Stage 11 {suffix}"), "git_owner": "clotho"}),
     )
     .await;
     assert_eq!(status, 201);
@@ -163,7 +170,7 @@ async fn control_plane_users_and_orgs() {
 
     let detail = get(&client, &url, &format!("/api/v1/orgs/{name}")).await;
     assert_eq!(detail["org"]["name"], name);
-    assert!(detail["members"].as_array().unwrap().len() >= 1);
+    assert!(!detail["members"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

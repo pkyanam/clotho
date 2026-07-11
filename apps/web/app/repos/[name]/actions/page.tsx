@@ -4,6 +4,13 @@ import { ClothoApiError, type ActionsConfig } from "@clotho/sdk-js";
 
 import { api, shortId, timeAgo } from "src/lib/api";
 import { RepoNav } from "src/components/repo-nav";
+import {
+  EmptyState,
+  PageFrame,
+  Panel,
+  SectionHeader,
+  StatCell,
+} from "src/components/ui/page-frame";
 import { runAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +21,7 @@ export default async function ActionsPage({
   params: Promise<{ name: string }>;
 }) {
   const { name } = await params;
-  const client = api();
+  const client = await api();
   const [detail, runs, config, providers] = await Promise.all([
     client.getRepo(name),
     client.actionRuns(name).catch(() => []),
@@ -32,114 +39,136 @@ export default async function ActionsPage({
   ).length;
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8">
+    <PageFrame>
       <RepoNav name={name} active="actions" />
-      <div className="mt-6 flex flex-wrap items-start justify-between gap-4 border-b border-kumo-hairline pb-5">
-        <div>
+
+      <div className="mt-6 flex flex-wrap items-start justify-between gap-4 border-b border-kumo-hairline pb-6">
+        <div className="min-w-0 max-w-3xl">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl leading-tight">actions</h1>
-            <Badge variant="outline">{config.enabled ? "enabled" : "disabled"}</Badge>
+            <h1
+              className="leading-tight text-kumo-default"
+              style={{ fontSize: "clamp(1.375rem, 2.5vw, 1.75rem)" }}
+            >
+              actions
+            </h1>
             <Badge variant="outline">
-              {provider?.configured ? "provider configured" : "provider missing"}
+              {config.enabled ? "enabled" : "disabled"}
             </Badge>
           </div>
-          <p className="mt-2 max-w-3xl text-[0.9375rem] text-kumo-inactive">
-            Clotho runs `.clotho/ci.sh` when present. Without it, the runner
-            probes Makefile, Cargo, then npm and reports status on pull requests.
+          <p className="mt-2 text-[0.9375rem] leading-relaxed text-kumo-inactive">
+            clotho runs <code className="text-kumo-default">.clotho/ci.sh</code>{" "}
+            when present. without it, the runner probes Makefile, Cargo, then
+            npm and reports status on pull requests.
           </p>
-          {!config.enabled && (
-            <p className="mt-3 max-w-2xl border border-kumo-hairline px-3 py-2 text-xs text-kumo-inactive">
-              actions config is not available from the api gateway currently
-              serving this page.
-            </p>
-          )}
         </div>
         <form action={startRun}>
-          <Button type="submit" disabled={!detail.main_commit_id || !config.enabled}>
+          <Button
+            type="submit"
+            disabled={!detail.main_commit_id || !config.enabled}
+          >
             run
           </Button>
         </form>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-4">
-        <Summary label="provider" value={provider?.name ?? config.provider} />
-        <Summary
-          label="configured"
-          value={provider?.configured ? "yes" : "no"}
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCell label="provider" value={provider?.name ?? config.provider} />
+        <StatCell
+          label="status"
+          value={provider?.configured ? "connected" : "not connected"}
           muted={!provider?.configured}
         />
-        <Summary
+        <StatCell
           label="default image"
           value={config.default_image || "provider default"}
         />
-        <Summary
-          label="latest"
-          value={latest ? `${latest.status} · ${timeAgo(latest.created_at_millis)}` : "none"}
+        <StatCell
+          label="latest run"
+          value={
+            latest
+              ? `${latest.status} · ${timeAgo(latest.created_at_millis)}`
+              : "none"
+          }
           muted={!latest}
         />
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section className="min-w-0">
-          <div className="flex flex-wrap items-center justify-between gap-3 border border-kumo-hairline px-4 py-3">
-            <div>
-              <h2 className="text-sm">runs</h2>
-              <p className="mt-1 text-xs text-kumo-inactive">
-                {runs.length} retained · {active} active · {failures} needing attention
-              </p>
+          <SectionHeader
+            title="runs"
+            meta={`${runs.length} retained · ${active} active · ${failures} needing attention`}
+          />
+          {runs.length === 0 ? (
+            <div className="mt-4">
+              <EmptyState
+                title="no action runs yet"
+                description="start a manual run from the current main commit, or push a change to trigger one automatically."
+                action={
+                  detail.main_commit_id && config.enabled ? (
+                    <form action={startRun}>
+                      <Button type="submit">start first run</Button>
+                    </form>
+                  ) : (
+                    <Link href="/settings/compute">
+                      <Button type="button" variant="outline">
+                        connect compute
+                      </Button>
+                    </Link>
+                  )
+                }
+              />
             </div>
-            <Badge variant="outline">postgres history</Badge>
-          </div>
-      {runs.length === 0 ? (
-        <p className="border-x border-b border-kumo-hairline px-4 py-8 text-sm text-kumo-inactive">
-          no action runs yet. start a manual run from the current main commit,
-          or push a commit to let the webhook create one.
-        </p>
-      ) : (
-        <ul className="divide-y divide-kumo-hairline border-x border-b border-kumo-hairline">
-          {runs.map((run) => (
-            <li key={run.id}>
-              <Link
-                href={`/repos/${name}/actions/${run.id}`}
-                className="block px-4 py-3 transition-colors hover:bg-kumo-muted"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge status={run.status} />
-                      <span className="text-sm">{run.id}</span>
-                      <span className="text-xs text-kumo-inactive">
-                        {run.trigger} by {run.actor}
+          ) : (
+            <ul className="mt-4 divide-y divide-kumo-hairline border border-kumo-hairline">
+              {runs.map((run) => (
+                <li key={run.id}>
+                  <Link
+                    href={`/repos/${name}/actions/${run.id}`}
+                    className="block px-4 py-3 transition-colors hover:bg-kumo-elevated"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline">{run.status}</Badge>
+                          <span className="text-[0.9375rem] text-kumo-default">
+                            {run.id}
+                          </span>
+                          <span className="text-[0.8125rem] text-kumo-inactive">
+                            {run.trigger} by {run.actor}
+                          </span>
+                        </div>
+                        <p className="mt-1 break-all text-[0.8125rem] text-kumo-inactive">
+                          {shortId(run.commit_id)} · {run.provider}
+                        </p>
+                      </div>
+                      <span className="text-[0.8125rem] text-kumo-inactive">
+                        {timeAgo(run.created_at_millis)}
                       </span>
                     </div>
-                    <p className="mt-1 break-all text-xs text-kumo-inactive">
-                      {shortId(run.commit_id)} · {run.provider}
-                      {run.sandbox_id ? ` · sandbox ${run.sandbox_id}` : ""}
-                    </p>
-                  </div>
-                  <span className="text-xs text-kumo-inactive">
-                    {timeAgo(run.created_at_millis)}
-                  </span>
-                </div>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
-        <aside className="space-y-4">
-          <section className="border border-kumo-hairline p-4">
-            <h2 className="text-[0.9375rem]">workflow</h2>
-            <ol className="mt-4 space-y-3 text-[0.8125rem] text-kumo-inactive">
-              <li>1. run `.clotho/ci.sh` when present</li>
+        <aside className="space-y-5">
+          <Panel className="p-4">
+            <h2 className="text-[0.9375rem] font-medium text-kumo-default">
+              workflow
+            </h2>
+            <ol className="mt-4 space-y-3 text-[0.8125rem] leading-relaxed text-kumo-inactive">
+              <li>
+                1. run <code>.clotho/ci.sh</code> when present
+              </li>
               <li>2. otherwise probe Makefile, Cargo, then npm</li>
-              <li>3. allocate a sandbox via the configured compute provider</li>
+              <li>3. allocate a sandbox on the configured compute provider</li>
               <li>4. check out the target commit and run checks</li>
               <li>5. persist logs and update pull request status</li>
             </ol>
             {!provider?.configured && (
-              <p className="mt-4 text-[0.8125rem] text-kumo-inactive">
+              <p className="mt-4 border-t border-kumo-hairline pt-4 text-[0.8125rem] text-kumo-inactive">
                 provider not connected —{" "}
                 <Link
                   href="/settings/compute"
@@ -149,10 +178,12 @@ export default async function ActionsPage({
                 </Link>
               </p>
             )}
-          </section>
+          </Panel>
 
-          <section className="border border-kumo-hairline p-4">
-            <h2 className="text-[0.9375rem]">runner policy</h2>
+          <Panel className="p-4">
+            <h2 className="text-[0.9375rem] font-medium text-kumo-default">
+              runner policy
+            </h2>
             <dl className="mt-4 grid gap-3 text-[0.8125rem]">
               <Meta label="timeout" value={`${config.timeout_seconds} seconds`} />
               <Meta label="trigger" value="push or manual start" />
@@ -162,10 +193,10 @@ export default async function ActionsPage({
                 value={(provider?.capabilities ?? []).join(", ") || "unknown"}
               />
             </dl>
-          </section>
+          </Panel>
         </aside>
       </div>
-    </div>
+    </PageFrame>
   );
 }
 
@@ -181,36 +212,11 @@ function fallbackActionsConfig(error: unknown): ActionsConfig {
   throw error;
 }
 
-function StatusBadge({ status }: { status: string }) {
-  return <Badge variant="outline">{status}</Badge>;
-}
-
-function Summary({
-  label,
-  value,
-  muted = false,
-}: {
-  label: string;
-  value: string;
-  muted?: boolean;
-}) {
-  return (
-    <section className="border border-kumo-hairline p-4">
-      <h2 className="text-xs text-kumo-inactive">{label}</h2>
-      <p
-        className={`mt-2 break-all text-sm ${muted ? "text-kumo-inactive" : "text-kumo-default"}`}
-      >
-        {value}
-      </p>
-    </section>
-  );
-}
-
 function Meta({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid gap-1 sm:grid-cols-[112px_minmax(0,1fr)]">
       <dt className="text-kumo-inactive">{label}</dt>
-      <dd className="min-w-0 break-words">{value}</dd>
+      <dd className="min-w-0 break-words text-kumo-default">{value}</dd>
     </div>
   );
 }

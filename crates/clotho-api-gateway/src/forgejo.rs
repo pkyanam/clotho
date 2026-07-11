@@ -94,11 +94,48 @@ pub struct PullInfo {
     pub updated_at: String,
     #[serde(default)]
     pub comments: i64,
+    #[serde(default)]
+    pub labels: Vec<IssueLabel>,
+    #[serde(default)]
+    pub assignees: Vec<PullUser>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PullUser {
     pub login: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MilestoneInfo {
+    pub id: i64,
+    pub title: String,
+    pub state: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub due_on: Option<String>,
+}
+
+/// Patch fields for the internal collaboration provider. Keeping this as one
+/// value prevents the provider boundary from growing a positional-argument
+/// API every time Clotho adds issue metadata.
+pub struct IssueUpdate<'a> {
+    pub title: Option<&'a str>,
+    pub body: Option<&'a str>,
+    pub state: Option<&'a str>,
+    pub assignees: Option<&'a [String]>,
+    pub labels: Option<&'a [String]>,
+    pub milestone: Option<Option<i64>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabelInfo {
+    pub id: i64,
+    pub name: String,
+    #[serde(default)]
+    pub color: String,
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +148,10 @@ pub struct IssueInfo {
     pub user: PullUser,
     #[serde(default)]
     pub labels: Vec<IssueLabel>,
+    #[serde(default)]
+    pub assignees: Vec<PullUser>,
+    #[serde(default)]
+    pub milestone: Option<MilestoneInfo>,
     #[serde(default)]
     pub comments: i64,
     pub html_url: String,
@@ -134,6 +175,26 @@ pub struct CommentInfo {
     pub html_url: String,
     pub created_at: String,
     pub updated_at: String,
+    /// Parent review comment id when upstream supports threaded replies.
+    #[serde(default)]
+    pub in_reply_to: Option<i64>,
+    /// Review batch this inline comment belongs to, when present.
+    #[serde(default)]
+    pub pull_request_review_id: Option<i64>,
+}
+
+/// A submitted pull request review (approve, request changes, comment).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewInfo {
+    pub id: i64,
+    #[serde(default)]
+    pub body: String,
+    pub user: PullUser,
+    /// APPROVED, REQUEST_CHANGES, COMMENTED, or PENDING.
+    pub state: String,
+    pub html_url: String,
+    #[serde(default)]
+    pub submitted_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -313,6 +374,57 @@ impl ForgejoClient {
         self.comment_on_issue(name, number, body).await
     }
 
+    /// Reply to an existing pull review comment when upstream supports threading.
+    pub async fn reply_on_pull_comment(
+        &self,
+        name: &str,
+        number: i64,
+        body: &str,
+        in_reply_to: i64,
+    ) -> Result<CommentInfo, ApiError> {
+        let owner = &self.config.owner;
+        let payload = serde_json::json!({
+            "body": body,
+            "in_reply_to": in_reply_to,
+        });
+        let mut comment: CommentInfo = self
+            .post_json(
+                &format!("/api/v1/repos/{owner}/{name}/pulls/{number}/comments"),
+                payload,
+            )
+            .await?;
+        comment = normalize_comment_ids(comment);
+        Ok(comment)
+    }
+
+    /// Inline review comments on a pull request (may include `in_reply_to`).
+    pub async fn list_pull_review_comments(
+        &self,
+        name: &str,
+        number: i64,
+    ) -> Result<Vec<CommentInfo>, ApiError> {
+        let owner = &self.config.owner;
+        let comments: Vec<CommentInfo> = self
+            .get_json(&format!(
+                "/api/v1/repos/{owner}/{name}/pulls/{number}/comments?limit=100"
+            ))
+            .await?;
+        Ok(comments.into_iter().map(normalize_comment_ids).collect())
+    }
+
+    /// Submitted reviews on a pull request.
+    pub async fn list_pull_reviews(
+        &self,
+        name: &str,
+        number: i64,
+    ) -> Result<Vec<ReviewInfo>, ApiError> {
+        let owner = &self.config.owner;
+        self.get_json(&format!(
+            "/api/v1/repos/{owner}/{name}/pulls/{number}/reviews?limit=100"
+        ))
+        .await
+    }
+
     pub async fn review_pull(
         &self,
         name: &str,
@@ -355,12 +467,28 @@ impl ForgejoClient {
         self.get_pull(name, number).await
     }
 
-    pub async fn list_issues(&self, name: &str, state: &str) -> Result<Vec<IssueInfo>, ApiError> {
+    pub async fn list_issues(
+        &self,
+        name: &str,
+        state: &str,
+        labels: Option<&str>,
+        assignee: Option<&str>,
+        milestone: Option<i64>,
+    ) -> Result<Vec<IssueInfo>, ApiError> {
         let owner = &self.config.owner;
-        self.get_json(&format!(
+        let mut query = format!(
             "/api/v1/repos/{owner}/{name}/issues?state={state}&type=issues&sort=recentupdate&limit=50"
-        ))
-        .await
+        );
+        if let Some(labels) = labels.filter(|s| !s.is_empty()) {
+            query.push_str(&format!("&labels={}", encode_query(labels)));
+        }
+        if let Some(assignee) = assignee.filter(|s| !s.is_empty()) {
+            query.push_str(&format!("&assignee={}", encode_query(assignee)));
+        }
+        if let Some(milestone) = milestone {
+            query.push_str(&format!("&milestone={milestone}"));
+        }
+        self.get_json(&query).await
     }
 
     pub async fn create_issue(
@@ -368,13 +496,120 @@ impl ForgejoClient {
         name: &str,
         title: &str,
         body: &str,
+        labels: &[String],
+        assignees: &[String],
+        milestone: Option<i64>,
     ) -> Result<IssueInfo, ApiError> {
         let owner = &self.config.owner;
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "title": title,
             "body": body,
         });
+        if !labels.is_empty() {
+            payload["labels"] = serde_json::json!(labels);
+        }
+        if !assignees.is_empty() {
+            payload["assignees"] = serde_json::json!(assignees);
+        }
+        if let Some(milestone) = milestone {
+            payload["milestone"] = serde_json::json!(milestone);
+        }
         self.post_json(&format!("/api/v1/repos/{owner}/{name}/issues"), payload)
+            .await
+    }
+
+    pub async fn update_issue(
+        &self,
+        name: &str,
+        number: i64,
+        update: IssueUpdate<'_>,
+    ) -> Result<IssueInfo, ApiError> {
+        let owner = &self.config.owner;
+        let mut payload = serde_json::Map::new();
+        if let Some(title) = update.title {
+            payload.insert("title".into(), serde_json::json!(title));
+        }
+        if let Some(body) = update.body {
+            payload.insert("body".into(), serde_json::json!(body));
+        }
+        if let Some(state) = update.state {
+            payload.insert("state".into(), serde_json::json!(state));
+        }
+        if let Some(assignees) = update.assignees {
+            payload.insert("assignees".into(), serde_json::json!(assignees));
+        }
+        if let Some(labels) = update.labels {
+            payload.insert("labels".into(), serde_json::json!(labels));
+        }
+        if let Some(milestone) = update.milestone {
+            match milestone {
+                Some(id) => {
+                    payload.insert("milestone".into(), serde_json::json!(id));
+                }
+                None => {
+                    payload.insert("milestone".into(), serde_json::Value::Null);
+                }
+            }
+        }
+        if payload.is_empty() {
+            return self.get_issue(name, number).await;
+        }
+        self.patch_json(
+            &format!("/api/v1/repos/{owner}/{name}/issues/{number}"),
+            serde_json::Value::Object(payload),
+        )
+        .await
+    }
+
+    pub async fn list_labels(&self, name: &str) -> Result<Vec<LabelInfo>, ApiError> {
+        let owner = &self.config.owner;
+        self.get_json(&format!("/api/v1/repos/{owner}/{name}/labels?limit=100"))
+            .await
+    }
+
+    pub async fn create_label(
+        &self,
+        name: &str,
+        label_name: &str,
+        color: &str,
+        description: Option<&str>,
+    ) -> Result<LabelInfo, ApiError> {
+        let owner = &self.config.owner;
+        let mut payload = serde_json::json!({
+            "name": label_name,
+            "color": color,
+        });
+        if let Some(description) = description.filter(|d| !d.is_empty()) {
+            payload["description"] = serde_json::json!(description);
+        }
+        self.post_json(&format!("/api/v1/repos/{owner}/{name}/labels"), payload)
+            .await
+    }
+
+    pub async fn list_milestones(&self, name: &str) -> Result<Vec<MilestoneInfo>, ApiError> {
+        let owner = &self.config.owner;
+        self.get_json(&format!(
+            "/api/v1/repos/{owner}/{name}/milestones?state=all&limit=100"
+        ))
+        .await
+    }
+
+    pub async fn create_milestone(
+        &self,
+        name: &str,
+        title: &str,
+        description: Option<&str>,
+        due_on: Option<&str>,
+    ) -> Result<MilestoneInfo, ApiError> {
+        let owner = &self.config.owner;
+        let mut payload = serde_json::json!({ "title": title });
+        if let Some(description) = description.filter(|d| !d.is_empty()) {
+            payload["description"] = serde_json::json!(description);
+        }
+        if let Some(due_on) = due_on.filter(|d| !d.is_empty()) {
+            payload["due_on"] = serde_json::json!(due_on);
+        }
+        self.post_json(&format!("/api/v1/repos/{owner}/{name}/milestones"), payload)
             .await
     }
 
@@ -483,6 +718,48 @@ impl ForgejoClient {
         Ok(())
     }
 
+    /// Best-effort sync of description, visibility, and default branch.
+    pub async fn patch_repo(
+        &self,
+        owner: &str,
+        name: &str,
+        description: Option<&str>,
+        visibility: Option<&str>,
+        default_branch: Option<&str>,
+    ) -> Result<(), ApiError> {
+        let mut body = serde_json::Map::new();
+        if let Some(d) = description {
+            body.insert("description".into(), serde_json::json!(d));
+        }
+        if let Some(v) = visibility {
+            let private = matches!(v, "private" | "internal");
+            body.insert("private".into(), serde_json::json!(private));
+        }
+        if let Some(b) = default_branch {
+            body.insert("default_branch".into(), serde_json::json!(b));
+        }
+        if body.is_empty() {
+            return Ok(());
+        }
+        self.request_with_body(
+            reqwest::Method::PATCH,
+            &format!("/api/v1/repos/{owner}/{name}"),
+            Some(serde_json::Value::Object(body)),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Delete the collaboration provider project (best-effort).
+    pub async fn delete_repo(&self, owner: &str, name: &str) -> Result<(), ApiError> {
+        self.request(
+            reqwest::Method::DELETE,
+            &format!("/api/v1/repos/{owner}/{name}"),
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, ApiError> {
         self.request(reqwest::Method::GET, path)
             .await?
@@ -502,4 +779,36 @@ impl ForgejoClient {
             .await
             .map_err(|e| ApiError::Upstream(format!("forgejo: invalid response for {path}: {e}")))
     }
+
+    async fn patch_json<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+    ) -> Result<T, ApiError> {
+        self.request_with_body(reqwest::Method::PATCH, path, Some(body))
+            .await?
+            .json()
+            .await
+            .map_err(|e| ApiError::Upstream(format!("forgejo: invalid response for {path}: {e}")))
+    }
+}
+
+fn encode_query(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
+            _ => format!("%{:02X}", c as u8),
+        })
+        .collect()
+}
+
+/// Upstream may return `0` for absent optional ids; normalize to `None`.
+fn normalize_comment_ids(mut comment: CommentInfo) -> CommentInfo {
+    if comment.in_reply_to == Some(0) {
+        comment.in_reply_to = None;
+    }
+    if comment.pull_request_review_id == Some(0) {
+        comment.pull_request_review_id = None;
+    }
+    comment
 }

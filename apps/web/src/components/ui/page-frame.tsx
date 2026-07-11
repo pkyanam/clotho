@@ -87,7 +87,7 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="border border-kumo-hairline bg-kumo-base px-6 py-12 text-center">
+    <div className="empty-enter border border-kumo-hairline bg-kumo-base px-6 py-12 text-center">
       <p className="text-[0.9375rem] text-kumo-default">{title}</p>
       {description && (
         <p className="mx-auto mt-2 max-w-md text-[0.875rem] leading-relaxed text-kumo-inactive">

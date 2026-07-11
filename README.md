@@ -153,6 +153,10 @@ Run the full local stack:
 just dev
 ```
 
+No `.env` file is required for the default local stack. Optional managed
+provider credentials can be connected from Clotho settings; environment
+variables remain an escape hatch for automation and deployment.
+
 Local service defaults:
 
 | Service | URL |

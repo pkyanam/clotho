@@ -15,12 +15,19 @@
 
 mod actions;
 mod agents;
+pub mod auth;
+pub mod auth_provider;
 mod ci;
 pub mod computesdk_catalog;
 pub mod control;
 pub mod error;
 pub mod forgejo;
 mod issues;
+mod labels;
+mod merge_policy;
+mod milestones;
+mod notifications;
+mod providers;
 mod pulls;
 mod repos;
 mod secrets;
@@ -30,8 +37,8 @@ mod webhooks;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::http::{HeaderMap, StatusCode};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use clotho_common::pb::compute::v1::compute_client::ComputeClient;
 use clotho_common::pb::diff::v1::diff_client::DiffClient;
@@ -86,6 +93,14 @@ pub struct GatewayConfig {
     pub bootstrap_org_name: String,
     /// Human-facing name for the bootstrap org.
     pub bootstrap_org_display_name: String,
+    /// When true, requests without a valid Bearer token receive 401.
+    pub auth_required: bool,
+    /// Human AuthProvider id: `bootstrap` (default) or `clerk` (ADR-0018).
+    pub auth_provider: String,
+    /// Optional Clerk config when `auth_provider=clerk` (or for tests).
+    pub clerk: Option<auth_provider::ClerkConfig>,
+    /// Public git clone base URL surfaced in API responses.
+    pub public_git_url: String,
     pub forgejo: ForgejoConfig,
 }
 
@@ -108,6 +123,12 @@ pub(crate) struct AppState {
     pub(crate) pool: Option<sqlx::PgPool>,
     /// Deterministic Stage 11 bootstrap identity.
     pub(crate) bootstrap: control::Bootstrap,
+    /// Require Bearer auth when true (CLOTHO_AUTH_REQUIRED).
+    pub(crate) auth_required: bool,
+    /// Active human AuthProvider (bootstrap | clerk).
+    pub(crate) auth_provider: Arc<dyn auth_provider::AuthProvider>,
+    /// Sanitized public git URL for clone links in responses.
+    pub(crate) public_git_url: String,
     /// AES-256-GCM master key for secrets at rest (docs/adr/0014). None when
     /// CLOTHO_SECRETS_MASTER_KEY is unset — list still works; write/resolve fail clearly.
     pub(crate) secrets_crypto: Option<secrets::SecretsCrypto>,
@@ -172,6 +193,15 @@ pub fn router_with_pool(
             "CLOTHO_SECRETS_MASTER_KEY unset or invalid — secret write/resolve disabled (docs/adr/0014)"
         );
     }
+    let auth_provider_id = auth_provider::AuthProviderId::parse(&config.auth_provider)
+        .map_err(|e| clotho_common::Error::Config(e.to_string()))?;
+    let auth_provider = auth_provider::build_auth_provider(auth_provider_id, config.clerk.clone())
+        .map_err(|e| clotho_common::Error::Config(e.to_string()))?;
+    tracing::info!(
+        auth_provider = auth_provider.id().as_str(),
+        auth_required = config.auth_required,
+        "human AuthProvider ready"
+    );
     let state = Arc::new(AppState {
         vcs: VcsClient::new(lazy_channel(&config.vcs_grpc_url, "vcs")?)
             // ExportRepoArchive returns the git object DB; lift the 4 MiB cap.
@@ -192,12 +222,22 @@ pub fn router_with_pool(
         actions,
         pool,
         bootstrap,
+        auth_required: config.auth_required,
+        auth_provider,
+        public_git_url: config.public_git_url.clone(),
         secrets_crypto,
     });
     Ok(Router::new()
         .route("/healthz", get(healthz))
         // Stage 15: published OpenAPI contract (hand-maintained docs/openapi.yaml).
         .route("/openapi.yaml", get(openapi_yaml))
+        // Slice A: human API tokens and current user.
+        .route("/api/v1/me", get(auth::me_handler))
+        .route(
+            "/api/v1/tokens",
+            get(auth::list_tokens_handler).post(auth::create_token_handler),
+        )
+        .route("/api/v1/tokens/{id}", delete(auth::revoke_token_handler))
         // Stage 11: users, orgs, activity, and org-scoped repos.
         .route("/api/v1/users", get(control::list_users_handler))
         .route(
@@ -212,7 +252,12 @@ pub fn router_with_pool(
         .route("/api/v1/activity", get(control::list_activity_handler))
         // Repo CRUD and browser endpoints (Stage 3/6/11).
         .route("/api/v1/repos", post(create_repo).get(repos::list_repos))
-        .route("/api/v1/repos/{name}", get(repos::get_repo))
+        .route(
+            "/api/v1/repos/{name}",
+            get(repos::get_repo)
+                .patch(repos::update_repo)
+                .delete(repos::delete_repo),
+        )
         .route("/api/v1/repos/{name}/tree", get(repos::tree))
         .route("/api/v1/repos/{name}/file", get(repos::file))
         .route(
@@ -222,16 +267,36 @@ pub fn router_with_pool(
         .route("/api/v1/repos/{name}/oplog", get(repos::op_log))
         .route("/api/v1/repos/{name}/submit", post(submit_change))
         .route(
+            "/api/v1/repos/{name}/merge-policy",
+            get(merge_policy::get_merge_policy_handler).put(merge_policy::put_merge_policy_handler),
+        )
+        .route(
             "/api/v1/repos/{name}/issues",
             get(issues::list_issues).post(issues::create_issue),
         )
         .route(
             "/api/v1/repos/{name}/issues/{number}",
-            get(issues::get_issue),
+            get(issues::get_issue).patch(issues::update_issue),
         )
         .route(
             "/api/v1/repos/{name}/issues/{number}/comments",
             post(issues::create_comment),
+        )
+        .route(
+            "/api/v1/repos/{name}/labels",
+            get(labels::list_labels).post(labels::create_label),
+        )
+        .route(
+            "/api/v1/repos/{name}/milestones",
+            get(milestones::list_milestones).post(milestones::create_milestone),
+        )
+        .route(
+            "/api/v1/notifications",
+            get(notifications::list_notifications_handler),
+        )
+        .route(
+            "/api/v1/notifications/mark-read",
+            post(notifications::mark_read_handler),
         )
         .route(
             "/api/v1/repos/{name}/pulls",
@@ -240,11 +305,11 @@ pub fn router_with_pool(
         .route("/api/v1/repos/{name}/pulls/{number}", get(pulls::get_pull))
         .route(
             "/api/v1/repos/{name}/pulls/{number}/comments",
-            post(pulls::comment_on_pull),
+            get(pulls::list_pull_comments).post(pulls::comment_on_pull),
         )
         .route(
             "/api/v1/repos/{name}/pulls/{number}/reviews",
-            post(pulls::review_pull),
+            get(pulls::list_pull_reviews).post(pulls::review_pull),
         )
         .route(
             "/api/v1/repos/{name}/pulls/{number}/merge",
@@ -271,10 +336,13 @@ pub fn router_with_pool(
             "/api/v1/repos/{name}/actions/config",
             get(actions::get_config).put(actions::put_config),
         )
-        // Stage 12 canonical provider registry routes (docs/adr/0013).
-        .route("/api/v1/providers", get(actions::providers))
-        .route("/api/v1/providers/{provider}", get(actions::provider))
-        // Stage 10 aliases kept for SDK/web compatibility.
+        // Stage 12/17: provider registry + Provider Fabric layer filter (ADR-0019).
+        .route("/api/v1/providers", get(providers::list_fabric_providers))
+        .route(
+            "/api/v1/providers/{provider}",
+            get(providers::get_fabric_provider),
+        )
+        // Stage 10 aliases kept for SDK/web compatibility (compute-only).
         .route("/api/v1/compute/providers", get(actions::providers))
         .route(
             "/api/v1/compute/providers/{provider}",
@@ -288,6 +356,21 @@ pub fn router_with_pool(
             "/api/v1/repos/{name}/agent-sessions",
             get(agents::repo_sessions),
         )
+        // Slice C: agent identity admin (proxies agent-gateway, ADR-0016).
+        .route(
+            "/api/v1/agents",
+            get(agents::list_agents).post(agents::create_agent),
+        )
+        .route("/api/v1/agents/{name}", get(agents::get_agent))
+        .route(
+            "/api/v1/agents/{name}/tokens",
+            get(agents::list_tokens).post(agents::mint_token),
+        )
+        .route(
+            "/api/v1/agents/{name}/tokens/{token_id}",
+            delete(agents::revoke_token).patch(agents::update_token_scopes),
+        )
+        .route("/api/v1/agents/{name}/audit", get(agents::agent_audit))
         // Forgejo push webhook → Stage 7 CI (docs/adr/0008). Registered per
         // repo at creation; verified by shared-secret HMAC.
         .route("/api/v1/webhooks/forgejo", post(webhooks::forgejo))
@@ -324,10 +407,11 @@ async fn openapi_yaml() -> impl axum::response::IntoResponse {
 #[derive(Serialize)]
 struct CreateRepoResponse {
     name: String,
-    /// Forgejo/clone-path owner (the git owner, not the Clotho org name).
+    /// Git clone-path owner.
     owner: String,
     /// Clotho org that owns this repo.
     owner_org: String,
+    description: String,
     visibility: String,
     default_branch: String,
     clone_url: String,
@@ -337,7 +421,7 @@ struct CreateRepoResponse {
     operation_id: String,
     /// The empty initial commit that seeds `refs/heads/main`.
     initial_commit_id: String,
-    forgejo: RepoInfo,
+    info: RepoInfo,
 }
 
 #[derive(Deserialize)]
@@ -399,9 +483,11 @@ struct SubmitChangeJson {
 /// repo ownership/visibility/default-branch metadata to Postgres first.
 async fn create_repo(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<control::CreateRepoRequest>,
 ) -> Result<(StatusCode, Json<CreateRepoResponse>), ApiError> {
     control::valid_name(&req.name)?;
+    let auth = auth::resolve_auth(&headers, &state).await?;
 
     // Resolve the owning org before provisioning anything.
     let owner_org = if req.owner_org.is_empty() {
@@ -410,7 +496,11 @@ async fn create_repo(
         req.owner_org.clone()
     };
     let (org_id, org_name, forgejo_owner) = match &state.pool {
-        Some(pool) => control::resolve_org(pool, &state.bootstrap, &owner_org).await?,
+        Some(pool) => {
+            let resolved = control::resolve_org(pool, &state.bootstrap, &owner_org).await?;
+            control::require_org_role(pool, &resolved.0, &auth.user_id, "admin").await?;
+            resolved
+        }
         None => (
             state.bootstrap.org_id.clone(),
             state.bootstrap.org_name.clone(),
@@ -454,7 +544,7 @@ async fn create_repo(
         Some(
             control::insert_repo(
                 pool,
-                &state.bootstrap,
+                &auth.user_id,
                 &req,
                 &(org_id, org_name.clone(), forgejo_owner.clone()),
                 &forgejo_repo,
@@ -479,7 +569,7 @@ async fn create_repo(
 
     let provider = state.actions.default_provider();
     let configured = state.actions.provider_configured(&provider);
-    let base_url = state.forgejo.config().base_url.clone();
+    let base_url = state.public_git_url.clone();
     let mut repo_info = match &clotho_repo {
         Some(c) => {
             control::build_repo_info(c, Some(&forgejo_repo), &base_url, &provider, configured)
@@ -501,6 +591,7 @@ async fn create_repo(
             name: init.name,
             owner: forgejo_owner,
             owner_org: org_name,
+            description: req.description.clone(),
             visibility: req.visibility,
             default_branch: req.default_branch,
             clone_url: repo_info.clone_url.clone(),
@@ -508,7 +599,7 @@ async fn create_repo(
             configured,
             operation_id: init.operation_id,
             initial_commit_id: initial.commit_id,
-            forgejo: repo_info,
+            info: repo_info,
         }),
     ))
 }
@@ -517,9 +608,14 @@ async fn create_repo(
 /// engine still owns tree construction and git object writes.
 async fn commit_repo(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Json(req): Json<CommitRepoRequest>,
 ) -> Result<(StatusCode, Json<CommitRepoResponse>), ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
+    if let Some(pool) = &state.pool {
+        control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
+    }
     if req.message.trim().is_empty() {
         return Err(ApiError::InvalidRequest("message is required".into()));
     }
@@ -562,9 +658,14 @@ async fn commit_repo(
 /// Submit a commit to the merge queue through the REST edge.
 async fn submit_change(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Json(req): Json<SubmitChangeBody>,
 ) -> Result<Json<SubmitChangeJson>, ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
+    if let Some(pool) = &state.pool {
+        control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
+    }
     let mut queue = state.queue.clone();
     let response = queue
         .submit_change(SubmitChangeRequest {

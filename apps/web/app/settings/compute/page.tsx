@@ -28,26 +28,26 @@ export default async function ComputeSettingsPage() {
   let defaultProviderId = "";
   let error: string | null = null;
   let upstreams: Upstream[] = [];
-  const orgs = await api()
+  const orgs = await (await api())
     .orgs()
     .catch(() => []);
   const primaryOrg = orgs[0]?.name ?? "clotho";
 
   try {
-    const list = await api().computeProviderList();
+    const list = await (await api()).computeProviderList();
     providers = list.providers;
     defaultProviderId = list.default_provider_id;
   } catch (e) {
     error = e instanceof Error ? e.message : "failed to load providers";
     try {
-      providers = await api().computeProviders();
+      providers = await (await api()).computeProviders();
     } catch {
       providers = [];
     }
   }
 
   try {
-    const cat = await api().listComputesdkUpstreams();
+    const cat = await (await api()).listComputesdkUpstreams();
     upstreams = cat.upstreams;
   } catch {
     upstreams = [];

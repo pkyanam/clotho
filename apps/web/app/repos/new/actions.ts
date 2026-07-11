@@ -10,6 +10,6 @@ export async function createRepo(formData: FormData): Promise<void> {
   const visibility = String(formData.get("visibility") ?? "public");
   if (!name) throw new Error("name is required");
 
-  const repo = await api().createRepo(name, { description, visibility });
+  const repo = await (await api()).createRepo(name, { description, visibility });
   redirect(`/repos/${repo.name}`);
 }

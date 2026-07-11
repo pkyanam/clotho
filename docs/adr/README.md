@@ -19,3 +19,11 @@ Context → Decision → Consequences. Supersede rather than edit.
 | [0012](0012-actions-compute-control-plane.md) | Clotho owns Actions and the compute control plane | Accepted |
 | [0013](0013-compute-provider-registry.md) | Capability-aware provider registry; ComputeSDK TS sidecar behind CCI | Accepted |
 | [0014](0014-secrets-storage-and-resolution.md) | Secrets storage (encrypted Postgres) and compute credential resolution | Accepted |
+| [0015](0015-human-api-tokens.md) | Human API tokens, bootstrap auth, and permission enforcement | Accepted |
+| [0016](0016-agent-admin-via-edge.md) | Agent admin proxied through the REST edge; human-only | Accepted |
+| [0017](0017-merge-policy.md) | Clotho-owned merge policy and honest review threads | Accepted |
+| [0018](0018-auth-provider-clerk.md) | AuthProvider — Clerk for humans, Clotho for agents | Accepted |
+| [0019](0019-provider-fabric.md) | Provider Fabric — pluggable compute, storage, network | Accepted |
+| [0020](0020-arachne-vcs-path.md) | Arachne on the VCS path — large files, LFS, repo kinds | Accepted |
+| [0021](0021-tailscale-network-provider.md) | Tailscale NetworkProvider — private reach and BYOC | Accepted |
+| [0022](0022-agent-runtime-v2.md) | Agent runtime v2 — durable queue, sandboxes, provenance | Accepted |

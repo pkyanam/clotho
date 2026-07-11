@@ -125,7 +125,11 @@ impl BoxProvider {
     }
 
     /// Create a one-shot box (auto-archives after TTL when set).
-    async fn create_box(&self, api_key: &str, env: &std::collections::HashMap<String, String>) -> Result<String, ComputeError> {
+    async fn create_box(
+        &self,
+        api_key: &str,
+        env: &std::collections::HashMap<String, String>,
+    ) -> Result<String, ComputeError> {
         let mut body = json!({});
         if let Some(ttl) = self.config.default_ttl_secs {
             body["ttlSeconds"] = json!(ttl);
@@ -279,9 +283,7 @@ impl BoxProvider {
         // staged relative file into place so existing CI scripts keep working.
         if path.starts_with('/') && path != rel {
             let parent = path.rsplit_once('/').map(|(p, _)| p).unwrap_or("/");
-            let cmd = format!(
-                "mkdir -p '{parent}' && cp -f -- '{rel}' '{path}'"
-            );
+            let cmd = format!("mkdir -p '{parent}' && cp -f -- '{rel}' '{path}'");
             let (code, out) = self
                 .execute(api_key, id, &cmd, &Default::default(), 30)
                 .await?;
@@ -324,18 +326,9 @@ impl BoxProvider {
             .await
             .map_err(Self::provider)?;
         let value = Self::json_or_err(resp, "execute command").await?;
-        let exit_code = value
-            .get("exitCode")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(-1) as i32;
-        let stdout = value
-            .get("stdout")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let stderr = value
-            .get("stderr")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let exit_code = value.get("exitCode").and_then(|v| v.as_i64()).unwrap_or(-1) as i32;
+        let stdout = value.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
+        let stderr = value.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
         let timed_out = value
             .get("timedOut")
             .and_then(|v| v.as_bool())
@@ -407,9 +400,8 @@ impl BoxProvider {
                 "box {what}: {status}: {text}"
             )));
         }
-        let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
-            ComputeError::Provider(format!("box {what}: bad JSON: {e}: {text}"))
-        })?;
+        let value: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| ComputeError::Provider(format!("box {what}: bad JSON: {e}: {text}")))?;
         if value.get("ok").and_then(|v| v.as_bool()) == Some(false) {
             let msg = value
                 .get("message")
@@ -605,7 +597,10 @@ mod tests {
 
     #[test]
     fn relative_path_strips_workdir_prefixes() {
-        assert_eq!(BoxProvider::relative_path("/workspace/repo.tar"), "repo.tar");
+        assert_eq!(
+            BoxProvider::relative_path("/workspace/repo.tar"),
+            "repo.tar"
+        );
         assert_eq!(BoxProvider::relative_path("repo.tar"), "repo.tar");
         assert_eq!(BoxProvider::relative_path("/tmp/ci.sh"), "ci.sh");
     }

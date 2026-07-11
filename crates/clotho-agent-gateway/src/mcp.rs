@@ -145,6 +145,12 @@ pub struct CreateIssueParams {
     pub repo: String,
     pub title: String,
     pub body: Option<String>,
+    /// Label names to apply on create.
+    pub labels: Option<Vec<String>>,
+    /// Assignee logins.
+    pub assignees: Option<Vec<String>>,
+    /// Milestone id.
+    pub milestone: Option<i64>,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -549,7 +555,9 @@ impl AgentGateway {
     // Stage 15: collab + Actions + platform (via REST edge)
     // -----------------------------------------------------------------------
 
-    #[tool(description = "List issues on a repository (open|closed|all). Backed by the Clotho REST edge.")]
+    #[tool(
+        description = "List issues on a repository (open|closed|all). Backed by the Clotho REST edge."
+    )]
     async fn list_issues(
         &self,
         Parameters(params): Parameters<ListIssuesParams>,
@@ -579,12 +587,26 @@ impl AgentGateway {
         let repo = params.repo.clone();
         let rest = self.rest.clone();
         self.run_tool(&ctx, "create_issue", &repo, args, async move {
+            let mut payload = json!({
+                "title": params.title,
+                "body": params.body.unwrap_or_default(),
+            });
+            if let Some(labels) = params.labels {
+                if !labels.is_empty() {
+                    payload["labels"] = json!(labels);
+                }
+            }
+            if let Some(assignees) = params.assignees {
+                if !assignees.is_empty() {
+                    payload["assignees"] = json!(assignees);
+                }
+            }
+            if let Some(milestone) = params.milestone {
+                payload["milestone"] = json!(milestone);
+            }
             rest.post(
                 &format!("/api/v1/repos/{}/issues", urlencoding_path(&params.repo)),
-                json!({
-                    "title": params.title,
-                    "body": params.body.unwrap_or_default(),
-                }),
+                payload,
             )
             .await
         })
@@ -883,7 +905,9 @@ impl AgentGateway {
         .await
     }
 
-    #[tool(description = "Get the file tree for a repository at a commit (default: main head). REST edge.")]
+    #[tool(
+        description = "Get the file tree for a repository at a commit (default: main head). REST edge."
+    )]
     async fn get_tree(
         &self,
         Parameters(params): Parameters<GetTreeParams>,

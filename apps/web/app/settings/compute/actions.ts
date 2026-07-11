@@ -26,7 +26,7 @@ export async function connectProvider(provider: string, formData: FormData) {
     if (Object.keys(credentials).length === 0 && !apiKey) {
       throw new Error("at least one credential is required");
     }
-    await api().connectProvider(provider, {
+    await (await api()).connectProvider(provider, {
       apiKey: apiKey || undefined,
       org: org || undefined,
       upstream: upstream || undefined,
@@ -37,7 +37,7 @@ export async function connectProvider(provider: string, formData: FormData) {
     if (!apiKey) {
       throw new Error("api key is required");
     }
-    await api().connectProvider(provider, {
+    await (await api()).connectProvider(provider, {
       apiKey,
       org: org || undefined,
     });
@@ -54,7 +54,7 @@ export async function disconnectProvider(
   formData: FormData,
 ) {
   const org = String(formData.get("org") ?? "").trim();
-  await api().disconnectProvider(provider, { org: org || undefined });
+  await (await api()).disconnectProvider(provider, { org: org || undefined });
   revalidatePath("/settings/compute");
   revalidatePath("/settings/secrets");
   revalidatePath("/");
