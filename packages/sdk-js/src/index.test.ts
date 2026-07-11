@@ -169,6 +169,38 @@ describe("ClothoClient", () => {
     );
   });
 
+  it("creates and verifies immutable repository releases", async () => {
+    const release = { version: "v1.0.0", commit_id: "c1", verified: true };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(release, 201))
+      .mockResolvedValueOnce(jsonResponse({ releases: [release] }))
+      .mockResolvedValueOnce(jsonResponse(release));
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    await client.createRelease("weave", "v1.0.0", { commitId: "c1" });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://gateway.test/api/v1/repos/weave/releases",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          version: "v1.0.0",
+          commit_id: "c1",
+          require_ready: true,
+        }),
+      }),
+    );
+    expect(await client.releases("weave")).toHaveLength(1);
+    await client.release("weave", "v1.0.0");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://gateway.test/api/v1/repos/weave/releases/v1.0.0",
+      expect.objectContaining({ headers: {} }),
+    );
+  });
+
   it("surfaces gateway error bodies as ClothoApiError", async () => {
     const { client } = clientWith(
       jsonResponse({ error: 'repo "weave" already exists' }, 409),

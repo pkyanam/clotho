@@ -544,6 +544,78 @@ paths:
         "403":
           $ref: "#/components/responses/Error"
 
+  /api/v1/repos/{name}/releases:
+    get:
+      tags: [repos]
+      operationId: listRepoReleases
+      summary: List immutable Clotho releases for a repository
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      responses:
+        "200":
+          description: Release summaries with live manifest verification
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [releases]
+                properties:
+                  releases:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RepoReleaseSummary"
+    post:
+      tags: [repos]
+      operationId: createRepoRelease
+      summary: Bind an immutable version to a commit and semantic artifact manifest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRepoRelease"
+      responses:
+        "201":
+          description: Immutable release created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepoRelease"
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/repos/{name}/releases/{version}:
+    get:
+      tags: [repos]
+      operationId: getRepoRelease
+      summary: Get and verify an immutable repository release
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Release and frozen semantic manifest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepoRelease"
+        "404":
+          $ref: "#/components/responses/Error"
+
   /api/v1/repos/{name}/hub-imports:
     get:
       tags: [repos, providers]
@@ -2701,6 +2773,59 @@ components:
           format: int64
         truncated:
           type: boolean
+    CreateRepoRelease:
+      type: object
+      required: [version]
+      properties:
+        version:
+          type: string
+          pattern: "^[A-Za-z0-9](?:[A-Za-z0-9._+-]{0,98}[A-Za-z0-9_+-])?$"
+        commit_id:
+          type: string
+          description: Empty resolves to the repository main head
+        require_ready:
+          type: boolean
+          default: true
+    RepoReleaseSummary:
+      type: object
+      required: [id, version, commit_id, manifest_sha256, kind, total_files, total_bytes, ready, verified, created_by, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        version:
+          type: string
+        commit_id:
+          type: string
+        manifest_sha256:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        kind:
+          type: string
+          enum: [code, model, dataset]
+        total_files:
+          type: integer
+          format: int64
+        total_bytes:
+          type: integer
+          format: int64
+        ready:
+          type: boolean
+        verified:
+          type: boolean
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    RepoRelease:
+      allOf:
+        - $ref: "#/components/schemas/RepoReleaseSummary"
+        - type: object
+          required: [manifest]
+          properties:
+            manifest:
+              $ref: "#/components/schemas/ArtifactManifest"
     HubImportRequest:
       type: object
       required: [repo_id]

@@ -213,6 +213,24 @@ export interface HubImportJob {
   completed_at: string | null;
 }
 
+export interface RepoReleaseSummary {
+  id: string;
+  version: string;
+  commit_id: string;
+  manifest_sha256: string;
+  kind: string;
+  total_files: number;
+  total_bytes: number;
+  ready: boolean;
+  verified: boolean;
+  created_by: string;
+  created_at: string;
+}
+
+export interface RepoRelease extends RepoReleaseSummary {
+  manifest: ArtifactManifest;
+}
+
 export interface FileContent {
   commit_id: string;
   path: string;
@@ -945,6 +963,35 @@ export class ClothoClient {
     return this.request(
       `/api/v1/repos/${encodeURIComponent(name)}/hub-imports/${encodeURIComponent(id)}`,
     );
+  }
+
+  async releases(name: string): Promise<RepoReleaseSummary[]> {
+    const response = await this.request<{ releases: RepoReleaseSummary[] }>(
+      `/api/v1/repos/${encodeURIComponent(name)}/releases`,
+    );
+    return response.releases;
+  }
+
+  release(name: string, version: string): Promise<RepoRelease> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/releases/${encodeURIComponent(version)}`,
+    );
+  }
+
+  createRelease(
+    name: string,
+    version: string,
+    options?: { commitId?: string; requireReady?: boolean },
+  ): Promise<RepoRelease> {
+    return this.request(`/api/v1/repos/${encodeURIComponent(name)}/releases`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        version,
+        commit_id: options?.commitId ?? "",
+        require_ready: options?.requireReady ?? true,
+      }),
+    });
   }
 
   file(name: string, path: string, commitId?: string): Promise<FileContent> {

@@ -31,6 +31,7 @@ mod milestones;
 mod notifications;
 mod providers;
 mod pulls;
+mod releases;
 mod repos;
 mod secrets;
 mod status;
@@ -291,6 +292,14 @@ pub fn router_with_pool(
         )
         .route("/api/v1/repos/{name}/file", get(repos::file))
         .route("/api/v1/repos/{name}/storage", get(repos::storage_stats))
+        .route(
+            "/api/v1/repos/{name}/releases",
+            get(releases::list_releases).post(releases::create_release),
+        )
+        .route(
+            "/api/v1/repos/{name}/releases/{version}",
+            get(releases::get_release),
+        )
         .route(
             "/api/v1/repos/{name}/commits",
             get(repos::commits)

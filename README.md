@@ -138,6 +138,10 @@ Large imports are durable jobs with live file/byte progress, scanner summaries,
 commit provenance, errors, and automatic replay after gateway restarts.
 Database leases and worker heartbeats fence stale workers, so multiple gateway
 replicas can share the queue without importing the same snapshot concurrently.
+Clotho releases then freeze a human version, Git commit, semantic artifact
+manifest, and SHA-256 attestation in the control plane. Releases are immutable
+and re-verified on every read, making Clotho—not a backing Hub—the registry of
+record for model, dataset, and code provenance.
 
 Tailscale is a first-class NetworkProvider: connect an org OAuth client from
 Clotho settings, verify it live, and mark repositories `public` or `tailscale`

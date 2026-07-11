@@ -13,6 +13,7 @@ import {
 import { PresencePanel } from "src/components/presence-panel";
 import { MarkdownCard } from "src/components/markdown-card";
 import { RepoNav } from "src/components/repo-nav";
+import { createRelease } from "./release-actions";
 import {
   EmptyState,
   PageFrame,
@@ -35,12 +36,13 @@ export default async function RepoPage({
     if (e instanceof ClothoApiError && e.status === 404) notFound();
     throw e;
   });
-  const [tree, commits, opLog, storage, manifest] = await Promise.all([
+  const [tree, commits, opLog, storage, manifest, releases] = await Promise.all([
     client.tree(name),
     client.commits(name, { limit: 20 }),
     client.opLog(name, 20),
     client.storageStats(name),
     client.artifacts(name),
+    client.releases(name),
   ]);
   const [pulls, issues, branches, statuses, sessions, actionRuns] =
     await Promise.all([
@@ -254,6 +256,75 @@ export default async function RepoPage({
               </div>
             </section>
           )}
+
+          <section id="releases">
+            <SectionHeader
+              title="releases"
+              meta={`${releases.length} immutable`}
+            />
+            <div className="mt-4 border border-kumo-hairline">
+              {releases.length > 0 && (
+                <ul className="divide-y divide-kumo-hairline">
+                  {releases.map((release) => (
+                    <li
+                      key={release.id}
+                      className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-[0.8125rem]"
+                    >
+                      <span>
+                        <strong className="font-medium text-kumo-default">
+                          {release.version}
+                        </strong>
+                        <span className="ml-3 text-kumo-inactive">
+                          {shortId(release.commit_id)} · {release.total_files} files ·{" "}
+                          {formatBytes(release.total_bytes)}
+                        </span>
+                      </span>
+                      <span className="flex items-center gap-2 text-kumo-inactive">
+                        <Badge variant="outline">
+                          {release.verified ? "✓ verified" : "invalid"}
+                        </Badge>
+                        <code>sha256:{shortId(release.manifest_sha256)}</code>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {releases.length === 0 && (
+                <p className="px-4 py-4 text-[0.8125rem] text-kumo-inactive">
+                  no immutable releases yet. a release freezes this commit and its
+                  semantic artifact manifest in Clotho.
+                </p>
+              )}
+              <form
+                action={createRelease.bind(null, name)}
+                className="flex flex-wrap items-end gap-3 border-t border-kumo-hairline bg-kumo-base px-4 py-3"
+              >
+                <label className="min-w-48 grow text-[0.75rem] text-kumo-inactive">
+                  version
+                  <input
+                    name="version"
+                    required
+                    maxLength={100}
+                    pattern="[A-Za-z0-9][A-Za-z0-9._+\-]*"
+                    placeholder="v1.0.0"
+                    className="mt-1 block w-full border border-kumo-hairline bg-kumo-control px-3 py-2 text-[0.875rem] text-kumo-default outline-none focus:border-kumo-contrast"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={!manifest.readiness.ready}
+                  className="border border-kumo-contrast px-4 py-2 text-[0.8125rem] text-kumo-default disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  create release
+                </button>
+                {!manifest.readiness.ready && (
+                  <span className="w-full text-[0.75rem] text-kumo-inactive">
+                    resolve artifact readiness warnings before publishing.
+                  </span>
+                )}
+              </form>
+            </div>
+          </section>
 
           {cardFile?.content && (
             <section>

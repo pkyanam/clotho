@@ -141,6 +141,21 @@ Thirty-second database leases are renewed by worker heartbeats; an expired job
 is reclaimed automatically, while a healthy worker cannot be stolen by another
 gateway replica.
 
+Create an immutable, tamper-evident release from the current main commit. Model
+and dataset releases fail closed unless their card, primary artifact, and
+structured metadata are publishable:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/repos/tiny-gpt/releases \
+  -H 'content-type: application/json' \
+  -d '{"version":"v1.0.0"}' | jq
+curl -s http://localhost:8080/api/v1/repos/tiny-gpt/releases/v1.0.0 | jq
+```
+
+The frozen manifest is bound to its Git commit and SHA-256 digest. Every read
+recomputes the digest and exposes `verified`; release versions cannot be
+overwritten or deleted.
+
 CSV, TSV, and JSONL previews are deliberately bounded: the gateway streams at
 most 256 KiB from Arachne and returns at most 100 rows. Large datasets never
 need to be materialized in gateway memory just to inspect their shape.

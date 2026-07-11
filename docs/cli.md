@@ -168,6 +168,8 @@ clotho --json repo artifacts my-dataset
 clotho repo preview my-dataset data/train.jsonl --limit 25
 clotho repo import-hf my-model hf-internal-testing/tiny-random-gpt2 --revision main
 clotho repo imports my-model
+clotho repo release my-model v1.0.0
+clotho repo releases my-model
 ```
 
 Use repeated `--path` flags for a selective snapshot. Imports default to 200

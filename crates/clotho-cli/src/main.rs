@@ -151,7 +151,7 @@ async fn cmd_auth(config: &Config, mut args: Vec<String>) -> Result<()> {
 
 async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
     let Some(sub) = args.first().cloned() else {
-        bail!("usage: clotho repo <init|list|status|log|commit|submit|tree|artifacts|preview|import-hf|imports|get> ...");
+        bail!("usage: clotho repo <init|list|status|log|commit|submit|tree|artifacts|preview|import-hf|imports|release|releases|get> ...");
     };
     args.remove(0);
     match sub.as_str() {
@@ -476,6 +476,68 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
                             "  failed"
                         } else {
                             ""
+                        }
+                    );
+                }
+            })
+        }
+        "release" => {
+            if args.len() < 2 {
+                bail!("usage: clotho repo release <repo> <version> [--commit <id>] [--allow-incomplete]");
+            }
+            let repo = args.remove(0);
+            let version = args.remove(0);
+            let commit_id = take_option(&mut args, "--commit").unwrap_or_default();
+            let allow_incomplete = take_flag(&mut args, "--allow-incomplete");
+            if !args.is_empty() {
+                bail!("unrecognized repo release arguments: {}", args.join(" "));
+            }
+            let body = request_value(
+                config,
+                reqwest::Method::POST,
+                &format!("/api/v1/repos/{repo}/releases"),
+                Some(json!({
+                    "version": version,
+                    "commit_id": commit_id,
+                    "require_ready": !allow_incomplete,
+                })),
+            )
+            .await?;
+            emit(config, &body, || {
+                println!(
+                    "released {} at {} · manifest sha256:{} · {}",
+                    body["version"].as_str().unwrap_or(&version),
+                    short(body["commit_id"].as_str().unwrap_or("")),
+                    short(body["manifest_sha256"].as_str().unwrap_or("")),
+                    if body["verified"].as_bool().unwrap_or(false) {
+                        "verified"
+                    } else {
+                        "verification failed"
+                    }
+                );
+            })
+        }
+        "releases" => {
+            let repo = require_one(&args, "clotho repo releases <repo>")?;
+            let body: Value = request_json(
+                config,
+                reqwest::Method::GET,
+                &format!("/api/v1/repos/{repo}/releases"),
+                None,
+            )
+            .await?;
+            emit(config, &body, || {
+                for release in body["releases"].as_array().into_iter().flatten() {
+                    println!(
+                        "{}  {}  {} files / {} bytes  {}",
+                        release["version"].as_str().unwrap_or("?"),
+                        short(release["commit_id"].as_str().unwrap_or("")),
+                        release["total_files"].as_u64().unwrap_or(0),
+                        release["total_bytes"].as_u64().unwrap_or(0),
+                        if release["verified"].as_bool().unwrap_or(false) {
+                            "verified"
+                        } else {
+                            "INVALID"
                         }
                     );
                 }
@@ -2038,6 +2100,8 @@ fn usage() {
     clotho repo preview <repo> <csv|tsv|jsonl-path> [--limit 1..100]
     clotho repo import-hf <target> <namespace/name> [--revision <rev>] [--path <path>]... [--max-files N] [--max-bytes N]
     clotho repo imports <repo>
+    clotho repo release <repo> <version> [--commit <id>] [--allow-incomplete]
+    clotho repo releases <repo>
     clotho repo commit <repo> -m <msg> --file <path> [...] [--submit]
     clotho repo submit <repo> <commit-id>
 
