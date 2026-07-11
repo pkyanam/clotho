@@ -3,6 +3,14 @@ packages:
   - "packages/*"
   - "services/*"
 
+overrides:
+  # Security floors for transitive optional ComputeSDK provider trees.
+  lodash: 4.18.1
+  postcss: 8.5.16
+  protobufjs: 8.7.0
+  undici: 8.5.0
+  xml2js: 0.5.0
+
 allowBuilds:
   # vitest -> esbuild: its install script just links the prebuilt binary.
   esbuild: true

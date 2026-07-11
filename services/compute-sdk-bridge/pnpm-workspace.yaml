@@ -3,6 +3,14 @@
 packages:
   - "."
 
+# Match the monorepo security floors in standalone Docker builds.
+overrides:
+  lodash: 4.18.1
+  postcss: 8.5.16
+  protobufjs: 8.7.0
+  undici: 8.5.0
+  xml2js: 0.5.0
+
 allowBuilds:
   bufferutil: true
   cbor-extract: true
