@@ -307,6 +307,7 @@ pub fn router_with_pool(
             get(releases::get_release_file).head(releases::head_release_file),
         )
         // Hugging Face-compatible, read-only projection over immutable Clotho releases.
+        .route("/api/models", get(hf_compat::list_models))
         .route("/api/models/{owner}/{name}", get(hf_compat::model_info))
         .route(
             "/api/models/{owner}/{name}/revision/{revision}",
@@ -320,6 +321,7 @@ pub fn router_with_pool(
             "/{owner}/{name}/resolve/{revision}/{*path}",
             get(hf_compat::model_resolve_get).head(hf_compat::model_resolve_head),
         )
+        .route("/api/datasets", get(hf_compat::list_datasets))
         .route("/api/datasets/{owner}/{name}", get(hf_compat::dataset_info))
         .route(
             "/api/datasets/{owner}/{name}/revision/{revision}",

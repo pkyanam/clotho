@@ -192,6 +192,8 @@ Immutable releases are projected through Hugging Face's standard read API:
 from huggingface_hub import HfApi
 
 hub = HfApi(endpoint="http://localhost:8080", token="clotho_...")
+models = list(hub.list_models(search="text-generation", limit=20))
+datasets = list(hub.list_datasets(search="training", limit=20))
 info = hub.model_info("clotho/tiny-gpt", revision="v1.0.0", files_metadata=True)
 files = hub.list_repo_files("clotho/tiny-gpt", revision="v1.0.0")
 ```

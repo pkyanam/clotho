@@ -702,6 +702,26 @@ paths:
         "200":
           description: Release file metadata in headers
 
+  /api/models:
+    get:
+      tags: [repos, providers]
+      operationId: huggingFaceListModels
+      summary: Search permission-checked models with verified Clotho releases
+      parameters:
+        - {name: search, in: query, schema: {type: string}}
+        - {name: filter, in: query, schema: {type: string}, description: Match task, library, language, dataset, or card tags}
+        - {name: author, in: query, schema: {type: string}}
+        - {name: pipeline_tag, in: query, schema: {type: string}}
+        - {name: gated, in: query, schema: {type: boolean}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 0}}
+        - {name: full, in: query, schema: {type: boolean, default: false}}
+      responses:
+        "200":
+          description: Hugging Face ModelInfo-compatible catalog entries
+          content:
+            application/json:
+              schema: {type: array, items: {type: object}}
+
   /api/models/{owner}/{name}:
     get:
       tags: [repos, providers]
@@ -770,6 +790,24 @@ paths:
         - {name: path, in: path, required: true, schema: {type: string}}
       responses:
         "200": {description: Immutable file headers}
+
+  /api/datasets:
+    get:
+      tags: [repos, providers]
+      operationId: huggingFaceListDatasets
+      summary: Search permission-checked datasets with verified Clotho releases
+      parameters:
+        - {name: search, in: query, schema: {type: string}}
+        - {name: filter, in: query, schema: {type: string}, description: Match task, format, language, or card tags}
+        - {name: author, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 0}}
+        - {name: full, in: query, schema: {type: boolean, default: false}}
+      responses:
+        "200":
+          description: Hugging Face DatasetInfo-compatible catalog entries
+          content:
+            application/json:
+              schema: {type: array, items: {type: object}}
 
   /api/datasets/{owner}/{name}:
     get:

@@ -35,6 +35,20 @@ pub struct TreeCompatQuery {
     pub expand: bool,
 }
 
+#[derive(Deserialize, Default)]
+pub struct ListCompatQuery {
+    pub search: Option<String>,
+    pub filter: Option<String>,
+    pub author: Option<String>,
+    pub pipeline_tag: Option<String>,
+    pub gated: Option<bool>,
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub full: bool,
+    #[serde(default, rename = "cardData")]
+    pub card_data: bool,
+}
+
 async fn snapshot(
     state: &AppState,
     headers: &HeaderMap,
@@ -81,6 +95,104 @@ pub async fn dataset_info(
     repo_info(state, headers, owner, name, query, "dataset").await
 }
 
+pub async fn list_models(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<ListCompatQuery>,
+) -> Result<Json<Vec<Value>>, ApiError> {
+    list_hub_repos(state, headers, query, "model").await
+}
+
+pub async fn list_datasets(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<ListCompatQuery>,
+) -> Result<Json<Vec<Value>>, ApiError> {
+    list_hub_repos(state, headers, query, "dataset").await
+}
+
+async fn list_hub_repos(
+    state: Arc<AppState>,
+    headers: HeaderMap,
+    query: ListCompatQuery,
+    kind: &str,
+) -> Result<Json<Vec<Value>>, ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("Hub compatibility requires the control plane".into()))?;
+    let candidates = control::list_repos_with_orgs(pool).await?;
+    let search = query.search.as_deref().map(str::to_ascii_lowercase);
+    let filter = query.filter.as_deref().map(str::to_ascii_lowercase);
+    let author = query.author.as_deref().map(str::to_ascii_lowercase);
+    let pipeline_tag = query.pipeline_tag.as_deref().map(str::to_ascii_lowercase);
+    let limit = query.limit.unwrap_or(usize::MAX);
+    if limit == 0 {
+        return Ok(Json(Vec::new()));
+    }
+    let mut results = Vec::new();
+    for candidate in candidates {
+        if query.gated == Some(true)
+            || candidate.repo.kind != kind
+            || author
+                .as_ref()
+                .is_some_and(|author| candidate.org_name.to_ascii_lowercase() != *author)
+        {
+            continue;
+        }
+        match control::require_repo_permission(pool, &candidate.repo.name, &auth.user_id, "read")
+            .await
+        {
+            Ok(_) => {}
+            Err(ApiError::Forbidden(_) | ApiError::NotFound(_)) => continue,
+            Err(error) => return Err(error),
+        }
+        let release =
+            match releases::resolve_release_snapshot(pool, &candidate.repo.id, "main").await {
+                Ok(release) => release,
+                Err(ApiError::NotFound(_) | ApiError::Conflict(_)) => continue,
+                Err(error) => return Err(error),
+            };
+        let searchable = format!(
+            "{}/{} {} {}",
+            candidate.org_name,
+            candidate.repo.name,
+            candidate.repo.description,
+            release.manifest["metadata"]
+        )
+        .to_ascii_lowercase();
+        if search
+            .as_ref()
+            .is_some_and(|needle| !searchable.contains(needle))
+        {
+            continue;
+        }
+        if filter
+            .as_ref()
+            .is_some_and(|needle| !searchable.contains(needle))
+            || pipeline_tag.as_ref().is_some_and(|tag| {
+                release.manifest["metadata"]["pipeline_tag"]
+                    .as_str()
+                    .map(str::to_ascii_lowercase)
+                    .as_deref()
+                    != Some(tag.as_str())
+            })
+        {
+            continue;
+        }
+        results.push(repo_info_value(
+            &candidate,
+            release,
+            query.full || query.card_data,
+        ));
+        if results.len() == limit {
+            break;
+        }
+    }
+    Ok(Json(results))
+}
+
 pub async fn model_info_revision(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -111,21 +223,29 @@ async fn repo_info(
 ) -> Result<Json<Value>, ApiError> {
     let revision = query.revision.as_deref().unwrap_or("main");
     let (repo, release) = snapshot(&state, &headers, &owner, &name, revision, kind).await?;
+    Ok(Json(repo_info_value(&repo, release, query.files_metadata)))
+}
+
+fn repo_info_value(
+    repo: &control::RepoWithOrg,
+    release: ReleaseSnapshot,
+    files_metadata: bool,
+) -> Value {
     let artifacts = release.manifest["artifacts"]
         .as_array()
         .cloned()
         .unwrap_or_default();
     let siblings = artifacts
         .iter()
-        .map(|artifact| sibling(artifact, &release.commit_id, query.files_metadata))
+        .map(|artifact| sibling(artifact, &release.commit_id, files_metadata))
         .collect::<Vec<_>>();
     let metadata = release.manifest["metadata"].clone();
-    let tags = discovery_tags(&metadata, kind);
-    let id = format!("{owner}/{name}");
-    Ok(Json(json!({
+    let tags = discovery_tags(&metadata, &repo.repo.kind);
+    let id = format!("{}/{}", repo.org_name, repo.repo.name);
+    json!({
         "id": id,
         "modelId": id,
-        "author": owner,
+        "author": repo.org_name,
         "sha": release.commit_id,
         "lastModified": hub_datetime(release.created_at),
         "private": repo.repo.visibility != "public",
@@ -144,7 +264,7 @@ async fn repo_info(
             "manifest_sha256": release.manifest_sha256,
             "source_of_truth": true
         }
-    })))
+    })
 }
 
 fn sibling(artifact: &Value, commit_id: &str, files_metadata: bool) -> Value {
