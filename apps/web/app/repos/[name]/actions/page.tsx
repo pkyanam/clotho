@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import Link from "next/link";
 import { Badge, Button } from "@cloudflare/kumo";
 import { ClothoApiError, type ActionsConfig } from "@clotho/sdk-js";
@@ -31,6 +32,9 @@ export default async function ActionsPage({
   ]);
   const provider = providers.find((p) => p.id === config.provider);
   const startRun = runAction.bind(null, name);
+  const manualRunKey = randomUUID();
+  const firstRunKey = randomUUID();
+  const releaseRunKey = randomUUID();
   const latest = runs[0];
   const failures = runs.filter((run) =>
     ["failure", "error"].includes(run.status),
@@ -63,6 +67,7 @@ export default async function ActionsPage({
           </p>
         </div>
         <form action={startRun}>
+          <input type="hidden" name="idempotency_key" value={manualRunKey} />
           <Button
             type="submit"
             disabled={!detail.main_commit_id || !config.enabled || !provider?.configured}
@@ -116,6 +121,7 @@ export default async function ActionsPage({
                 action={
                   detail.main_commit_id && config.enabled && provider?.configured ? (
                     <form action={startRun}>
+                      <input type="hidden" name="idempotency_key" value={firstRunKey} />
                       <Button type="submit">start first run</Button>
                     </form>
                   ) : (
@@ -187,6 +193,7 @@ export default async function ActionsPage({
               </p>
             ) : (
               <form action={startRun} className="mt-4 grid gap-3">
+                <input type="hidden" name="idempotency_key" value={releaseRunKey} />
                 <label className="text-[0.75rem] text-kumo-inactive">
                   workflow
                   <select

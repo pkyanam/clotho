@@ -6,8 +6,8 @@ shells out to local `git` binaries — all reads and writes go through the gatew
 > **Pre-release CLI:** command groups are usable today, but grammar and exit-code
 > compatibility are not frozen. Error exit classes are stable; the remaining
 > public-alpha gate adds generated command reference, named contexts with
-> OS-keychain tokens, strict stdout/stderr and JSON tests, completions, signed binaries, and
-> retry/idempotency controls. See
+> OS-keychain tokens, strict stdout/stderr and JSON tests, completions, signed
+> binaries, and retry/idempotency controls beyond manual Action starts. See
 > [`release-readiness.md`](release-readiness.md#cli).
 
 ```bash
@@ -18,14 +18,17 @@ clotho help
 
 ## Configuration
 
-| Flag / env | Default | Meaning |
-|---|---|---|
-| `--api <url>` / `CLOTHO_API_URL` | `http://localhost:8080` | API gateway base URL |
-| `--token <tok>` / `CLOTHO_TOKEN` | unset | Bearer token for authenticated routes |
-| `--json` | off | Pretty-print JSON responses on stdout |
+| Flag / env                       | Default                 | Meaning                               |
+| -------------------------------- | ----------------------- | ------------------------------------- |
+| `--api <url>` / `CLOTHO_API_URL` | `http://localhost:8080` | API gateway base URL                  |
+| `--token <tok>` / `CLOTHO_TOKEN` | unset                   | Bearer token for authenticated routes |
+| `--json`                         | off                     | Pretty-print JSON responses on stdout |
 
-When `CLOTHO_AUTH_REQUIRED=true` on the gateway, set `CLOTHO_TOKEN` (from
-bootstrap logs or `clotho auth token create`) before mutating commands.
+When local auth is open, mint a token deliberately with
+`clotho auth token create`. Before setting `CLOTHO_AUTH_REQUIRED=true`, save
+that token in your automation's secret store and supply it as `CLOTHO_TOKEN`,
+or provision a deployment-managed `CLOTHO_BOOTSTRAP_TOKEN`; credentials are
+never printed in gateway logs.
 
 **Auth providers (Stage 17):** local/demo use `CLOTHO_AUTH_PROVIDER=bootstrap`
 (default) with `clotho_tok_…`. Managed deploy uses `clerk` — pass a Clerk
@@ -38,16 +41,16 @@ policy blocks from `clotho pr merge`.
 
 Stable exit classes:
 
-| Exit | Class |
-|---:|---|
-| `0` | success |
-| `1` | internal/unclassified failure |
-| `2` | CLI usage error |
-| `3` | authentication required/expired |
-| `4` | permission denied |
-| `5` | conflict or policy block |
-| `6` | not found |
-| `7` | retryable unavailability/rate limit |
+| Exit | Class                               |
+| ---: | ----------------------------------- |
+|  `0` | success                             |
+|  `1` | internal/unclassified failure       |
+|  `2` | CLI usage error                     |
+|  `3` | authentication required/expired     |
+|  `4` | permission denied                   |
+|  `5` | conflict or policy block            |
+|  `6` | not found                           |
+|  `7` | retryable unavailability/rate limit |
 
 For automation, pin the Clotho release, pass `--json`, read exactly one success
 value from stdout, and branch on the stable exit class. Error text includes the
@@ -59,13 +62,13 @@ Copy-paste end-to-end path (verified against `clotho help`):
 
 ```bash
 export CLOTHO_API_URL=http://localhost:8080
-export CLOTHO_TOKEN=clotho_tok_…   # from clotho auth token create or bootstrap logs
+export CLOTHO_TOKEN=clotho_tok_…   # from an explicit clotho auth token create
 
 clotho auth whoami
 clotho repo init demo-loop --kind model
 clotho issue create demo-loop --title "flaky" --label bug
 clotho pr create demo-loop --title "fix" --head feature --base main
-clotho actions run demo-loop --actor cli
+clotho actions run demo-loop --actor cli --idempotency-key demo-action-01
 clotho actions list demo-loop
 # copy run id from list output, then:
 clotho actions logs demo-loop <run-id>
@@ -114,23 +117,38 @@ clotho --json activity --limit 50 --cursor '<opaque-next-cursor>'
 JSON stdout is exactly `{ "events": [...], "next_cursor": ... }`; human
 output prints the next cursor after the events when another page exists.
 
+Manual Action starts accept a persisted retry key:
+
+```bash
+clotho --json actions run demo-loop \
+  --actor automation \
+  --idempotency-key action-20260711-01
+```
+
+The key must be 1–128 characters containing only letters, digits, `.`, `_`,
+`:`, or `-`. Reusing it for the same request within 24 hours returns the
+original run without scheduling duplicate compute. Reusing it with different
+Action arguments fails with `idempotency_conflict` and exit `5`. Keys are
+scoped to the authenticated principal and organization; use a new key for new
+work and never place credentials in one.
+
 ## Command groups
 
-| Group | Subcommands |
-|---|---|
-| `auth` | `whoami`, `token create\|list\|revoke` |
-| `repo` | `init`, `list [--limit N] [--cursor C]`, `status`, `log`, `tree`, `artifacts`, `preview`, `import-hf`, `commit`, `submit`, `update`, `delete`, `merge-policy get\|set` |
-| `issue` | `list`, `create`, `get`, `comment`, `update` |
-| `label` | `list`, `create` |
-| `milestone` | `list`, `create` |
-| `notification` | `list`, `read` |
-| `pr` | `list`, `create`, `get`, `comment`, `review`, `merge`, `diff` |
-| `actions` | `list`, `run` (alias `start`), `get`, `logs`, `config` |
-| `provider` | `list [--layer …\|--all]`, `get`, `connect` |
-| `secret` | `list`, `set`, `get`, `delete` (org\|repo; values write-only) |
-| `org` | `list`, `create`, `get`, `repos [--limit N] [--cursor C]` |
-| `activity` | feed (`--limit 1..100`, `--cursor`) |
-| `agent` | `list`, `create`, `tokens`, `mint`, `revoke`, `audit` (org admin) |
+| Group          | Subcommands                                                                                                                                                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth`         | `whoami`, `token create\|list\|revoke`                                                                                                                                 |
+| `repo`         | `init`, `list [--limit N] [--cursor C]`, `status`, `log`, `tree`, `artifacts`, `preview`, `import-hf`, `commit`, `submit`, `update`, `delete`, `merge-policy get\|set` |
+| `issue`        | `list`, `create`, `get`, `comment`, `update`                                                                                                                           |
+| `label`        | `list`, `create`                                                                                                                                                       |
+| `milestone`    | `list`, `create`                                                                                                                                                       |
+| `notification` | `list`, `read`                                                                                                                                                         |
+| `pr`           | `list`, `create`, `get`, `comment`, `review`, `merge`, `diff`                                                                                                          |
+| `actions`      | `list`, `run` (alias `start`; `--idempotency-key`), `get`, `logs`, `config`                                                                                            |
+| `provider`     | `list [--layer …\|--all]`, `get`, `connect`                                                                                                                            |
+| `secret`       | `list`, `set`, `get`, `delete` (org\|repo; values write-only)                                                                                                          |
+| `org`          | `list`, `create`, `get`, `repos [--limit N] [--cursor C]`                                                                                                              |
+| `activity`     | feed (`--limit 1..100`, `--cursor`)                                                                                                                                    |
+| `agent`        | `list`, `create`, `tokens`, `mint`, `revoke`, `audit` (org admin)                                                                                                      |
 
 Stage 8 aliases still work: `init`, `status`, `log`, `commit`, `submit`, and
 `pr <repo> [state]` (list).
@@ -217,7 +235,8 @@ clotho repo import-hf my-model hf-internal-testing/tiny-random-gpt2 --revision m
 clotho repo imports my-model
 clotho repo release my-model v1.0.0
 clotho repo releases my-model
-clotho actions run my-model --workflow evaluate --release v1.0.0
+clotho actions run my-model --workflow evaluate --release v1.0.0 \
+  --idempotency-key evaluate-v1-01
 ```
 
 Use repeated `--path` flags for a selective snapshot. The source accepts

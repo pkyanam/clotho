@@ -11,9 +11,15 @@ Clients authenticate with `Authorization: Bearer clotho_tok_…`.
 
 ### Bootstrap
 
-On first boot, `ensure_bootstrap` mints a token for the bootstrap user when none
-exists. The plaintext is logged once at INFO. For deterministic demos, set
-`CLOTHO_BOOTSTRAP_TOKEN` before start (hashed and upserted).
+`ensure_bootstrap` provisions `CLOTHO_BOOTSTRAP_TOKEN` for the bootstrap user
+when an operator supplies it (hashed and upserted). It never logs credential
+plaintext. Open local/dev auth does not auto-mint an unrecoverable random token;
+an operator can deliberately mint one with `clotho auth token create`. A
+deployment that enables required auth must supply the bootstrap token through
+its secret manager before startup, or use the configured managed AuthProvider.
+
+This Stage 22 amendment replaces the original one-time plaintext startup log.
+Startup logs contain only safe recovery guidance.
 
 ### Auth resolution
 
@@ -63,4 +69,5 @@ Agent bearer tokens remain on the agent-gateway (Slice C).
 
 - Existing integration tests keep working with default open auth.
 - Production can enable `CLOTHO_AUTH_REQUIRED=true` without code changes.
-- Token plaintext is shown only at mint time; storage is SHA-256 hex only.
+- Token plaintext is shown only in the response to an explicit mint request;
+  it is never written to service logs. Storage is SHA-256 hex only.

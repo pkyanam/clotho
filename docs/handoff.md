@@ -53,6 +53,12 @@ not_found` and added a live MCP↔REST error-equivalence assertion.
   REST/OpenAPI/SDK/CLI/MCP/web. The `1..100` query orders by immutable
   `(created_at, id)`, uses an additive Postgres index, returns explicit page
   envelopes, and rejects malformed cursors instead of restarting traversal.
+- Added the first common persisted-idempotency contract to manual Action starts
+  across REST/OpenAPI/SDK/CLI/MCP/web. A bounded key is hashed and scoped to the
+  immutable organization plus authenticated principal for 24 hours; the key,
+  run, initial log, and exact response commit atomically. Sequential/concurrent
+  retries replay one run, while changed intent fails with the stable
+  `409 idempotency_conflict` / CLI exit `5` contract.
 
 ## Baseline state
 
@@ -116,12 +122,18 @@ rebuilt API, MCP, and web surfaces traversed non-overlapping activity pages; a
 pre-restart cursor remained valid after an API restart; CLI JSON and live
 MCP↔REST envelopes matched; and browser review passed at 1280 px and 320 px.
 
+The persisted manual Action-idempotency design, migration, focused contract
+tests, and runtime acceptance record are in
+[`evidence/stage22-action-idempotency.md`](evidence/stage22-action-idempotency.md).
+
 ## Next bounded acceptance test
 
-Add common persisted idempotency keys to one retryable create/start operation,
-or extend the bounded cursor convention to the next smallest high-volume list
-family if that is smaller. Preserve REST-first parity and do not start Stage 23
-until the Stage 22 gate is materially closed.
+Close the Stage 22 authorization blockers before expanding contract breadth:
+require private-repository read permission across every public REST route,
+propagate the scoped MCP principal through REST-backed tools under
+`CLOTHO_AUTH_REQUIRED=true`, and add a route × identity deny matrix that proves
+foreign ids and listings do not leak. Preserve REST-first parity and do not
+start Stage 23 until the remaining public-alpha gate is materially closed.
 
 After Stage 22 is materially closed, begin Stage 23—not the previous Capsule
 plan. Stage 23 establishes production identity, authorization, and tenant

@@ -11,10 +11,12 @@ export async function runAction(repo: string, formData: FormData) {
     | "inference"
     | "benchmark";
   const releaseVersion = String(formData.get("release_version") ?? "").trim();
+  const idempotencyKey = String(formData.get("idempotency_key") ?? "").trim();
   await (await api()).createActionRun(repo, {
     actor: "web",
     workflow,
     releaseVersion,
+    idempotencyKey: idempotencyKey || undefined,
   });
   revalidatePath(`/repos/${repo}/actions`);
 }

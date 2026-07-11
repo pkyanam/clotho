@@ -61,7 +61,11 @@ jobs:
             --email admin@clotho.internal --must-change-password=false"
           TOKEN=$(docker exec forgejo su git -c "forgejo --config /data/gitea/conf/app.ini \
             admin user generate-access-token --username clotho --token-name ci --scopes all --raw")
+          echo "::add-mask::$TOKEN"
           echo "CLOTHO_FORGEJO_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          BOOTSTRAP_TOKEN="clotho_tok_$(openssl rand -hex 24)"
+          echo "::add-mask::$BOOTSTRAP_TOKEN"
+          echo "CLOTHO_BOOTSTRAP_TOKEN=$BOOTSTRAP_TOKEN" >> "$GITHUB_ENV"
       # The control-plane Postgres (agent identity + audit log), mirroring
       # the `clotho` database of docker-compose.dev.yml.
       - name: Start Postgres (agent-gateway integration tests)
@@ -87,6 +91,7 @@ jobs:
           CLOTHO_COMPUTE_PROVIDER=disabled \
             nohup ./target/debug/clotho-compute >"$RUNNER_TEMP/clotho-compute.log" 2>&1 &
           CLOTHO_GATEWAY_HTTP_ADDR=127.0.0.1:8080 \
+            CLOTHO_GATEWAY_DATABASE_URL=postgres://clotho:clotho-dev@localhost:5432/clotho \
             CLOTHO_VCS_GRPC_URL=http://localhost:50051 \
             CLOTHO_DIFF_GRPC_URL=http://localhost:50055 \
             CLOTHO_MERGE_QUEUE_GRPC_URL=http://localhost:50053 \
@@ -108,11 +113,25 @@ jobs:
             nohup ./target/debug/clotho-agent-gateway >"$RUNNER_TEMP/clotho-agent-gateway.log" 2>&1 &
       - run: cargo test --workspace
         env:
+          CLOTHO_TEST_FAIL_ON_SKIP: "true"
           CLOTHO_STORAGE_TEST_S3_ENDPOINT: http://localhost:9000
           # Keep CI fast; run bigger files locally via CLOTHO_STORAGE_TEST_FILE_MB.
           CLOTHO_STORAGE_TEST_FILE_MB: "64"
           CLOTHO_COLLAB_TEST_GATEWAY_URL: http://localhost:8080
+          CLOTHO_STAGE11_TEST_DATABASE_URL: postgres://clotho:clotho-dev@localhost:5432/clotho
+          CLOTHO_STAGE11_TEST_FORGEJO_URL: http://localhost:3000
           CLOTHO_AGENT_TEST_MCP_URL: http://localhost:8090
+      - name: Assert generated credentials are absent from service logs
+        if: always()
+        run: |
+          if grep -Fq "$CLOTHO_BOOTSTRAP_TOKEN" "$RUNNER_TEMP"/*.log 2>/dev/null; then
+            echo "::error::generated bootstrap credential appeared in a service log"
+            exit 1
+          fi
+          if grep -Fq "$CLOTHO_FORGEJO_TOKEN" "$RUNNER_TEMP"/*.log 2>/dev/null; then
+            echo "::error::generated collaboration credential appeared in a service log"
+            exit 1
+          fi
       - name: Dump service logs
         if: failure()
         run: |

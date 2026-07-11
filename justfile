@@ -65,20 +65,28 @@ test-js:
 # Storage dedup integration tests against the dev stack's MinIO (`just dev`
 # first). Override file size with CLOTHO_STORAGE_TEST_FILE_MB (default 256).
 test-storage:
-    CLOTHO_STORAGE_TEST_S3_ENDPOINT=http://localhost:9000 cargo test -p clotho-storage --test storage --release
+    CLOTHO_TEST_FAIL_ON_SKIP=1 CLOTHO_STORAGE_TEST_S3_ENDPOINT=http://localhost:9000 cargo test -p clotho-storage --test storage --release
 
-# Stage 3 + 6 integration tests against the running dev stack (`just dev`
+# Stage 3 + 6 + 11 integration tests against the running dev stack (`just dev`
 # first): repo creation through the Clotho API → real Forgejo project with
-# working issues/PRs backed by a jj-managed git repo (tests/gateway.rs), and
-# the full browse/PR-diff/presence read surface (tests/stage6.rs).
+# working issues/PRs backed by a jj-managed git repo (tests/gateway.rs), the
+# full browse/PR-diff/presence read surface (tests/stage6.rs), and the durable
+# control plane (tests/stage11.rs). Missing live gates fail this recipe.
 test-collab:
-    CLOTHO_COLLAB_TEST_GATEWAY_URL=http://localhost:8080 cargo test -p clotho-api-gateway --tests
+    #!/usr/bin/env bash
+    set -euo pipefail
+    forgejo_token="$(docker compose -f docker-compose.dev.yml exec -T clotho-api-gateway sh -c 'cat /run/clotho/forgejo-token')"
+    CLOTHO_TEST_FAIL_ON_SKIP=1 \
+      CLOTHO_COLLAB_TEST_GATEWAY_URL=http://localhost:8080 \
+      CLOTHO_STAGE11_TEST_DATABASE_URL=postgres://clotho:clotho-dev@localhost:5432/clotho \
+      CLOTHO_STAGE11_TEST_FORGEJO_TOKEN="$forgejo_token" \
+      cargo test -p clotho-api-gateway --tests
 
 # Stage 4 agent-interface integration test against the running dev stack
 # (`just dev` first): a real MCP client authenticates as a scoped agent
 # identity, checkpoints, breaks something, and restores — all over MCP.
 test-agent:
-    CLOTHO_AGENT_TEST_MCP_URL=http://localhost:8090 cargo test -p clotho-agent-gateway --test agent
+    CLOTHO_TEST_FAIL_ON_SKIP=1 CLOTHO_AGENT_TEST_MCP_URL=http://localhost:8090 cargo test -p clotho-agent-gateway --test agent
 
 # Stage 7/14 compute unit + integration tests. Live provider tests self-skip
 # unless DAYTONA_API_KEY / BOX_API_KEY are set — loaded from .env if present.

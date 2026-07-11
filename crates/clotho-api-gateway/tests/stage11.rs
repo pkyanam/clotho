@@ -4,7 +4,13 @@
 //! running local services (clotho-vcs on :50051, Forgejo on :13000). Skipped
 //! when `CLOTHO_STAGE11_TEST_DATABASE_URL` is empty. Override Forgejo token
 //! via `CLOTHO_STAGE11_TEST_FORGEJO_TOKEN` (defaults to `CLOTHO_FORGEJO_TOKEN`).
+//! CI and `just test-collab` set `CLOTHO_TEST_FAIL_ON_SKIP=1`, which makes a
+//! missing database fatal. Unique organizations/repositories are cleaned on
+//! success or failure unless failed-fixture retention is explicitly enabled.
 
+mod support;
+
+use futures::FutureExt;
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 
@@ -17,12 +23,10 @@ fn env_or(name: &str, default: &str) -> String {
 }
 
 fn database_url() -> Option<String> {
-    let url = env_or("CLOTHO_STAGE11_TEST_DATABASE_URL", "");
-    if url.is_empty() {
-        None
-    } else {
-        Some(url)
-    }
+    support::live_env(
+        "CLOTHO_STAGE11_TEST_DATABASE_URL",
+        "use `just test-collab` with the Docker stack running",
+    )
 }
 
 fn forgejo_token() -> TokenSource {
@@ -106,7 +110,9 @@ fn test_config() -> GatewayConfig {
 async fn spawn_gateway() -> Option<(u16, sqlx::PgPool, GatewayConfig)> {
     let database_url = database_url()?;
     let config = test_config();
-    let pool = init_db(&database_url).await.ok()?;
+    let pool = init_db(&database_url)
+        .await
+        .unwrap_or_else(|error| panic!("stage11 database initialization failed: {error}"));
     let bootstrap = Bootstrap::from_config(&config);
     ensure_bootstrap(&pool, &bootstrap).await.unwrap();
     let router = router_with_pool(config.clone(), Some(pool.clone()), bootstrap).unwrap();
@@ -115,6 +121,36 @@ async fn spawn_gateway() -> Option<(u16, sqlx::PgPool, GatewayConfig)> {
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     Some((addr.port(), pool, config))
+}
+
+async fn cleanup_org_fixture(pool: &sqlx::PgPool, name: &str, failed: bool) -> Result<(), String> {
+    if !name.starts_with("stage11-org-") {
+        return Err(format!("refusing to clean non-test organization {name:?}"));
+    }
+    if support::keep_fixture_on_failure(failed) {
+        eprintln!("preserving failed organization fixture {name}");
+        return Ok(());
+    }
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("begin organization fixture cleanup: {error}"))?;
+    sqlx::query(
+        "delete from activity_events where org_id in (select id from orgs where name = $1)",
+    )
+    .bind(name)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("delete organization fixture activity: {error}"))?;
+    sqlx::query("delete from orgs where name = $1")
+        .bind(name)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("delete organization fixture: {error}"))?;
+    tx.commit()
+        .await
+        .map_err(|error| format!("commit organization fixture cleanup: {error}"))?;
+    Ok(())
 }
 
 async fn get(client: &reqwest::Client, url: &str, path: &str) -> Value {
@@ -144,7 +180,7 @@ async fn post_json(client: &reqwest::Client, url: &str, path: &str, body: Value)
 
 #[tokio::test]
 async fn control_plane_users_and_orgs() {
-    let Some((port, _pool, _config)) = spawn_gateway().await else {
+    let Some((port, pool, _config)) = spawn_gateway().await else {
         return;
     };
     let url = format!("http://127.0.0.1:{port}");
@@ -161,19 +197,26 @@ async fn control_plane_users_and_orgs() {
         .unwrap()
         .as_nanos();
     let name = format!("stage11-org-{suffix}");
-    let (status, created) = post_json(
+
+    let outcome = std::panic::AssertUnwindSafe(async {
+        let (status, created) = post_json(
         &client,
         &url,
         "/api/v1/orgs",
         json!({"name": name, "display_name": format!("Stage 11 {suffix}"), "git_owner": "clotho"}),
     )
     .await;
-    assert_eq!(status, 201);
-    assert_eq!(created["name"], name);
+        assert_eq!(status, 201);
+        assert_eq!(created["name"], name);
 
-    let detail = get(&client, &url, &format!("/api/v1/orgs/{name}")).await;
-    assert_eq!(detail["org"]["name"], name);
-    assert!(!detail["members"].as_array().unwrap().is_empty());
+        let detail = get(&client, &url, &format!("/api/v1/orgs/{name}")).await;
+        assert_eq!(detail["org"]["name"], name);
+        assert!(!detail["members"].as_array().unwrap().is_empty());
+    })
+    .catch_unwind()
+    .await;
+    let cleanup = cleanup_org_fixture(&pool, &name, outcome.is_err()).await;
+    support::finish_after_cleanup(outcome, cleanup);
 }
 
 #[tokio::test]
@@ -189,113 +232,131 @@ async fn control_plane_repo_creation_and_metadata() {
         .unwrap()
         .as_nanos();
     let name = format!("stage11-repo-{suffix}");
-    let (status, created) = post_json(
-        &client,
-        &url,
-        "/api/v1/repos",
-        json!({
-            "name": name,
-            "description": "Stage 11 control-plane repo",
-            "visibility": "public",
-            "default_branch": "main",
-        }),
-    )
-    .await;
-    assert_eq!(status, 201, "{:?}", created);
-    assert_eq!(created["name"], name);
-    assert!(created.get("owner_org").is_some());
-    assert_eq!(created["visibility"], "public");
-    assert_eq!(created["default_branch"], "main");
-    assert!(created["clone_url"].as_str().unwrap().ends_with(".git"));
-    assert_eq!(created["provider"], "daytona");
-    assert_eq!(created["configured"], false);
-
-    let detail = get(&client, &url, &format!("/api/v1/repos/{name}")).await;
-    assert_eq!(detail["name"], name);
-    assert_eq!(detail["visibility"], "public");
-    assert_eq!(detail["default_branch"], "main");
-    assert_eq!(detail["provider"], "daytona");
-    assert_eq!(detail["configured"], false);
-
-    // The repo should be returned by both global and org-scoped list APIs.
-    let list = get(&client, &url, "/api/v1/repos").await;
-    assert!(
-        list["repos"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|r| r["name"] == name),
-        "repo should appear in /api/v1/repos"
-    );
-
-    let org_name = config.bootstrap_org_name.clone();
-    let org_list = get(&client, &url, &format!("/api/v1/orgs/{org_name}/repos")).await;
-    assert!(
-        org_list["repos"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|r| r["name"] == name),
-        "repo should appear under its org"
-    );
-
-    let activity = get(&client, &url, "/api/v1/activity?limit=10").await;
-    assert!(
-        activity["events"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|e| e["event_type"] == "repo.created"),
-        "repo creation should appear in activity feed"
-    );
-    assert!(activity["next_cursor"].is_null() || activity["next_cursor"].is_string());
-
     let pagination_event_prefix = format!("stage22.activity-pagination.{suffix}");
-    let actor_id = Bootstrap::from_config(&config).user_id;
-    for sequence in ["one", "two"] {
-        log_activity(
-            &pool,
-            ActivityEventInput {
-                actor_id: actor_id.clone(),
-                org_id: None,
-                repo_id: None,
-                event_type: format!("{pagination_event_prefix}.{sequence}"),
-                payload: json!({}),
-            },
+
+    let outcome = std::panic::AssertUnwindSafe(async {
+        let (status, created) = post_json(
+            &client,
+            &url,
+            "/api/v1/repos",
+            json!({
+                "name": name,
+                "description": "Stage 11 control-plane repo",
+                "visibility": "public",
+                "default_branch": "main",
+            }),
         )
-        .await
-        .unwrap();
-    }
+        .await;
+        assert_eq!(status, 201, "{:?}", created);
+        assert_eq!(created["name"], name);
+        assert!(created.get("owner_org").is_some());
+        assert_eq!(created["visibility"], "public");
+        assert_eq!(created["default_branch"], "main");
+        assert!(created["clone_url"].as_str().unwrap().ends_with(".git"));
+        assert_eq!(created["provider"], "daytona");
+        assert_eq!(created["configured"], false);
 
-    let first_activity_page = get(&client, &url, "/api/v1/activity?limit=1").await;
-    assert_eq!(first_activity_page["events"].as_array().unwrap().len(), 1);
-    let activity_cursor = first_activity_page["next_cursor"]
-        .as_str()
-        .expect("multiple setup events should produce an activity cursor");
-    let second_activity_page = get(
-        &client,
-        &url,
-        &format!("/api/v1/activity?limit=1&cursor={activity_cursor}"),
-    )
+        let detail = get(&client, &url, &format!("/api/v1/repos/{name}")).await;
+        assert_eq!(detail["name"], name);
+        assert_eq!(detail["visibility"], "public");
+        assert_eq!(detail["default_branch"], "main");
+        assert_eq!(detail["provider"], "daytona");
+        assert_eq!(detail["configured"], false);
+
+        // The repo should be returned by both global and org-scoped list APIs.
+        let list = get(&client, &url, "/api/v1/repos").await;
+        assert!(
+            list["repos"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["name"] == name),
+            "repo should appear in /api/v1/repos"
+        );
+
+        let org_name = config.bootstrap_org_name.clone();
+        let org_list = get(&client, &url, &format!("/api/v1/orgs/{org_name}/repos")).await;
+        assert!(
+            org_list["repos"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["name"] == name),
+            "repo should appear under its org"
+        );
+
+        let activity = get(&client, &url, "/api/v1/activity?limit=10").await;
+        assert!(
+            activity["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["event_type"] == "repo.created"),
+            "repo creation should appear in activity feed"
+        );
+        assert!(activity["next_cursor"].is_null() || activity["next_cursor"].is_string());
+
+        let actor_id = Bootstrap::from_config(&config).user_id;
+        for sequence in ["one", "two"] {
+            log_activity(
+                &pool,
+                ActivityEventInput {
+                    actor_id: actor_id.clone(),
+                    org_id: None,
+                    repo_id: None,
+                    event_type: format!("{pagination_event_prefix}.{sequence}"),
+                    payload: json!({}),
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        let first_activity_page = get(&client, &url, "/api/v1/activity?limit=1").await;
+        assert_eq!(first_activity_page["events"].as_array().unwrap().len(), 1);
+        let activity_cursor = first_activity_page["next_cursor"]
+            .as_str()
+            .expect("multiple setup events should produce an activity cursor");
+        let second_activity_page = get(
+            &client,
+            &url,
+            &format!("/api/v1/activity?limit=1&cursor={activity_cursor}"),
+        )
+        .await;
+        assert_eq!(second_activity_page["events"].as_array().unwrap().len(), 1);
+        assert_ne!(
+            first_activity_page["events"][0]["id"], second_activity_page["events"][0]["id"],
+            "activity pages must not overlap"
+        );
+
+        let invalid_limit = client
+            .get(format!("{url}/api/v1/activity?limit=0"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(invalid_limit.status(), reqwest::StatusCode::BAD_REQUEST);
+        let invalid_body: Value = invalid_limit.json().await.unwrap();
+        assert_eq!(invalid_body["code"], "invalid_request");
+
+        sqlx::query("delete from activity_events where event_type like $1")
+            .bind(format!("{pagination_event_prefix}.%"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    })
+    .catch_unwind()
     .await;
-    assert_eq!(second_activity_page["events"].as_array().unwrap().len(), 1);
-    assert_ne!(
-        first_activity_page["events"][0]["id"], second_activity_page["events"][0]["id"],
-        "activity pages must not overlap"
-    );
-
-    let invalid_limit = client
-        .get(format!("{url}/api/v1/activity?limit=0"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(invalid_limit.status(), reqwest::StatusCode::BAD_REQUEST);
-    let invalid_body: Value = invalid_limit.json().await.unwrap();
-    assert_eq!(invalid_body["code"], "invalid_request");
-
-    sqlx::query("delete from activity_events where event_type like $1")
-        .bind(format!("{pagination_event_prefix}.%"))
-        .execute(&pool)
-        .await
-        .unwrap();
+    let activity_cleanup = if support::keep_fixture_on_failure(outcome.is_err()) {
+        Ok(())
+    } else {
+        sqlx::query("delete from activity_events where event_type like $1")
+            .bind(format!("{pagination_event_prefix}.%"))
+            .execute(&pool)
+            .await
+            .map(|_| ())
+            .map_err(|error| format!("delete pagination activity fixture: {error}"))
+    };
+    let repo_cleanup = support::cleanup_repo_fixture(&client, &url, &name, outcome.is_err()).await;
+    let cleanup = activity_cleanup.and(repo_cleanup);
+    support::finish_after_cleanup(outcome, cleanup);
 }

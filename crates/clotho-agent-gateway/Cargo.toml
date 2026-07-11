@@ -27,4 +27,5 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+futures.workspace = true
 rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }

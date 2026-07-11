@@ -28,12 +28,18 @@ if ! forgejo_cli admin user list --admin | awk 'NR>1 {print $2}' | grep -qx "$AD
 fi
 
 if [ ! -s "$TOKEN_FILE" ]; then
+  # The shell performs the redirect as root, so constrain creation before the
+  # token exists and then hand ownership to the uid shared with Clotho.
+  umask 077
   forgejo_cli admin user generate-access-token \
     --username "$ADMIN_USER" \
     --token-name clotho-api-gateway \
     --scopes all --raw >"$TOKEN_FILE"
-  chmod 0644 "$TOKEN_FILE"
   echo "provision: wrote API token to $TOKEN_FILE"
 fi
+
+# Also repair permissions on volumes provisioned by an older release.
+chown git:git "$TOKEN_FILE"
+chmod 0600 "$TOKEN_FILE"
 
 echo "provision: done"

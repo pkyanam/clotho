@@ -697,7 +697,11 @@ describe("ClothoClient", () => {
     });
 
     await expect(client.actionRuns("weave")).resolves.toEqual([{ id: "run-1" }]);
-    await client.createActionRun("weave", { commitId: "abc", actor: "preetham" });
+    await client.createActionRun("weave", {
+      commitId: "abc",
+      actor: "preetham",
+      idempotencyKey: "action-retry-1",
+    });
     await client.actionRun("weave", "run-1");
     await client.actionLogs("weave", "run-1");
     await client.actionsConfig("weave");
@@ -711,6 +715,9 @@ describe("ClothoClient", () => {
       "http://gateway.test/api/v1/repos/weave/actions/runs",
       expect.objectContaining({
         method: "POST",
+        headers: expect.objectContaining({
+          "idempotency-key": "action-retry-1",
+        }),
         body: JSON.stringify({
           commit_id: "abc",
           branch: "main",

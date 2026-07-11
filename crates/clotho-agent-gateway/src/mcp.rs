@@ -214,6 +214,12 @@ pub struct StartActionRunParams {
     pub commit_id: Option<String>,
     pub branch: Option<String>,
     pub actor: Option<String>,
+    /// ci, evaluate, inference, or benchmark.
+    pub workflow: Option<String>,
+    /// Required for evaluate, inference, and benchmark.
+    pub release_version: Option<String>,
+    /// Stable retry key. Reusing it with different arguments fails closed.
+    pub idempotency_key: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -802,7 +808,7 @@ impl AgentGateway {
         let repo = params.repo.clone();
         let rest = self.rest.clone();
         self.run_tool(&ctx, "start_action_run", &repo, args, async move {
-            rest.post(
+            rest.post_with_idempotency_key(
                 &format!(
                     "/api/v1/repos/{}/actions/runs",
                     urlencoding_path(&params.repo)
@@ -811,7 +817,10 @@ impl AgentGateway {
                     "commit_id": params.commit_id.unwrap_or_default(),
                     "branch": params.branch.unwrap_or_else(|| "main".into()),
                     "actor": params.actor.unwrap_or_else(|| "agent".into()),
+                    "workflow": params.workflow.unwrap_or_else(|| "ci".into()),
+                    "release_version": params.release_version.unwrap_or_default(),
                 }),
+                params.idempotency_key.as_deref(),
             )
             .await
         })

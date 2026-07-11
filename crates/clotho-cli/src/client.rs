@@ -56,7 +56,7 @@ impl ApiFailure {
         match self.code.as_str() {
             "unauthenticated" => EXIT_AUTH,
             "permission_denied" => EXIT_PERMISSION,
-            "conflict" | "policy_conflict" => EXIT_CONFLICT,
+            "conflict" | "policy_conflict" | "idempotency_conflict" => EXIT_CONFLICT,
             "not_found" => EXIT_NOT_FOUND,
             "rate_limited"
             | "upstream_unavailable"
@@ -126,6 +126,16 @@ pub async fn request_value(
     path: &str,
     body: Option<Value>,
 ) -> Result<Value> {
+    request_value_with_headers(config, method, path, body, &[]).await
+}
+
+pub async fn request_value_with_headers(
+    config: &Config,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<Value>,
+    headers: &[(&str, &str)],
+) -> Result<Value> {
     let client = reqwest::Client::new();
     let mut request = client.request(method.clone(), format!("{}{}", config.api_url, path));
     if let Some(token) = &config.token {
@@ -133,6 +143,9 @@ pub async fn request_value(
     }
     if let Some(body) = body {
         request = request.json(&body);
+    }
+    for (name, value) in headers {
+        request = request.header(*name, *value);
     }
     let response = request.send().await?;
     let status = response.status();
@@ -216,6 +229,10 @@ mod tests {
             EXIT_PERMISSION
         );
         assert_eq!(failure("conflict", false).exit_code(), EXIT_CONFLICT);
+        assert_eq!(
+            failure("idempotency_conflict", false).exit_code(),
+            EXIT_CONFLICT
+        );
         assert_eq!(failure("not_found", false).exit_code(), EXIT_NOT_FOUND);
         assert_eq!(
             failure("upstream_unavailable", true).exit_code(),

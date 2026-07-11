@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::Json;
 use clotho_common::pb::vcs::v1::GetHeadsRequest;
 use serde::{Deserialize, Serialize};
@@ -62,6 +62,7 @@ pub struct ActionsState {
     pool: Option<PgPool>,
 }
 
+#[derive(Serialize)]
 pub(crate) struct NewActionRun {
     pub repo: String,
     pub commit_id: String,
@@ -178,43 +179,16 @@ impl ActionsState {
         self.configs.lock().await.insert(repo, config);
     }
 
-    pub async fn create_run(&self, new: NewActionRun) -> ActionRun {
-        let config = self.config_for(&new.repo).await;
-        let id = match self.next_run_id().await {
-            Some(id) => id,
-            None => format!("run-{}", self.next_id.fetch_add(1, Ordering::Relaxed)),
-        };
-        let run = ActionRun {
-            id: id.clone(),
-            repo: new.repo,
-            commit_id: new.commit_id,
-            branch: new.branch,
-            status: "queued".into(),
-            conclusion: String::new(),
-            trigger: new.trigger,
-            actor: new.actor,
-            workflow: new.workflow.clone(),
-            release_version: new.release_version,
-            release_manifest_sha256: new.release_manifest_sha256,
-            provider: config.provider,
-            sandbox_id: String::new(),
-            created_at_millis: now_millis(),
-            started_at_millis: 0,
-            finished_at_millis: 0,
-            duration_ms: 0,
-            attempt: 0,
-            jobs: vec![ActionJob {
-                id: format!("{id}-job-1"),
-                run_id: id.clone(),
-                name: format!("clotho-{}", new.workflow),
-                status: "queued".into(),
-                exit_code: None,
-            }],
-            log_text: String::new(),
-        };
+    pub async fn create_run(&self, new: NewActionRun) -> Result<ActionRun, ApiError> {
+        let run = self.build_run(new).await;
+        let id = run.id.clone();
         if let Some(pool) = &self.pool {
-            let jobs = serde_json::to_value(&run.jobs).unwrap_or_else(|_| serde_json::json!([]));
-            match sqlx::query(
+            let jobs = serde_json::to_value(&run.jobs)
+                .map_err(|error| ApiError::Internal(format!("encode Action jobs: {error}")))?;
+            let mut tx = pool.begin().await.map_err(|error| {
+                ApiError::Internal(format!("begin durable Action create: {error}"))
+            })?;
+            sqlx::query(
                 r#"
                 insert into action_runs
                     (id, repo, commit_id, branch, status, conclusion, trigger, actor,
@@ -242,28 +216,203 @@ impl ActionsState {
             .bind(run.finished_at_millis)
             .bind(run.duration_ms as i64)
             .bind(jobs)
-            .execute(pool)
+            .execute(&mut *tx)
             .await
-            {
-                Ok(_) => {
-                    if let Err(e) =
-                        sqlx::query("insert into action_logs (run_id, log_text) values ($1, '')")
-                            .bind(&run.id)
-                            .execute(pool)
-                            .await
-                    {
-                        tracing::warn!(run_id = %run.id, error = %e, "failed to initialize action log");
-                    }
-                    return run;
-                }
-                Err(e) => {
-                    tracing::warn!(run_id = %run.id, error = %e, "failed to persist action run")
-                }
-            }
+            .map_err(|error| ApiError::Internal(format!("persist durable Action: {error}")))?;
+            sqlx::query("insert into action_logs (run_id, log_text) values ($1, '')")
+                .bind(&run.id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| {
+                    ApiError::Internal(format!("persist durable Action log: {error}"))
+                })?;
+            tx.commit().await.map_err(|error| {
+                ApiError::Internal(format!("commit durable Action create: {error}"))
+            })?;
+            return Ok(run);
         }
         self.runs.lock().await.insert(id.clone(), run.clone());
         self.logs.lock().await.insert(id, String::new());
-        run
+        Ok(run)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_run_idempotent(
+        &self,
+        new: NewActionRun,
+        org_id: &str,
+        principal_id: &str,
+        operation: &str,
+        key: &str,
+        request_fingerprint: &str,
+    ) -> Result<(ActionRun, bool), ApiError> {
+        let pool = self.pool.as_ref().ok_or_else(|| {
+            ApiError::Internal("idempotent Action starts require the control plane".into())
+        })?;
+        let run = self.build_run(new).await;
+        let response_body = serde_json::to_value(&run)
+            .map_err(|error| ApiError::Internal(format!("encode Action response: {error}")))?;
+        let response_size = serde_json::to_vec(&response_body)
+            .map_err(|error| ApiError::Internal(format!("measure Action response: {error}")))?
+            .len();
+        if response_size > crate::idempotency::MAX_STORED_RESPONSE_BYTES {
+            return Err(ApiError::Internal(
+                "Action response exceeds the idempotency storage bound".into(),
+            ));
+        }
+        let jobs = serde_json::to_value(&run.jobs)
+            .map_err(|error| ApiError::Internal(format!("encode Action jobs: {error}")))?;
+        let key_hash = crate::idempotency::key_hash(key);
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|error| ApiError::Internal(format!("begin idempotent Action: {error}")))?;
+
+        sqlx::query(
+            r#"delete from idempotency_records
+               where org_id = $1 and principal_id = $2 and key_hash = $3
+                 and expires_at <= now()"#,
+        )
+        .bind(org_id)
+        .bind(principal_id)
+        .bind(&key_hash)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| ApiError::Internal(format!("expire idempotency key: {error}")))?;
+
+        let inserted = sqlx::query(
+            r#"insert into idempotency_records
+                   (org_id, principal_id, key_hash, operation, request_fingerprint,
+                    resource_kind, resource_id, response_status, response_body)
+               values ($1, $2, $3, $4, $5, 'action_run', $6, 202, $7)
+               on conflict (org_id, principal_id, key_hash) do nothing"#,
+        )
+        .bind(org_id)
+        .bind(principal_id)
+        .bind(&key_hash)
+        .bind(operation)
+        .bind(request_fingerprint)
+        .bind(&run.id)
+        .bind(&response_body)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| ApiError::Internal(format!("reserve idempotency key: {error}")))?;
+
+        if inserted.rows_affected() == 0 {
+            let row = sqlx::query(
+                r#"select operation, request_fingerprint, resource_id,
+                          response_status, response_body
+                   from idempotency_records
+                   where org_id = $1 and principal_id = $2 and key_hash = $3"#,
+            )
+            .bind(org_id)
+            .bind(principal_id)
+            .bind(&key_hash)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|error| ApiError::Internal(format!("read idempotency replay: {error}")))?;
+            let stored = crate::idempotency::StoredResponse {
+                operation: row.get("operation"),
+                request_fingerprint: row.get("request_fingerprint"),
+                resource_id: row.get("resource_id"),
+                response_status: row.get("response_status"),
+                response_body: row.get("response_body"),
+            };
+            crate::idempotency::require_match(&stored, operation, request_fingerprint)?;
+            if stored.response_status != StatusCode::ACCEPTED.as_u16() as i32 {
+                return Err(ApiError::Internal(
+                    "stored idempotency response has an invalid status".into(),
+                ));
+            }
+            let replayed: ActionRun = serde_json::from_value(stored.response_body)
+                .map_err(|error| ApiError::Internal(format!("decode Action replay: {error}")))?;
+            if replayed.id != stored.resource_id {
+                return Err(ApiError::Internal(
+                    "stored idempotency response has an invalid resource".into(),
+                ));
+            }
+            tx.commit().await.map_err(|error| {
+                ApiError::Internal(format!("finish idempotency replay: {error}"))
+            })?;
+            return Ok((replayed, true));
+        }
+
+        sqlx::query(
+            r#"insert into action_runs
+                   (id, repo, commit_id, branch, status, conclusion, trigger, actor,
+                    workflow, release_version, release_manifest_sha256,
+                    provider, sandbox_id, created_at_millis, started_at_millis,
+                    finished_at_millis, duration_ms, jobs)
+               values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)"#,
+        )
+        .bind(&run.id)
+        .bind(&run.repo)
+        .bind(&run.commit_id)
+        .bind(&run.branch)
+        .bind(&run.status)
+        .bind(&run.conclusion)
+        .bind(&run.trigger)
+        .bind(&run.actor)
+        .bind(&run.workflow)
+        .bind(&run.release_version)
+        .bind(&run.release_manifest_sha256)
+        .bind(&run.provider)
+        .bind(&run.sandbox_id)
+        .bind(run.created_at_millis)
+        .bind(run.started_at_millis)
+        .bind(run.finished_at_millis)
+        .bind(run.duration_ms as i64)
+        .bind(jobs)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| ApiError::Internal(format!("persist idempotent Action: {error}")))?;
+        sqlx::query("insert into action_logs (run_id, log_text) values ($1, '')")
+            .bind(&run.id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| {
+                ApiError::Internal(format!("persist idempotent Action log: {error}"))
+            })?;
+        tx.commit()
+            .await
+            .map_err(|error| ApiError::Internal(format!("commit idempotent Action: {error}")))?;
+        Ok((run, false))
+    }
+
+    async fn build_run(&self, new: NewActionRun) -> ActionRun {
+        let config = self.config_for(&new.repo).await;
+        let id = match self.next_run_id().await {
+            Some(id) => id,
+            None => format!("run-{}", self.next_id.fetch_add(1, Ordering::Relaxed)),
+        };
+        ActionRun {
+            id: id.clone(),
+            repo: new.repo,
+            commit_id: new.commit_id,
+            branch: new.branch,
+            status: "queued".into(),
+            conclusion: String::new(),
+            trigger: new.trigger,
+            actor: new.actor,
+            workflow: new.workflow.clone(),
+            release_version: new.release_version,
+            release_manifest_sha256: new.release_manifest_sha256,
+            provider: config.provider,
+            sandbox_id: String::new(),
+            created_at_millis: now_millis(),
+            started_at_millis: 0,
+            finished_at_millis: 0,
+            duration_ms: 0,
+            attempt: 0,
+            jobs: vec![ActionJob {
+                id: format!("{id}-job-1"),
+                run_id: id.clone(),
+                name: format!("clotho-{}", new.workflow),
+                status: "queued".into(),
+                exit_code: None,
+            }],
+            log_text: String::new(),
+        }
     }
 
     pub(crate) async fn claim_run(&self, run_id: &str) -> Option<String> {
@@ -515,7 +664,7 @@ impl ActionsState {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ActionRun {
     pub id: String,
     pub repo: String,
@@ -540,7 +689,7 @@ pub struct ActionRun {
     log_text: String,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ActionJob {
     pub id: String,
     pub run_id: String,
@@ -633,6 +782,18 @@ fn default_manual_actor() -> String {
 fn default_workflow() -> String {
     "ci".into()
 }
+
+#[derive(Serialize)]
+struct ActionRunIntent<'a> {
+    repo_id: &'a str,
+    commit_id: &'a str,
+    branch: &'a str,
+    actor: &'a str,
+    workflow: &'a str,
+    release_version: &'a str,
+}
+
+const CREATE_ACTION_RUN_OPERATION: &str = "actions.run.create.v1";
 
 #[derive(Clone, Serialize)]
 pub struct ProviderCapabilitiesJson {
@@ -751,32 +912,14 @@ pub async fn create_run(
     headers: HeaderMap,
     Path(name): Path<String>,
     Json(req): Json<CreateActionRunRequest>,
-) -> Result<(StatusCode, Json<ActionRun>), ApiError> {
+) -> Result<(StatusCode, HeaderMap, Json<ActionRun>), ApiError> {
     let auth = auth::resolve_auth(&headers, &state).await?;
+    let idempotency_key = crate::idempotency::extract_key(&headers)?;
     let repo = if let Some(pool) = &state.pool {
-        let repo = control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
-        if repo.repo.network_mode == "tailscale" {
-            if !crate::providers::tailscale_configured(&state, Some(&repo.org_name)).await {
-                return Err(ApiError::InvalidRequest(
-                    "repository requires Tailscale private networking, but its org OAuth client is not live-verified"
-                        .into(),
-                ));
-            }
-            return Err(ApiError::InvalidRequest(
-                "repository requires Tailscale private networking; no configured compute provider currently advertises private-net attachment"
-                    .into(),
-            ));
-        }
-        Some(repo)
+        Some(control::require_repo_permission(pool, &name, &auth.user_id, "write").await?)
     } else {
         None
     };
-    let config = state.actions.config_for(&name).await;
-    if !config.enabled {
-        return Err(ApiError::InvalidRequest(
-            "actions are disabled for this repo".into(),
-        ));
-    }
 
     let workflow = req.workflow.trim().to_ascii_lowercase();
     if !matches!(
@@ -793,6 +936,71 @@ pub async fn create_run(
             "{workflow} runs must be pinned to an immutable release"
         )));
     }
+    let request_fingerprint = repo
+        .as_ref()
+        .map(|repo| {
+            crate::idempotency::fingerprint(&ActionRunIntent {
+                repo_id: &repo.repo.id,
+                commit_id: req.commit_id.trim(),
+                branch: &req.branch,
+                actor: &req.actor,
+                workflow: &workflow,
+                release_version: &release_version,
+            })
+        })
+        .transpose()?;
+    if idempotency_key.is_some() && (state.pool.is_none() || repo.is_none()) {
+        return Err(ApiError::Internal(
+            "idempotent Action starts require durable repository metadata".into(),
+        ));
+    }
+    if let (Some(key), Some(pool), Some(repo), Some(fingerprint)) = (
+        idempotency_key.as_deref(),
+        state.pool.as_ref(),
+        repo.as_ref(),
+        request_fingerprint.as_deref(),
+    ) {
+        if let Some(stored) =
+            crate::idempotency::lookup(pool, &repo.repo.org_id, &auth.user_id, key).await?
+        {
+            crate::idempotency::require_match(&stored, CREATE_ACTION_RUN_OPERATION, fingerprint)?;
+            if stored.response_status != StatusCode::ACCEPTED.as_u16() as i32 {
+                return Err(ApiError::Internal(
+                    "stored idempotency response has an invalid status".into(),
+                ));
+            }
+            let replayed: ActionRun = serde_json::from_value(stored.response_body)
+                .map_err(|error| ApiError::Internal(format!("decode Action replay: {error}")))?;
+            if replayed.id != stored.resource_id {
+                return Err(ApiError::Internal(
+                    "stored idempotency response has an invalid resource".into(),
+                ));
+            }
+            return Ok(action_run_response(replayed, true));
+        }
+    }
+
+    if let Some(repo) = &repo {
+        if repo.repo.network_mode == "tailscale" {
+            if !crate::providers::tailscale_configured(&state, Some(&repo.org_name)).await {
+                return Err(ApiError::InvalidRequest(
+                    "repository requires Tailscale private networking, but its org OAuth client is not live-verified"
+                        .into(),
+                ));
+            }
+            return Err(ApiError::InvalidRequest(
+                "repository requires Tailscale private networking; no configured compute provider currently advertises private-net attachment"
+                    .into(),
+            ));
+        }
+    }
+    let config = state.actions.config_for(&name).await;
+    if !config.enabled {
+        return Err(ApiError::InvalidRequest(
+            "actions are disabled for this repo".into(),
+        ));
+    }
+
     let release_binding = if release_version.is_empty() {
         None
     } else {
@@ -834,27 +1042,54 @@ pub async fn create_run(
         ));
     }
 
-    let run = state
-        .actions
-        .create_run(NewActionRun {
-            repo: name.clone(),
-            commit_id: commit_id.clone(),
-            branch: req.branch,
-            trigger: if release_binding.is_some() {
-                "release".into()
-            } else {
-                "manual".into()
-            },
-            actor: req.actor,
-            workflow,
-            release_version,
-            release_manifest_sha256: release_binding
-                .map(|binding| binding.manifest_sha256)
-                .unwrap_or_default(),
-        })
-        .await;
-    tokio::spawn(ci::run_existing(state, run.id.clone(), name, commit_id));
-    Ok((StatusCode::ACCEPTED, Json(run)))
+    let new = NewActionRun {
+        repo: name.clone(),
+        commit_id: commit_id.clone(),
+        branch: req.branch,
+        trigger: if release_binding.is_some() {
+            "release".into()
+        } else {
+            "manual".into()
+        },
+        actor: req.actor,
+        workflow,
+        release_version,
+        release_manifest_sha256: release_binding
+            .map(|binding| binding.manifest_sha256)
+            .unwrap_or_default(),
+    };
+    let (run, replayed) = if let (Some(key), Some(repo), Some(fingerprint)) = (
+        idempotency_key.as_deref(),
+        repo.as_ref(),
+        request_fingerprint.as_deref(),
+    ) {
+        state
+            .actions
+            .create_run_idempotent(
+                new,
+                &repo.repo.org_id,
+                &auth.user_id,
+                CREATE_ACTION_RUN_OPERATION,
+                key,
+                fingerprint,
+            )
+            .await?
+    } else {
+        (state.actions.create_run(new).await?, false)
+    };
+    if !replayed {
+        tokio::spawn(ci::run_existing(state, run.id.clone(), name, commit_id));
+    }
+    Ok(action_run_response(run, replayed))
+}
+
+fn action_run_response(run: ActionRun, replayed: bool) -> (StatusCode, HeaderMap, Json<ActionRun>) {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        crate::idempotency::IDEMPOTENCY_REPLAYED_HEADER,
+        HeaderValue::from_static(if replayed { "true" } else { "false" }),
+    );
+    (StatusCode::ACCEPTED, headers, Json(run))
 }
 
 /// Continuously dispatch queued runs and reclaim expired worker leases. The
@@ -1381,5 +1616,179 @@ fn row_to_run(row: sqlx::postgres::PgRow) -> ActionRun {
         attempt: row.get("attempt"),
         jobs: serde_json::from_value(jobs).unwrap_or_default(),
         log_text: String::new(),
+    }
+}
+
+#[cfg(test)]
+mod idempotency_tests {
+    use super::*;
+
+    fn test_database_url() -> Option<String> {
+        let url = std::env::var("CLOTHO_CONTROL_PLANE_TEST_DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://clotho:clotho-dev@localhost:5432/clotho".into());
+        (!url.trim().is_empty()).then_some(url)
+    }
+
+    fn new_run(repo: &str) -> NewActionRun {
+        NewActionRun {
+            repo: repo.into(),
+            commit_id: "commit-1".into(),
+            branch: "main".into(),
+            trigger: "manual".into(),
+            actor: "test".into(),
+            workflow: "ci".into(),
+            release_version: String::new(),
+            release_manifest_sha256: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn persisted_action_idempotency_replays_and_conflicts() {
+        let Some(database_url) = test_database_url() else {
+            return;
+        };
+        let pool = crate::init_db(&database_url).await.unwrap();
+        let suffix = Uuid::new_v4().simple().to_string();
+        let user_id = format!("idem-user-{suffix}");
+        let org_id = format!("idem-org-{suffix}");
+        let repo = format!("idem-repo-{suffix}");
+        sqlx::query("insert into users (id, name, email, display_name) values ($1, $1, $2, $1)")
+            .bind(&user_id)
+            .bind(format!("{user_id}@example.invalid"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into orgs (id, name, display_name, forgejo_owner, created_by) values ($1, $1, $1, $1, $2)",
+        )
+        .bind(&org_id)
+        .bind(&user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let state = ActionsState::with_pool(
+            ActionsDefaults {
+                provider: "daytona".into(),
+                default_image: "ubuntu:22.04".into(),
+                timeout_seconds: 900,
+                configured_providers: HashMap::new(),
+            },
+            pool.clone(),
+        );
+        let key = format!("action-{suffix}");
+        let fingerprint = crate::idempotency::fingerprint(&serde_json::json!({
+            "repo_id": &repo,
+            "workflow": "ci"
+        }))
+        .unwrap();
+        let (first, first_replayed) = state
+            .create_run_idempotent(
+                new_run(&repo),
+                &org_id,
+                &user_id,
+                CREATE_ACTION_RUN_OPERATION,
+                &key,
+                &fingerprint,
+            )
+            .await
+            .unwrap();
+        let (second, second_replayed) = state
+            .create_run_idempotent(
+                new_run(&repo),
+                &org_id,
+                &user_id,
+                CREATE_ACTION_RUN_OPERATION,
+                &key,
+                &fingerprint,
+            )
+            .await
+            .unwrap();
+        assert!(!first_replayed);
+        assert!(second_replayed);
+        assert_eq!(first.id, second.id);
+
+        let conflict = state
+            .create_run_idempotent(
+                new_run(&repo),
+                &org_id,
+                &user_id,
+                CREATE_ACTION_RUN_OPERATION,
+                &key,
+                "different-fingerprint",
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(conflict, ApiError::IdempotencyConflict(_)));
+        let count: i64 = sqlx::query_scalar("select count(*) from action_runs where id = $1")
+            .bind(&first.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+
+        let concurrent_key = format!("concurrent-action-{suffix}");
+        let (left, right) = tokio::join!(
+            state.create_run_idempotent(
+                new_run(&repo),
+                &org_id,
+                &user_id,
+                CREATE_ACTION_RUN_OPERATION,
+                &concurrent_key,
+                &fingerprint,
+            ),
+            state.create_run_idempotent(
+                new_run(&repo),
+                &org_id,
+                &user_id,
+                CREATE_ACTION_RUN_OPERATION,
+                &concurrent_key,
+                &fingerprint,
+            )
+        );
+        let (left_run, left_replayed) = left.unwrap();
+        let (right_run, right_replayed) = right.unwrap();
+        assert_eq!(left_run.id, right_run.id);
+        assert_ne!(left_replayed, right_replayed);
+
+        let other_principal = format!("other-{user_id}");
+        let (independent, independent_replayed) = state
+            .create_run_idempotent(
+                new_run(&repo),
+                &org_id,
+                &other_principal,
+                CREATE_ACTION_RUN_OPERATION,
+                &key,
+                &fingerprint,
+            )
+            .await
+            .unwrap();
+        assert!(!independent_replayed);
+        assert_ne!(independent.id, first.id);
+
+        sqlx::query("delete from idempotency_records where org_id = $1")
+            .bind(&org_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("delete from action_runs where id = any($1)")
+            .bind(vec![
+                first.id.clone(),
+                left_run.id.clone(),
+                independent.id.clone(),
+            ])
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("delete from orgs where id = $1")
+            .bind(&org_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("delete from users where id = $1")
+            .bind(&user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
     }
 }

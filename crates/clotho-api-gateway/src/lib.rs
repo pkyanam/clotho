@@ -25,6 +25,7 @@ pub mod error;
 pub mod forgejo;
 mod hf_compat;
 mod hub;
+mod idempotency;
 mod issues;
 mod labels;
 mod merge_policy;
@@ -253,6 +254,7 @@ pub fn router_with_pool(
     });
     hub::recover_hub_import_jobs(state.clone());
     actions::recover_action_runs(state.clone());
+    idempotency::start_cleanup(state.pool.clone());
     Ok(Router::new()
         .route("/healthz", get(healthz))
         // Stage 15: published OpenAPI contract (hand-maintained docs/openapi.yaml).

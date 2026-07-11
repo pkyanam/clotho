@@ -1498,13 +1498,20 @@ export class ClothoClient {
       actor?: string;
       workflow?: "ci" | "evaluate" | "inference" | "benchmark";
       releaseVersion?: string;
+      /** Stable retry key, scoped by organization and authenticated principal. */
+      idempotencyKey?: string;
     },
   ): Promise<ActionRun> {
     return this.request(
       `/api/v1/repos/${encodeURIComponent(name)}/actions/runs`,
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(options?.idempotencyKey
+            ? { "idempotency-key": options.idempotencyKey }
+            : {}),
+        },
         body: JSON.stringify({
           commit_id: options?.commitId ?? "",
           branch: options?.branch ?? "main",

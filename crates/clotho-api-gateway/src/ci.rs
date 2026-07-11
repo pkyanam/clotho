@@ -36,7 +36,7 @@ struct CiOutput {
 /// Errors are logged and turned into a failed/errored commit status rather
 /// than propagated — this runs detached from the webhook response.
 pub async fn run(state: Arc<AppState>, repo: String, sha: String) {
-    let run = state
+    let run = match state
         .actions
         .create_run(NewActionRun {
             repo: repo.clone(),
@@ -48,7 +48,14 @@ pub async fn run(state: Arc<AppState>, repo: String, sha: String) {
             release_version: String::new(),
             release_manifest_sha256: String::new(),
         })
-        .await;
+        .await
+    {
+        Ok(run) => run,
+        Err(error) => {
+            tracing::error!(%repo, %sha, %error, "failed to persist push-triggered Action");
+            return;
+        }
+    };
     run_existing(state, run.id, repo, sha).await;
 }
 

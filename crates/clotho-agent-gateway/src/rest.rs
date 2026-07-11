@@ -42,11 +42,25 @@ impl RestClient {
     }
 
     pub async fn get(&self, path: &str) -> Result<Value, ToolError> {
-        self.request(reqwest::Method::GET, path, None).await
+        self.request(reqwest::Method::GET, path, None, &[]).await
     }
 
     pub async fn post(&self, path: &str, body: Value) -> Result<Value, ToolError> {
-        self.request(reqwest::Method::POST, path, Some(body)).await
+        self.request(reqwest::Method::POST, path, Some(body), &[])
+            .await
+    }
+
+    pub async fn post_with_idempotency_key(
+        &self,
+        path: &str,
+        body: Value,
+        idempotency_key: Option<&str>,
+    ) -> Result<Value, ToolError> {
+        let headers = idempotency_key
+            .map(|key| vec![("Idempotency-Key", key)])
+            .unwrap_or_default();
+        self.request(reqwest::Method::POST, path, Some(body), &headers)
+            .await
     }
 
     async fn request(
@@ -54,11 +68,15 @@ impl RestClient {
         method: reqwest::Method,
         path: &str,
         body: Option<Value>,
+        headers: &[(&str, &str)],
     ) -> Result<Value, ToolError> {
         let url = format!("{}{path}", self.base_url);
         let mut req = self.http.request(method.clone(), &url);
         if let Some(body) = body {
             req = req.json(&body);
+        }
+        for (name, value) in headers {
+            req = req.header(*name, *value);
         }
         let response = req.send().await.map_err(|e| {
             ToolError::Mcp(rmcp::ErrorData::internal_error(

@@ -32,6 +32,9 @@
   immutable releases, standard Hub reads, release-pinned Actions, provider
   fabric, StorageSDK, Tailscale intent, GPU policy, durable job leases, and the
   native web shell already exist. Inspect before rebuilding them.
+- Manual Action starts have a persisted REST-led idempotency contract across
+  OpenAPI, SDK, CLI, MCP, and web; other retryable mutations remain outside
+  that guarantee until explicitly declared.
 - The public-alpha contract is not frozen. The docs intentionally distinguish
   working behavior from release gates.
 - A system-wide light/dark contrast issue is documented as a release blocker;

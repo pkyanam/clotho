@@ -40,6 +40,8 @@ pub enum ApiError {
     NotFound(String),
     #[error("{0}")]
     Conflict(String),
+    #[error("{0}")]
+    IdempotencyConflict(String),
     #[error("{message}")]
     RangeNotSatisfiable { message: String, size: u64 },
     /// A backing service (clotho-vcs, Forgejo) failed or is unreachable.
@@ -59,6 +61,7 @@ impl ApiError {
             Self::InvalidRequest(_) => StatusCode::BAD_REQUEST,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::IdempotencyConflict(_) => StatusCode::CONFLICT,
             Self::RangeNotSatisfiable { .. } => StatusCode::RANGE_NOT_SATISFIABLE,
             Self::Upstream(_) => StatusCode::BAD_GATEWAY,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -72,6 +75,7 @@ impl ApiError {
             Self::InvalidRequest(_) => "invalid_request",
             Self::NotFound(_) => "not_found",
             Self::Conflict(_) => "conflict",
+            Self::IdempotencyConflict(_) => "idempotency_conflict",
             Self::RangeNotSatisfiable { .. } => "range_not_satisfiable",
             Self::Upstream(_) => "upstream_unavailable",
             Self::Internal(_) => "internal_error",
@@ -144,6 +148,11 @@ mod tests {
             ),
             (ApiError::NotFound("missing".into()), "not_found", false),
             (ApiError::Conflict("blocked".into()), "conflict", false),
+            (
+                ApiError::IdempotencyConflict("key reused".into()),
+                "idempotency_conflict",
+                false,
+            ),
             (
                 ApiError::Unauthorized("token expired".into()),
                 "unauthenticated",

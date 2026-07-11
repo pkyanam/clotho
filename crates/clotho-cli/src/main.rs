@@ -14,7 +14,10 @@ use crate::args::{
     require_one, require_two, strip_globals, take_flag, take_option, take_repeated,
     take_repeated_str,
 };
-use crate::client::{emit, exit_code, first_line, request_json, request_value, short, Config};
+use crate::client::{
+    emit, exit_code, first_line, request_json, request_value, request_value_with_headers, short,
+    Config,
+};
 
 #[tokio::main]
 async fn main() {
@@ -1456,7 +1459,8 @@ async fn cmd_actions(config: &Config, mut args: Vec<String>) -> Result<()> {
             if args.is_empty() {
                 bail!(
                     "usage: clotho actions run <repo> [--commit <id>] [--branch <name>] \
-                     [--actor <name>] [--workflow ci|evaluate|inference|benchmark] [--release <version>]"
+                     [--actor <name>] [--workflow ci|evaluate|inference|benchmark] [--release <version>] \
+                     [--idempotency-key <key>]"
                 );
             }
             let repo = args.remove(0);
@@ -1465,10 +1469,15 @@ async fn cmd_actions(config: &Config, mut args: Vec<String>) -> Result<()> {
             let actor = take_option(&mut args, "--actor").unwrap_or_else(|| "cli".into());
             let workflow = take_option(&mut args, "--workflow").unwrap_or_else(|| "ci".into());
             let release_version = take_option(&mut args, "--release").unwrap_or_default();
+            let idempotency_key = take_option(&mut args, "--idempotency-key");
             if !args.is_empty() {
                 bail!("unrecognized arguments: {}", args.join(" "));
             }
-            let body = request_value(
+            let idempotency_headers = idempotency_key
+                .as_deref()
+                .map(|key| vec![("Idempotency-Key", key)])
+                .unwrap_or_default();
+            let body = request_value_with_headers(
                 config,
                 reqwest::Method::POST,
                 &format!("/api/v1/repos/{repo}/actions/runs"),
@@ -1479,6 +1488,7 @@ async fn cmd_actions(config: &Config, mut args: Vec<String>) -> Result<()> {
                     "workflow": workflow,
                     "release_version": release_version,
                 })),
+                &idempotency_headers,
             )
             .await?;
             emit(config, &body, || {
@@ -2209,7 +2219,7 @@ fn usage() {
 
   actions
     clotho actions list <repo>
-    clotho actions run <repo> [--commit <id>] [--branch main] [--actor cli] [--workflow ci|evaluate|inference|benchmark] [--release <version>]
+    clotho actions run <repo> [--commit <id>] [--branch main] [--actor cli] [--workflow ci|evaluate|inference|benchmark] [--release <version>] [--idempotency-key <key>]
     clotho actions get <repo> <run-id>
     clotho actions logs <repo> <run-id>
     clotho actions config <repo> [--provider <id>] [--enabled true|false] [--accelerator cpu|gpu] [--gpu-type <id>]...

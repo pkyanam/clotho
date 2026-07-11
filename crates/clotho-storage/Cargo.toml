@@ -20,4 +20,5 @@ xet-core-structures.workspace = true
 xet-data.workspace = true
 
 [dev-dependencies]
+futures.workspace = true
 tempfile.workspace = true

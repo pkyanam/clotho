@@ -163,22 +163,19 @@ pub(crate) async fn resolve_auth(
     state.auth_provider.resolve(headers, state).await
 }
 
-/// Mint bootstrap token when none exists; log plaintext once at INFO.
+/// Provision the explicitly configured bootstrap token, if any.
+///
+/// Local development defaults to open bootstrap auth, so an operator can mint
+/// a token deliberately with `clotho auth token create`. Required-auth
+/// deployments must provide `CLOTHO_BOOTSTRAP_TOKEN` through their secret
+/// manager before startup. Bootstrap credential plaintext is never logged.
 pub async fn ensure_bootstrap_token(pool: &PgPool, user_id: &str) -> Result<(), ApiError> {
-    let count: i64 = sqlx::query_scalar(
-        "select count(*)::bigint from api_tokens where user_id = $1 and revoked_at is null",
-    )
-    .bind(user_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| ApiError::Internal(format!("bootstrap token check: {e}")))?;
-    if count > 0 {
+    let Some(plaintext) = configured_bootstrap_token(std::env::var("CLOTHO_BOOTSTRAP_TOKEN").ok())
+    else {
+        tracing::info!(
+            "bootstrap API token not auto-minted; local open auth can mint one with `clotho auth token create`, and required-auth deployments must set CLOTHO_BOOTSTRAP_TOKEN before startup"
+        );
         return Ok(());
-    }
-
-    let plaintext = match std::env::var("CLOTHO_BOOTSTRAP_TOKEN") {
-        Ok(t) if !t.trim().is_empty() => t.trim().to_string(),
-        _ => mint_plaintext_token(),
     };
     let id = Uuid::new_v4().to_string();
     let prefix = display_prefix(&plaintext);
@@ -203,10 +200,16 @@ pub async fn ensure_bootstrap_token(pool: &PgPool, user_id: &str) -> Result<(), 
     .map_err(|e| ApiError::Internal(format!("bootstrap token insert: {e}")))?;
 
     tracing::info!(
-        token = %plaintext,
-        "bootstrap API token minted — set CLOTHO_TOKEN or CLOTHO_BOOTSTRAP_TOKEN for deterministic demos"
+        "bootstrap API token provisioned from CLOTHO_BOOTSTRAP_TOKEN; credential plaintext is not logged"
     );
     Ok(())
+}
+
+fn configured_bootstrap_token(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let value = value.trim();
+        (!value.is_empty()).then(|| value.to_string())
+    })
 }
 
 async fn get_user(pool: &PgPool, user_id: &str) -> Result<UserPublic, ApiError> {
@@ -349,5 +352,15 @@ mod tests {
         let t = mint_plaintext_token();
         assert!(t.starts_with(TOKEN_PREFIX));
         assert!(t.len() > TOKEN_PREFIX.len());
+    }
+
+    #[test]
+    fn bootstrap_token_requires_explicit_nonempty_configuration() {
+        assert_eq!(configured_bootstrap_token(None), None);
+        assert_eq!(configured_bootstrap_token(Some("   ".into())), None);
+        assert_eq!(
+            configured_bootstrap_token(Some("  clotho_tok_configured  ".into())),
+            Some("clotho_tok_configured".into())
+        );
     }
 }

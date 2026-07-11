@@ -79,46 +79,55 @@ human REST/CLI/web surfaces.
 
 ### VCS (gRPC)
 
-| Tool | Purpose |
-|---|---|
-| `orient_repo` | Heads, main, op log, file summary |
-| `checkpoint` | Named op-log checkpoint |
-| `restore_to` | Restore to an operation id |
-| `diff_symbol` | Symbol-level diff |
-| `commit` | Author a commit from file contents |
-| `submit_change` | Land via merge queue |
+| Tool            | Purpose                            |
+| --------------- | ---------------------------------- |
+| `orient_repo`   | Heads, main, op log, file summary  |
+| `checkpoint`    | Named op-log checkpoint            |
+| `restore_to`    | Restore to an operation id         |
+| `diff_symbol`   | Symbol-level diff                  |
+| `commit`        | Author a commit from file contents |
+| `submit_change` | Land via merge queue               |
 
 ### Collab (REST)
 
-| Tool | REST |
-|---|---|
-| `list_issues` | `GET …/issues` |
-| `create_issue` | `POST …/issues` (optional `labels`, `assignees`, `milestone`) |
-| `comment_issue` | `POST …/issues/{n}/comments` |
-| `list_pulls` | `GET …/pulls` |
-| `create_pull` | `POST …/pulls` |
-| `comment_pull` | `POST …/pulls/{n}/comments` |
-| `review_pull` | `POST …/pulls/{n}/reviews` |
-| `merge_pull` | `POST …/pulls/{n}/merge` |
+| Tool            | REST                                                          |
+| --------------- | ------------------------------------------------------------- |
+| `list_issues`   | `GET …/issues`                                                |
+| `create_issue`  | `POST …/issues` (optional `labels`, `assignees`, `milestone`) |
+| `comment_issue` | `POST …/issues/{n}/comments`                                  |
+| `list_pulls`    | `GET …/pulls`                                                 |
+| `create_pull`   | `POST …/pulls`                                                |
+| `comment_pull`  | `POST …/pulls/{n}/comments`                                   |
+| `review_pull`   | `POST …/pulls/{n}/reviews`                                    |
+| `merge_pull`    | `POST …/pulls/{n}/merge`                                      |
 
 ### Actions (REST)
 
-| Tool | REST |
-|---|---|
-| `list_action_runs` | `GET …/actions/runs` |
-| `start_action_run` | `POST …/actions/runs` |
-| `get_action_logs` | `GET …/actions/runs/{id}/logs` |
+| Tool               | REST                                                                |
+| ------------------ | ------------------------------------------------------------------- |
+| `list_action_runs` | `GET …/actions/runs`                                                |
+| `start_action_run` | `POST …/actions/runs` (`idempotency_key` maps to `Idempotency-Key`) |
+| `get_action_logs`  | `GET …/actions/runs/{id}/logs`                                      |
+
+`start_action_run` accepts optional `workflow`, `release_version`, and
+`idempotency_key` arguments in addition to repo/commit/branch/actor. A key is
+scoped to the authenticated principal and immutable organization and retained
+for 24 hours. Retrying the same arguments returns the original Action run and
+does not schedule duplicate compute; changing the intent under the same key
+returns the canonical REST `idempotency_conflict` error in MCP error data.
+Keys are 1–128 characters using letters, digits, `.`, `_`, `:`, or `-` and
+must never contain a credential.
 
 ### Platform / read helpers (REST)
 
-| Tool | REST |
-|---|---|
-| `list_providers` | `GET /api/v1/providers` |
-| `list_repos` | `GET /api/v1/repos?limit={1..100}&cursor={opaque}` |
-| `get_activity` | `GET /api/v1/activity?limit={1..100}&cursor={opaque}` |
-| `list_secrets` | org/repo secrets **metadata only** |
-| `get_tree` | `GET …/tree` |
-| `get_file` | `GET …/file` |
+| Tool             | REST                                                  |
+| ---------------- | ----------------------------------------------------- |
+| `list_providers` | `GET /api/v1/providers`                               |
+| `list_repos`     | `GET /api/v1/repos?limit={1..100}&cursor={opaque}`    |
+| `get_activity`   | `GET /api/v1/activity?limit={1..100}&cursor={opaque}` |
+| `list_secrets`   | org/repo secrets **metadata only**                    |
+| `get_tree`       | `GET …/tree`                                          |
+| `get_file`       | `GET …/file`                                          |
 
 `list_repos` accepts optional `limit` and `cursor` arguments and returns the
 canonical REST page envelope with `repos` and `next_cursor`. Agents must treat
@@ -147,7 +156,8 @@ export CLOTHO_AGENT_TOKEN=clotho_agt_…   # from mint output
 2. `create_issue` — e.g. title `"flaky"`, labels `["bug"]`
 3. `commit` + `submit_change` — land code on a branch
 4. `create_pull` / `review_pull` / `merge_pull` as needed
-5. `start_action_run` → `list_action_runs` → `get_action_logs`
+5. `start_action_run` with a fresh `idempotency_key` → `list_action_runs` →
+   `get_action_logs`
 6. `list_providers` — honest compute status
 
 Merge policy gates from Slice E apply to `merge_pull` the same as the REST
@@ -155,11 +165,11 @@ Merge policy gates from Slice E apply to `merge_pull` the same as the REST
 
 ## Config
 
-| Env | Default | Meaning |
-|---|---|---|
-| `CLOTHO_AGENT_HTTP_ADDR` | `0.0.0.0:8090` | MCP + admin listen |
-| `CLOTHO_API_URL` | `http://localhost:8080` | REST edge for Stage 15 tools |
-| `CLOTHO_AGENT_ADMIN_TOKEN` | (required) | Admin surface bearer |
-| `CLOTHO_VCS_GRPC_URL` etc. | localhost ports | VCS / diff / merge-queue |
+| Env                        | Default                 | Meaning                      |
+| -------------------------- | ----------------------- | ---------------------------- |
+| `CLOTHO_AGENT_HTTP_ADDR`   | `0.0.0.0:8090`          | MCP + admin listen           |
+| `CLOTHO_API_URL`           | `http://localhost:8080` | REST edge for Stage 15 tools |
+| `CLOTHO_AGENT_ADMIN_TOKEN` | (required)              | Admin surface bearer         |
+| `CLOTHO_VCS_GRPC_URL` etc. | localhost ports         | VCS / diff / merge-queue     |
 
 Integration tests: `just test-agent` (needs `just dev`).

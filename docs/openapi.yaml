@@ -1793,6 +1793,7 @@ paths:
       summary: Start a manual Action run
       parameters:
         - $ref: "#/components/parameters/repoName"
+        - $ref: "#/components/parameters/idempotencyKey"
       requestBody:
         content:
           application/json:
@@ -1817,12 +1818,17 @@ paths:
                   description: Required for evaluate, inference, and benchmark; resolves and verifies the immutable release commit
       responses:
         "202":
-          description: Accepted / queued
+          description: Accepted / queued, or replayed from the same idempotent request
+          headers:
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ActionRun"
         "400":
+          $ref: "#/components/responses/Error"
+        "409":
           $ref: "#/components/responses/Error"
 
   /api/v1/repos/{name}/actions/runs/{run_id}:
@@ -2662,6 +2668,15 @@ components:
         minimum: 1
         maximum: 100
         default: 100
+    idempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: Opaque retry key scoped to the immutable organization and authenticated principal; retained for 24 hours
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[A-Za-z0-9._:-]+$'
     repoPageCursor:
       name: cursor
       in: query
@@ -2767,6 +2782,11 @@ components:
         type: string
         minLength: 1
         maxLength: 128
+    IdempotencyReplayed:
+      description: Whether the response was replayed from the persisted idempotency record
+      required: true
+      schema:
+        type: boolean
 
   schemas:
     HuggingFaceObject:
@@ -2814,6 +2834,7 @@ components:
             - not_found
             - method_not_allowed
             - conflict
+            - idempotency_conflict
             - policy_conflict
             - payload_too_large
             - range_not_satisfiable

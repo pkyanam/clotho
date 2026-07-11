@@ -7,9 +7,10 @@ edge), the web console, and `@clotho/sdk-js`.
 > **Pre-release contract:** `/api/v1` is the intended compatibility boundary,
 > but the public-alpha hardening gate is not complete. Consumers should pin a
 > Clotho release until pagination across every unbounded collection,
-> idempotency, and async-operation conventions land. Error envelope version `1`,
-> request correlation, structural OpenAPI/SDK verification, and repository
-> pagination are stable. Track the remaining contract in
+> idempotency across every retryable mutation, and async-operation conventions
+> land. Error envelope version `1`, request correlation, structural OpenAPI/SDK
+> verification, repository/activity pagination, and persisted manual Action-run
+> idempotency are stable. Track the remaining contract in
 > [`release-readiness.md`](release-readiness.md).
 
 ## Contract
@@ -55,7 +56,7 @@ Error responses are safe and machine-readable:
 
 Stable codes in envelope version `1` are `invalid_request`,
 `unauthenticated`, `permission_denied`, `not_found`, `method_not_allowed`,
-`conflict`, `policy_conflict`, `payload_too_large`,
+`conflict`, `idempotency_conflict`, `policy_conflict`, `payload_too_large`,
 `range_not_satisfiable`, `rate_limited`, `upstream_unavailable`,
 `service_unavailable`, `upstream_timeout`, and `internal_error`. Internal and
 provider topology is logged server-side but never returned in the safe message.
@@ -94,6 +95,40 @@ callers retain explicit control of work and latency.
 The SDK's canonical `activityPage` method, CLI `activity --cursor`, MCP
 `get_activity`, and web activity page preserve this envelope and cursor.
 
+### Manual Action-run idempotency
+
+`POST /api/v1/repos/{name}/actions/runs` accepts an optional
+`Idempotency-Key` header for safe retries after a timeout or lost response:
+
+- keys are opaque, 1–128 ASCII characters, and may contain letters, digits,
+  `.`, `_`, `:`, or `-`;
+- a key is scoped to the immutable organization and authenticated principal,
+  hashed before storage, and retained for 24 hours;
+- the first accepted request atomically persists the key, queued Action run,
+  initial log, and exact `202` response before compute starts;
+- retrying the same semantic request returns the original run and does not
+  schedule duplicate compute;
+- reusing the key with a different repo, requested commit, branch, actor,
+  workflow, or release returns `409 idempotency_conflict`;
+- `Idempotency-Replayed: false` identifies the first acceptance and
+  `Idempotency-Replayed: true` identifies a persisted replay.
+
+For a branch-based request with no explicit commit, the original run remains
+the result of that key even if the branch moves before a retry. Generate a new
+key for new work; never derive a key from a secret.
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/repos/weave/actions/runs \
+  -H 'content-type: application/json' \
+  -H 'Idempotency-Key: action-20260711-01' \
+  -H "Authorization: Bearer $CLOTHO_TOKEN" \
+  -d '{"actor":"automation","workflow":"ci"}' | jq
+```
+
+This is the first common persisted-idempotency slice. Other retryable
+create/start/import/submit routes remain outside this guarantee until their
+OpenAPI operations explicitly declare the same contract.
+
 ### Auth model (Stage 17 / ADR-0018)
 
 Human authentication is pluggable behind `AuthProvider`:
@@ -111,16 +146,19 @@ tokens (ADR-0005), minted only via human-only agent admin (ADR-0016).
 | `CLOTHO_AUTH_PROVIDER`                                        | `bootstrap` (default) or `clerk`                                  |
 | `CLOTHO_AUTH_REQUIRED`                                        | `true` to require Bearer (managed default; local default `false`) |
 | `CLOTHO_TOKEN`                                                | SDK, CLI (`--token`), web server bootstrap path                   |
-| `CLOTHO_BOOTSTRAP_TOKEN`                                      | Deterministic bootstrap token on first start                      |
+| `CLOTHO_BOOTSTRAP_TOKEN`                                      | Secret-managed bootstrap/recovery token; never logged             |
 | `CLERK_PUBLISHABLE_KEY` / `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Web Clerk UI (managed only)                                       |
 | `CLERK_SECRET_KEY`                                            | Gateway Clerk Backend / verification (managed only)               |
 | `CLERK_JWKS_URL`                                              | Clerk JWKS for session JWT verification                           |
 | `CLOTHO_CLERK_JWT_SECRET`                                     | Dev/test HS256 secret (mocks; not for production)                 |
 
-On first gateway start with Postgres, read the bootstrap token from gateway logs
-or set `CLOTHO_BOOTSTRAP_TOKEN` before boot. Mint additional Clotho human tokens
-via `POST /api/v1/tokens` or `clotho auth token create`. Inspect the current
-actor with `GET /api/v1/me`.
+The default local profile uses open bootstrap auth and does not auto-mint a
+random credential. Mint a token deliberately via `POST /api/v1/tokens` or
+`clotho auth token create`; the plaintext is returned only to that explicit
+request and is never written to service logs. Before enabling
+`CLOTHO_AUTH_REQUIRED=true`, provision `CLOTHO_BOOTSTRAP_TOKEN` through the
+deployment secret manager (or configure the managed AuthProvider). Inspect the
+current actor with `GET /api/v1/me`.
 
 **§11 #7 default:** Clotho continues minting `clotho_tok_…` under both
 providers. Under `clerk`, Clerk session JWTs and org API keys also resolve to
@@ -243,6 +281,7 @@ missing, incomplete, or tampered releases:
 ```bash
 curl -s -X POST http://localhost:8080/api/v1/repos/tiny-gpt/actions/runs \
   -H 'content-type: application/json' \
+  -H 'Idempotency-Key: evaluate-v1-01' \
   -d '{"workflow":"evaluate","release_version":"v1.0.0"}' | jq
 ```
 
@@ -350,6 +389,7 @@ curl -s http://localhost:8080/api/v1/repos/weave/merge-policy \
 # start an Action run
 curl -s -X POST http://localhost:8080/api/v1/repos/weave/actions/runs \
   -H 'content-type: application/json' \
+  -H 'Idempotency-Key: docs-action-01' \
   -H "Authorization: Bearer $CLOTHO_TOKEN" \
   -d '{"actor":"docs"}' | jq
 
@@ -455,7 +495,10 @@ const issue = await clotho.createIssue("weave", {
   body: "repro on main",
   labels: ["bug"],
 });
-const run = await clotho.createActionRun("weave", { actor: "script" });
+const run = await clotho.createActionRun("weave", {
+  actor: "script",
+  idempotencyKey: "script-action-01",
+});
 const logs = await clotho.actionLogs("weave", run.id);
 ```
 
@@ -463,9 +506,10 @@ const logs = await clotho.actionLogs("weave", run.id);
 
 - `/api/v1` is the stable-path candidate. During `0.x`, release notes must call
   out any behavioral or schema incompatibility; clients should pin a release.
-- Error envelope version `1`, request correlation, repository/activity pagination, and
-  CLI error classes are frozen. The remaining public-alpha gate covers cursor
-  pagination for other unbounded collections, idempotency, conditional-write,
+- Error envelope version `1`, request correlation, repository/activity
+  pagination, manual Action-run idempotency, and CLI error classes are frozen.
+  The remaining public-alpha gate covers cursor pagination for other unbounded
+  collections, idempotency for other retryable mutations, conditional-write,
   asynchronous-operation, cancellation, rate/size-limit, and
   request/audit-correlation conventions.
 - Additive changes remain compatible. A removal or semantic change after the
