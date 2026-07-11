@@ -3,6 +3,13 @@
 `clotho` is a thin human client over the **REST edge** (ADR-0010). It never
 shells out to local `git` binaries — all reads and writes go through the gateway.
 
+> **Pre-release CLI:** command groups are usable today, but grammar and exit-code
+> compatibility are not frozen. The public-alpha gate adds generated command
+> reference, named contexts with OS-keychain tokens, strict stdout/stderr and
+> JSON behavior, stable exit-code classes, completions, signed binaries, and
+> retry/idempotency controls. See
+> [`release-readiness.md`](release-readiness.md#cli).
+
 ```bash
 cargo run -p clotho-cli -- help
 # or after install:
@@ -28,6 +35,12 @@ Clotho `clotho_tok_…` (§11 #7). Agents stay on `clotho_agt_…` via MCP only.
 Exit status is non-zero on HTTP or usage errors (script-friendly). Gateway error
 envelopes (`{ "error": "…" }`) are surfaced in stderr-style messages, including
 merge **409** policy blocks from `clotho pr merge`.
+
+For current automation, pin the Clotho release, pass `--json`, and do not parse
+human-formatted tables. The compatibility freeze will reserve stdout for the
+requested value, stderr for diagnostics/progress, and publish distinct exit
+classes for usage, authentication, permission, policy conflict, not-found,
+retryable unavailability, and internal failure.
 
 ## Demo loop
 

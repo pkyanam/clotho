@@ -4,6 +4,12 @@ The **api-gateway** (`clotho-api-gateway`, default `http://localhost:8080`) is
 the single product contract for humans (CLI), agents (MCP tools that call this
 edge), the web console, and `@clotho/sdk-js`.
 
+> **Pre-release contract:** `/api/v1` is the intended compatibility boundary,
+> but the public-alpha hardening gate is not complete. Consumers should pin a
+> Clotho release until stable error codes, pagination, idempotency, async
+> operations, and full OpenAPI schema verification land. Track the contract in
+> [`release-readiness.md`](release-readiness.md).
+
 ## Contract
 
 | Artifact | Location |
@@ -379,7 +385,15 @@ const logs = await clotho.actionLogs("weave", run.id);
 
 ## Versioning
 
-- Additive REST changes are fine within the prototype (`0.x`).
-- Breaking changes require an explicit major bump once Clotho leaves prototype.
-- Prefer documenting new paths in OpenAPI **in the same PR** as the Axum route
-  (the drift test enforces path presence).
+- `/api/v1` is the stable-path candidate. During `0.x`, release notes must call
+  out any behavioral or schema incompatibility; clients should pin a release.
+- The public-alpha gate freezes a machine-readable error envelope, cursor
+  pagination, idempotency, conditional-write, asynchronous-operation,
+  cancellation, rate/size-limit, and request/audit-correlation conventions.
+- Additive changes remain compatible. A removal or semantic change after the
+  beta freeze requires a deprecation window, migration note, and versioned path.
+- Document a route and its complete request, success, and error schemas in
+  OpenAPI **in the same change**. Today CI checks route presence; Stage 22 must
+  upgrade this to structural OpenAPI↔implementation↔SDK verification.
+- Internal gRPC, Forgejo routes, database schemas, and provider bridge APIs are
+  not public contracts unless a document explicitly promotes them.

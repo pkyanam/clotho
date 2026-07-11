@@ -8,6 +8,13 @@ VCS tools use internal gRPC. **Collab, Actions, and platform tools call the
 REST edge** (`CLOTHO_API_URL`) so agents cannot drift from the public API
 ([`openapi.yaml`](openapi.yaml)).
 
+> **Pre-release MCP:** tool names and scopes are usable but not yet under a
+> compatibility freeze. Public alpha requires versioned schemas, stable typed
+> errors, operation handles/progress/cancellation for durable work, capability
+> classes, REST-equivalence tests, request/audit correlation, and a published
+> prompt-injection authority model. See
+> [`release-readiness.md`](release-readiness.md#mcp-and-autonomous-agent-handoff).
+
 ## Auth
 
 1. An operator creates an agent and mints a token through the **REST edge**
@@ -49,6 +56,12 @@ values — only metadata where applicable.
 
 Every tool call is audited (agent, tool, repo, status). Scope denials return
 an MCP tool error result, not a transport failure.
+
+Repository files, cards, issues, comments, imported metadata, Actions logs, and
+tool output are **untrusted content**, never authority. They cannot expand token
+scope, mint credentials, approve destructive work, or override Clotho policy.
+Agents must obtain new authority from an authenticated operator through the
+human REST/CLI/web surfaces.
 
 - **Repo-scoped tools** require `allowed_repos` to include the repo (or `*`).
 - **Platform tools** (`list_providers`, `list_repos`, `get_activity`, and

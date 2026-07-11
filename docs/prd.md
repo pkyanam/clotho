@@ -1,6 +1,6 @@
 # Clotho — Product Requirements
-### Prototype record, v2 modular-platform roadmap, and v3 dream roadmap
-**v0.3 — July 2026**
+### Prototype record, modular-platform roadmap, and public-release plan
+**v0.4 — July 2026**
 
 ---
 
@@ -17,6 +17,14 @@ PRD v2 shifts the product from "prove the stack works" to "make Clotho a mature 
 - Treat web, REST, SDK, CLI, and MCP parity as part of feature maturity, not separate polish.
 
 **PRD v3 (Dream Roadmap)** turns the vision's idealism into sequenced product work: Clerk human auth, a Provider Fabric (compute + BYO storage + Tailscale network), Arachne on the real VCS path (code *and* model/dataset repos), and an agent runtime that does not feel bolted on (durable merge-queue, sandboxes, provenance). See §5 Stages 17–21 and ADRs 0018–0022. Discovery (Stage 16) stays after those foundations.
+
+**PRD v4 makes public trust the immediate next milestone.** Stage 22 is the
+release gate even where earlier capability stages have remaining work: API,
+CLI, SDK, MCP, security, durability, packaging, accessibility, and an
+unfamiliar-agent handoff must be hardened before Clotho makes a stable platform
+claim. Stages 23–27 sequence the most defensible frontier ideas. See
+[`release-readiness.md`](release-readiness.md) and
+[`frontier-roadmap.md`](frontier-roadmap.md).
 
 ---
 
@@ -577,6 +585,98 @@ repo kinds/policies, materialized CI export, and streaming download/LFS Batch.
 - **Acceptance:** same as Stage 16, plus model/code public browsing does
   not lie about storage or compute capabilities.
 
+### Stage 22 — Public alpha and contract hardening *(PRD v4 — immediate next gate)*
+
+- Execute the P0 checklist in
+  [`release-readiness.md`](release-readiness.md): complete OpenAPI schemas,
+  stable error codes, pagination, idempotency, request correlation, generated or
+  structurally verified SDK types, CLI automation semantics, versioned MCP tool
+  contracts, authorization matrix, backup/restore drills, migrations, resource
+  bounds, accessibility, packaging, and public project hygiene.
+- Add the agent-ready repository contract: root `AGENTS.md`, current handoff,
+  capability discovery, deterministic fixtures, bootstrap diagnostics, and an
+  acceptance checklist that an unfamiliar agent can execute without internal
+  services or undocumented environment variables.
+- Treat the dashboard contrast issue as a design-system release blocker. Meet
+  WCAG 2.2 AA in light and dark themes and capture release evidence across core
+  journeys (see `docs/design/stage13-web-console.md`).
+- Publish an honest alpha support/compatibility policy and known limitations;
+  do not claim HA or production readiness without the later stable gate.
+- **Acceptance:** clean clone succeeds on a new machine; all default tests and
+  release builds pass; restore succeeds from a complete backup; API diff is
+  reviewed; and a fresh agent completes create → orient → change → test →
+  submit using only public docs and scoped surfaces.
+
+### Stage 23 — Handoff Capsules and repository task plane
+
+- Make a handoff an immutable repository object: goal, authority, acceptance,
+  checkpoint, operation/diff state, context manifest, evidence, budget, leases,
+  related resources, and explicit assumptions/blockers.
+- Add a task plane above issues for executable work with dependency graphs,
+  concurrency-safe workspace leases, authority levels, bounded retries,
+  speculative attempts, review routing, and terminal evidence.
+- REST owns capsule/task semantics; CLI and MCP expose resume/fork/inspect;
+  web renders the same object for humans.
+- **Acceptance:** an agent without transcript access resumes another agent's
+  partial task from a capsule and reaches the same deterministic test result;
+  stale-base and insufficient-scope resumes fail explainably.
+
+### Stage 24 — Lachesis evidence graph and executable release contracts
+
+- Compose source, artifacts, datasets, model ancestry, evaluations, Actions,
+  compute/runtime facts, approvals, security/license results, SBOMs, signatures,
+  deployments, and agent provenance into a content-addressed release graph.
+- Add impact queries by digest and explainable release policies for required
+  artifacts, evaluation thresholds, regression budgets, review, licensing,
+  scanner state, reproducibility, and approved trust/network boundaries.
+- Generate common policies from web defaults; raw configuration remains an
+  advanced escape hatch, not the onboarding path.
+- **Acceptance:** a user or agent can prove what produced a release, compare
+  evaluation evidence fairly, and enumerate releases affected by a revoked
+  dataset, vulnerable component, or failed policy edge.
+
+### Stage 25 — Compute Bindings and GPU/data locality
+
+- Add a repository/branch/release compute binding expressed as capabilities
+  (accelerator, persistence, region, isolation, private reach, residency,
+  budget), resolved through CCI rather than provider syntax.
+- Materialize verified releases into persistent provider snapshots; fork warm
+  evaluation/inference workspaces; cache by release/runtime/driver/GPU contract.
+- Schedule near Arachne/BYO storage or inside the tailnet and show predicted
+  transfer, warmup, runtime cost, and trust boundary before execution.
+- Return outputs to isolated Arachne namespaces; repository mutation still
+  passes policy and merge queue.
+- **Acceptance:** a release-bound H100 workspace starts from a verified warm
+  snapshot, performs no unnecessary full artifact transfer, and returns an
+  attested result linked into Lachesis.
+
+### Stage 26 — Lazy repositories and protocol mesh
+
+- Materialize repository metadata immediately and fetch Arachne ranges on
+  demand in managed sandboxes; later expose a cross-platform virtual mount.
+- Add sparse path/symbol orientation for agents and signed offline travel packs.
+- Generalize the existing Hugging Face projection so one immutable Clotho
+  release can be consumed through Git/LFS, Hub, HTTPS ranges, OCI
+  artifacts/referrers, and selected package/storage read protocols.
+- **Acceptance:** a hundreds-of-gigabytes repository becomes usable without a
+  full checkout, and every protocol resolves to the same Clotho release digest
+  and evidence graph.
+
+### Stage 27 — Connector/provider kit, Atropos lifecycle, and federation
+
+- Publish out-of-process provider and policy SDKs with signed manifests,
+  capability/egress declarations, UI schemas, and automated conformance suites.
+- Add repository-bound database/warehouse/vector/object connectors: schema and
+  bounded context, read-only by default, audited and network-policy constrained.
+- Introduce Atropos retention, legal hold, garbage collection, cache eviction,
+  revocation, and verifiable deletion across Git, Arachne, backups, and external
+  providers.
+- Add federation/discovery only after permission, evidence, and lifecycle
+  semantics remain correct across instances.
+- **Acceptance:** a third party ships a conformant integration without core
+  patches; lifecycle policy traces or deletes every relevant copy; federation
+  never leaks private metadata or bypasses release verification.
+
 ---
 
 ## 6. Success criteria
@@ -620,6 +720,18 @@ repo kinds/policies, materialized CI export, and streaming download/LFS Batch.
 - Stage 16 discovery does not ship ahead of Stages 17–20 without an
   explicit waiver.
 
+### PRD v4 (Public trust + frontier)
+
+- Stage 22 public-alpha gates are evidence-backed; release readiness is not a
+  README assertion.
+- A new operator can install, diagnose, upgrade, back up, and restore Clotho
+  using published artifacts and documentation.
+- An unfamiliar, least-privileged agent can orient, execute a bounded task,
+  recover from interruption, and hand off through public surfaces only.
+- New frontier work follows the core-scope decision rule in
+  [`frontier-roadmap.md`](frontier-roadmap.md); integrations remain integrations
+  when they do not strengthen Clotho's source-of-truth role.
+
 ---
 
 ## 7. Public interfaces
@@ -644,6 +756,11 @@ repo kinds/policies, materialized CI export, and streaming download/LFS Batch.
 - **CLI/MCP:** API-backed wrappers only; no shelling out to `git`/`jj` from
   Clotho services. Stage 15 raises CLI/MCP to parity with stable REST; Stages
   17–20 extend the same rule to new routes.
+- **Public-alpha contract:** Stage 22 freezes stable error, pagination,
+  idempotency, async-operation, audit-correlation, CLI exit, and MCP capability
+  semantics before the surface grows further.
+- **Frontier:** Stages 23–27 add handoff/task, evidence/policy, compute-binding,
+  lazy/projection, connector/lifecycle, and federation APIs through REST first.
 
 ---
 
@@ -658,11 +775,25 @@ repo kinds/policies, materialized CI export, and streaming download/LFS Batch.
 - Compute provider contract tests using disabled/fake providers by default;
   env-gated live tests for Daytona, ComputeSDK bridge providers, and Box.
 - MCP end-to-end tests for scoped agent permissions and parity workflows.
+- Contract tests for stable error codes, pagination, idempotent replay,
+  cancellation, conditional writes, request/audit correlation, OpenAPI↔SDK
+  schema parity, CLI stdout/exit behavior, and MCP↔REST equivalence.
+- Security tests for tenant isolation, SSRF, archive/path traversal, webhook
+  replay, secret redaction, prompt-injection authority boundaries, and scoped
+  agent capabilities.
+- Migration and full backup/restore drills across Postgres, Git objects,
+  Arachne/object storage, and the secrets key.
+- Automated WCAG checks plus light/dark visual regression for every critical
+  public-alpha journey.
 - **v3 additions:** Clerk (or mock AuthProvider) session + API-key paths;
   ObjectStoreProvider probe/configured honesty; Arachne commit/fetch
   round-trip + dedup measurement; Tailscale connect mocked + env-gated live
   ephemeral join; merge-queue durability across restart; sandbox
   checkpoint/restore; provenance trailer assertions on agent commits.
+- **v4 additions:** unfamiliar-agent handoff acceptance; capsule stale-base and
+  scope tests; evidence-graph impact queries; release policy explanations;
+  warm GPU binding provenance; lazy range-fetch correctness; cross-protocol
+  digest identity; retention/deletion traceability.
 
 ---
 

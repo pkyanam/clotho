@@ -1,259 +1,192 @@
-# Clotho
+<div align="center">
+  <img src="./logo-placeholder.svg" alt="Clotho" width="112" height="112" />
+
+  <h1>Clotho</h1>
+
+  <p><strong>The source of truth for software, models, datasets, and the humans and agents that build them.</strong></p>
+
+  <p>
+    Open source · Self-hostable · Git compatible · Agent native
+  </p>
+
+  <p>
+    <a href="./docs/vision-spec.md">Vision</a>
+    · <a href="./docs/prd.md">Product roadmap</a>
+    · <a href="./docs/release-readiness.md">Release readiness</a>
+    · <a href="./docs/frontier-roadmap.md">What comes next</a>
+    · <a href="./docs/api.md">API</a>
+    · <a href="./docs/mcp.md">MCP</a>
+  </p>
+</div>
+
+<!--
+PUBLIC RELEASE SCREENSHOT
+
+Add the final light/dark product screenshot here before announcing the release:
 
 <p align="center">
-  <img src="./logo-placeholder.svg" alt="Clotho logo placeholder" width="120" height="120" />
+  <img src="./docs/assets/clotho-dashboard.png" alt="Clotho dashboard" width="1200" />
 </p>
-
-<p align="center">
-  <strong>Version control and collaboration for humans and AI agents working concurrently.</strong>
-</p>
-
-<p align="center">
-  <a href="./docs/vision-spec.md">Vision</a>
-  ·
-  <a href="./docs/prd.md">Product PRD</a>
-  ·
-  <a href="./docs/adr">ADRs</a>
-  ·
-  <a href="./collab/README.md">Forgejo Boundary</a>
-</p>
+-->
 
 ---
 
-## What Is Clotho?
+Clotho is a modular version-control and collaboration platform designed for a
+world where humans and AI agents work concurrently. It combines Git-compatible
+history, Jujutsu-native operations, content-defined artifact storage, durable
+automation, model and dataset management, and scoped agent tools behind one
+Clotho-owned control plane.
 
-Clotho is an open, modular version control and collaboration platform for the
-world where commits, reviews, issues, and operational work are produced by
-humans and AI agents at the same time.
+Clotho is not a skin over Forgejo and it is not an ML registry bolted onto Git.
+Forgejo is an internal collaboration provider; compute, storage, networking,
+identity, and Hub integrations are replaceable modules. The public product
+surface is Clotho: web, REST, SDK, CLI, Git/Hugging Face compatibility, and MCP.
 
-The goal is simple to say and hard to build:
+> **Release status:** active pre-release software. The core platform is working
+> end to end, but the public API stability, security review, accessibility,
+> packaging, migration, and recovery gates in
+> [release readiness](./docs/release-readiness.md) must close before a stable
+> production claim.
 
-- **Vercel-simple**: create a repo, push work, open the product UI, and invite
-  agents without YAML archaeology.
-- **Cloudflare-robust**: expose a calm surface over real primitives: VCS,
-  storage, collaboration, agent identity, merge queues, and compute.
-- **Agent-native**: agents are first-class identities with scoped credentials,
-  audited actions, checkpoints, structured diffs, and merge-queue writes.
-- **Open and self-hostable**: every major subsystem should be swappable, and the
-  project should remain practical to run outside a managed cloud.
+## Why Clotho
 
-Clotho is not a GitHub skin. It is a decoupled product shell and API over a set
-of independently replaceable services.
+### One repository, every artifact
 
----
+Code, model weights, datasets, evaluation evidence, cards, releases, and
+automation provenance share one commit graph. Large artifacts stream through
+**Arachne**, Clotho's content-defined storage engine, while normal Git clients
+continue to see real Git objects and standard LFS-compatible pointers.
 
-## Current Status
+### Agents are identities, not API keys with names
 
-Clotho is an active prototype moving toward a real product surface.
+Agents receive scoped, revocable credentials; checkpoint and restore through
+the repository operation log; consume structured diffs; submit through a
+merge queue; and leave an auditable record of every action. Human and
+agent interfaces resolve to the same product contract.
 
-Completed foundations include:
+### Bring your own infrastructure
 
-- jj-lib-backed VCS engine writing real git objects.
-- Xet-style content-defined storage over S3-compatible object storage.
-- Forgejo adopted as an unmodified internal collaboration provider.
-- Merge queue that serializes per repo and lands conflicts as first-class
-  commits.
-- MCP agent gateway with scoped tokens, audit log, checkpoint/restore,
-  structured diff, commit, and submit tools.
-- REST API gateway used by both the web app and CLI.
-- Rust `clotho` CLI for repo creation, status, log, PR lookup, commit, and
-  submit flows.
-- Next.js product shell with native Clotho repo, PR, issue, Actions, agent,
-  storage, insight, and settings views.
+Clotho has stable provider boundaries for compute, object storage, networking,
+and authentication. Daytona, ComputeSDK, StorageSDK, S3-compatible stores, and
+Tailscale fit behind Clotho-owned capability contracts instead of leaking
+vendor configuration into every repository.
 
-See [docs/prd.md](./docs/prd.md) for stage-by-stage implementation notes.
+### A model and dataset platform that stays portable
 
----
+Clotho imports pinned Hugging Face snapshots, classifies semantic artifacts,
+fails closed on unsafe scans, produces immutable verified releases, and serves
+those releases through Clotho-native streaming and standard Hugging Face read
+routes. Workloads can run against exact release digests without silently
+falling back to a mutable hosted revision.
+
+## What works today
+
+- **Git-compatible VCS:** jj-lib-backed operations that write real Git objects,
+  with checkpoints, operation history, structured diffs, and conflict-aware
+  submission.
+- **Arachne storage:** content-defined deduplication over S3-compatible storage,
+  transparent large-file pointers, byte-range reads, and optional StorageSDK
+  adapters.
+- **Typed repositories:** `code`, `model`, and `dataset` policies with semantic
+  manifests, cards, bounded previews, evaluations, and artifact readiness.
+- **Hub migration and compatibility:** durable Hugging Face imports plus
+  model/dataset discovery, refs, commits, trees, `HEAD`, and `resolve` reads.
+- **Immutable releases:** commit- and manifest-bound versions with tamper
+  verification and reproducible evaluation, inference, and benchmark Actions.
+- **Actions and GPU policy:** capability-aware compute through CCI, Daytona,
+  and an optional ComputeSDK bridge, including repository-level GPU intent.
+- **Provider fabric:** Clotho-managed compute, storage, network, Hub, and auth
+  connections with encrypted secrets and honest configured-state reporting.
+- **Private networking:** Tailscale connection and repository network intent,
+  designed to fail closed when private reach is unavailable.
+- **First-class agents:** MCP tools for VCS, issues, pull requests, Actions,
+  repositories, providers, activity, and bounded file reads.
+- **Clotho control plane:** organizations, permissions, tokens, secrets,
+  notifications, audit activity, merge policy, and a native web console.
 
 ## Architecture
 
 ```text
-humans / agents
-  |
-  |  browser, CLI, MCP clients
-  v
-+-----------------------+        +--------------------------+
-| apps/web              |        | clotho-agent-gateway     |
-| product UI            |        | MCP + agent identity     |
-+-----------+-----------+        +------------+-------------+
-            |                                 |
-            | REST                            | gRPC / HTTP
-            v                                 v
-+----------------------------------------------------------+
-| clotho-api-gateway                                       |
-| public REST edge and collaboration facade                |
-+------+----------------+------------------+---------------+
-       |                |                  |
-       v                v                  v
-+-------------+  +--------------+  +-----------------------+
-| clotho-vcs  |  | clotho-diff  |  | clotho-merge-queue    |
-| jj-lib      |  | tree-sitter  |  | serialized landing    |
-+------+------+  +--------------+  +-----------------------+
-       |
-       | real git objects
-       v
-+----------------------------------------------------------+
-| internal providers                                       |
-| Forgejo · Postgres · S3-compatible storage · compute     |
-+----------------------------------------------------------+
+ humans                         agents
+ browser · CLI · SDK            MCP clients
+        │                           │
+        └───────────┬───────────────┘
+                    ▼
+          ┌─────────────────────┐
+          │ Clotho control plane│
+          │ REST · auth · policy│
+          └──────┬───────┬──────┘
+                 │       │
+       ┌─────────▼──┐  ┌─▼──────────────┐
+       │ VCS + diff │  │ Actions + agents│
+       │ jj · Git   │  │ queue · CCI     │
+       └──────┬─────┘  └───────┬────────┘
+              │                │
+       ┌──────▼──────┐  ┌──────▼────────────────┐
+       │ Arachne     │  │ modular providers      │
+       │ chunks · S3 │  │ compute · network · Hub│
+       └─────────────┘  └───────────────────────┘
+
+ Internal implementation providers: Forgejo · Postgres · MinIO
 ```
 
-### Layer Responsibilities
-
-| Layer | Responsibility |
+| Component | Responsibility |
 |---|---|
-| `apps/web` | Product UI for repositories, PRs, issues, Actions, agents, storage, insights, and settings |
-| `clotho-api-gateway` | Public REST edge, collaboration facade, webhook handling, and composition over internal services |
-| `clotho-agent-gateway` | MCP server, scoped agent tokens, authorization, audit log, and agent-facing tools |
-| `clotho-vcs` | jj-lib-backed VCS engine with real git-compatible object storage |
-| `clotho-storage` | Arachne storage engine: Xet-style chunk dedup over S3-compatible object storage |
-| `storage-sdk-bridge` | Optional open StorageSDK adapter layer for external stores plus agent snapshots/forks |
-| `clotho-merge-queue` | Per-repo serialized integration and first-class conflict commits |
-| `clotho-diff` | Tree-sitter structured diffs for humans and agents |
-| Forgejo | Internal collaboration provider for git HTTP, issues, PRs, comments, statuses, and webhooks |
+| `apps/web` | Clotho's human control plane |
+| `clotho-api-gateway` | Canonical REST contract, auth, policy, and composition |
+| `clotho-agent-gateway` | MCP transport, scoped agent identity, and audit |
+| `clotho-vcs` | jj-lib operation graph and Git-compatible objects |
+| `clotho-diff` | Tree-sitter structured diffs |
+| `clotho-storage` | Arachne chunk storage and reconstruction |
+| `clotho-merge-queue` | Serialized conflict-aware integration |
+| `clotho-compute` | Capability-based compute interface (CCI) |
+| Forgejo | Internal Git/collaboration compatibility provider |
 
-Clotho repositories are typed as `code`, `model`, or `dataset`. Model and
-dataset repos automatically route artifacts at or above 1 MiB through Arachne
-(10 MiB for code), with a per-repository policy editable from the web app, CLI,
-or API. The standard stack needs no `.env` file for this behavior.
+Architectural decisions are recorded in [`docs/adr`](./docs/adr).
 
-Every repository also has a Clotho-owned semantic artifact manifest. Model
-weights (Safetensors, GGUF, ONNX, PyTorch, TensorFlow), tokenizers, dataset
-shards (Parquet, Arrow, JSONL, CSV), schemas, cards, and evaluations are
-classified with logical sizes and publication-readiness checks. The web app,
-CLI, and SDK consume that control-plane view without exposing Forgejo or
-downloading multi-gigabyte Arachne payloads.
-Dataset repositories add bounded CSV, TSV, and JSONL row previews; repository
-cards render CommonMark plus GFM while refusing implicit remote-image loads.
-Hugging Face-style card frontmatter and portable model/dataset configs become
-structured discovery metadata with source provenance, not presentation-only
-tags trapped in a README renderer.
+## Quick start
 
-The Hub provider fabric can import a pinned Hugging Face model or dataset
-snapshot into an existing Clotho repository. Imports validate the fixed source
-host, preserve scanner status, fail closed on unsafe artifacts, stream large
-files into Arachne, and land as ordinary Clotho commits. Public imports need no
-configuration; private/gated access uses an encrypted in-app token.
-Large imports are durable jobs with live file/byte progress, scanner summaries,
-commit provenance, errors, and automatic replay after gateway restarts.
-Database leases and worker heartbeats fence stale workers, so multiple gateway
-replicas can share the queue without importing the same snapshot concurrently.
-Clotho releases then freeze a human version, Git commit, semantic artifact
-manifest, and SHA-256 attestation in the control plane. Releases are immutable
-and re-verified on every read, making Clotho—not a backing Hub—the registry of
-record for model, dataset, and code provenance.
-Evaluation, inference, and benchmark Actions can be pinned to those releases;
-GPU sandboxes receive the verified release digest and exact commit, making a
-"repo linked to an H100" a reproducible platform primitive rather than an
-untracked notebook session. Release-pinned sandboxes are self-describing
-offline ML runtimes: Clotho injects a local artifact root, canonical release
-URI, repo identity/kind, and JSON provenance manifest while preventing
-frameworks from silently falling back to a mutable hosted Hub revision.
-Action workers use database leases and heartbeats too: gateway restarts and
-replica failures are reclaimed automatically, with stale workers fenced and
-the recovery attempt visible in Clotho.
-Release files have a Clotho-native `HEAD`/streaming `GET` distribution path.
-Multi-GB weights flow from Arachne with immutable cache headers, SHA-256 ETags,
-and commit/manifest provenance—never through Forgejo and never through a JSON
-base64 response. Single HTTP byte ranges are served as `206 Partial Content`,
-and Arachne skips unrelated Xet segments so interrupted GPU/model transfers can
-resume without reconstructing the whole artifact.
-Clotho also projects releases through the standard Hugging Face read routes:
-`model_info`, `dataset_info`, repository trees, `resolve`, and `HEAD`. Existing
-`huggingface_hub` clients can point at Clotho and keep their familiar API while
-Clotho remains the source of truth underneath. Standard model/dataset discovery
-searches only permission-checked, verified releases in Clotho's catalog.
-Public releases are anonymously readable in managed deployments, while
-private/internal catalog entries remain token- and permission-gated.
-Standard Hub refs map `main` to the newest verified release and project every
-immutable Clotho version as a tag for existing client tooling.
-Hub commit-history calls resolve through the release binding into Clotho VCS,
-keeping Forgejo out of the public provenance path.
-Bounded JSON evaluation and benchmark artifacts are ingested into the semantic
-manifest, frozen with their source path, and surfaced beside the exact release
-commit/digest instead of floating independently from model weights.
+### Requirements
 
-Tailscale is a first-class NetworkProvider: connect an org OAuth client from
-Clotho settings, verify it live, and mark repositories `public` or `tailscale`
-with scoped tags. Private repos fail closed when network attachment is not
-available instead of silently running over public egress. Provider credentials
-live in Clotho's encrypted vault; Docker generates a persistent vault key when
-an explicit master key is not supplied.
+- Docker Desktop or another Compose-compatible Docker runtime
+- Rust stable and `protoc`
+- Node.js 20+, `pnpm`, and `just`
 
-GPU compute is repository policy too. CCI advertises provider GPU capability
-and supported types; a repo can select `accelerator: gpu` and preferences such
-as H100/H200. Daytona-backed Actions translate that intent to the official
-`daytona-gpu` snapshot while keeping provider syntax out of the repository.
-
----
-
-## Repository Layout
-
-| Path | Purpose |
-|---|---|
-| [`apps/web`](./apps/web) | Main Clotho product app, built with Next.js |
-| [`apps/site`](./apps/site) | Marketing/teaser site |
-| [`crates`](./crates) | Rust services and CLI |
-| [`packages/sdk-js`](./packages/sdk-js) | Typed JavaScript client for the REST API |
-| [`packages/ui`](./packages/ui) | Shared design tokens and UI assets |
-| [`proto`](./proto) | Shared protobuf service definitions |
-| [`collab`](./collab) | Forgejo submodule boundary and collaboration notes |
-| [`infra`](./infra) | Docker and future deployment assets |
-| [`docs`](./docs) | Vision, PRD, ADRs, and proposals |
-| [`scripts`](./scripts) | Setup, provisioning, and demo scripts |
-
----
-
-## Development
-
-Prerequisites:
-
-- Rust stable
-- `protoc`
-- Docker
-- Node.js 20+
-- `pnpm`
-- `just`
-
-Install JavaScript dependencies:
+### Run Clotho locally
 
 ```sh
+git clone https://github.com/pkyanam/clotho.git
+cd clotho
 just setup
-```
-
-Run the full local stack:
-
-```sh
 just dev
 ```
 
-No `.env` file is required for the default local stack. Optional managed
-provider credentials can be connected from Clotho settings; environment
-variables remain an escape hatch for automation and deployment.
+Open [http://localhost:3100](http://localhost:3100).
 
-Local service defaults:
+The standard local stack does **not** require a `.env` file. Provider
+credentials can be connected inside Clotho; environment variables remain an
+automation and deployment escape hatch.
 
-| Service | URL |
+| Surface | Local address |
 |---|---|
-| Web app | http://localhost:3100 |
-| REST API gateway | http://localhost:8080 |
-| MCP agent gateway | http://localhost:8090/mcp |
-| Forgejo debug UI | http://localhost:13000 |
-| MinIO | http://localhost:9000 |
+| Web | `http://localhost:3100` |
+| REST / OpenAPI | `http://localhost:8080` · `/openapi.yaml` |
+| MCP | `http://localhost:8090/mcp` |
+| Forgejo debug provider | `http://localhost:13000` |
+| MinIO | `http://localhost:9000` |
 
-Forgejo is intentionally a debug/internal provider in normal Clotho workflows.
-The product UI and SDK should talk to `clotho-api-gateway`, not Forgejo.
-
-Run checks:
+### Verify the workspace
 
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-pnpm turbo build lint typecheck test
+pnpm typecheck
+pnpm lint
+pnpm test
 ```
 
-Stack-dependent smoke tests:
+Stack-dependent checks:
 
 ```sh
 just test-collab
@@ -261,71 +194,69 @@ just test-agent
 just test-storage
 ```
 
-Do not run `just dev-down` casually: it removes Docker volumes.
+Do not run `just dev-down` casually: it removes local Docker volumes.
 
----
+## Use Clotho
 
-## Deployment Direction
+The REST API is the canonical public contract. The web app and SDK use it;
+the CLI is a thin human client; MCP exposes a deliberately scoped agent
+surface. New product capabilities are not considered mature until these
+surfaces agree.
 
-Clotho is designed to ship as a set of versioned containers plus a small number
-of required backing services:
+```sh
+export CLOTHO_API_URL=http://localhost:8080
 
-- Postgres for control-plane data.
-- S3-compatible object storage for Arachne.
-- Persistent git repository storage.
-- Forgejo as an internal provider, until Clotho replaces or abstracts more of
-  that surface.
-- A CCI-compatible compute provider for Actions runs; Daytona is the first
-  configured provider.
+clotho repo init my-model --kind model
+clotho repo import-hf my-model openai-community/gpt2@main
+clotho repo imports my-model
+clotho repo artifacts my-model
+clotho repo release my-model v1.0.0
+clotho actions run my-model --workflow evaluate --release v1.0.0
+```
 
-Expected future deployment targets:
+Developer guides:
 
-| Target | Intended Use |
+- [REST and JavaScript SDK](./docs/api.md)
+- [CLI](./docs/cli.md)
+- [MCP agent gateway](./docs/mcp.md)
+- [OpenAPI contract](./docs/openapi.yaml)
+
+## Repository layout
+
+| Path | Purpose |
 |---|---|
-| Docker Compose | Local development, demos, single-node self-hosting |
-| Helm chart | Production self-hosting on Kubernetes |
-| Managed Clotho Cloud | Hosted free/paid product operated by the Clotho team |
-| CLI installer | Eventually, a friendlier single-node install path |
+| [`apps/web`](./apps/web) | Main product console |
+| [`apps/site`](./apps/site) | Public marketing site |
+| [`crates`](./crates) | Rust services and CLI |
+| [`packages/sdk-js`](./packages/sdk-js) | Typed JavaScript client |
+| [`packages/ui`](./packages/ui) | Shared design tokens and components |
+| [`services`](./services) | Optional provider bridges |
+| [`proto`](./proto) | Internal protobuf contracts |
+| [`collab`](./collab) | Isolated Forgejo boundary |
+| [`infra`](./infra) | Deployment assets |
+| [`docs`](./docs) | Vision, PRD, plans, and ADRs |
 
-The monorepo should publish:
+## Roadmap
 
-- one container image per Rust service;
-- one container image for `apps/web`;
-- release binaries for the `clotho` CLI;
-- Helm/Kustomize or Compose deployment assets.
+The immediate priority is a trustworthy public alpha: contract hardening,
+security boundaries, backup and restore, migrations, accessibility, release
+packaging, and a complete agent handoff path. The longer horizon includes
+versioned agent handoff capsules, an evidence graph, GPU/data-local compute
+bindings, lazy virtual repositories, and a protocol mesh that can project one
+Clotho release as Git, Hugging Face, OCI, and artifact-storage interfaces.
 
----
+Read the prioritized [frontier roadmap](./docs/frontier-roadmap.md) and the
+stage-by-stage [PRD](./docs/prd.md).
 
-## Licensing
+## Open source and provider boundaries
 
-Clotho's own code is intended to be distributed Apache-2.0 style. See
-[LICENSE](./LICENSE).
-
-Forgejo is GPLv3 and lives behind a clear runtime/API boundary:
-
-- `collab/forgejo` is a submodule pinned to an upstream Forgejo release.
-- The dev stack runs the unmodified official Forgejo container image.
-- Clotho talks to Forgejo over HTTP and shared git object storage.
-- Forgejo source modifications require a deliberate decision and must respect
-  Forgejo's GPLv3 license.
-
-See [collab/README.md](./collab/README.md) and
+Clotho's own code is licensed under [Apache-2.0](./LICENSE). Forgejo is GPLv3
+and remains an unmodified, separately distributed internal provider behind a
+runtime/API boundary. See [the collaboration boundary](./collab/README.md) and
 [ADR-0003](./docs/adr/0003-forgejo-integration-adopt.md).
 
----
+## The name
 
-## Project Docs
-
-- [Vision Spec](./docs/vision-spec.md)
-- [Product PRD](./docs/prd.md)
-- [Architecture Decision Records](./docs/adr)
-- [Stage 9 Proposal](./docs/proposals/stage-9-product-shell-collaboration-facade.md)
-- [Stage 10 Proposal](./docs/proposals/stage-10-actions-compute-control-plane.md)
-
----
-
-## Name
-
-Clotho is named for the Fate who spins the thread. The platform is built around
-the same idea: many human and agent hands continuously spinning one coherent
-commit graph forward.
+Clotho is the Fate who spins the thread. The platform is built around the same
+idea: many human and agent hands continuously spinning one coherent history
+forward.

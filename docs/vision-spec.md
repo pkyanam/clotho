@@ -1,6 +1,6 @@
 # Clotho
 ### A version control & collaboration platform for humans and AI agents
-**Master Vision & Architecture Spec — v0.1 (July 2026)**
+**Master Vision & Architecture Spec — v0.2 (July 2026)**
 
 ---
 
@@ -10,6 +10,13 @@ GitHub was built for a world where every commit came from a human typing at a ke
 
 **Clotho is the version control platform built for the world as it actually is now: humans and agents, working together, on the same repo, at the same time.**
 
+The repository is the product's unit of truth, but “repository” means more than
+a Git tree. A Clotho repository binds source, models, datasets, evaluations,
+releases, agent work, compute, network reach, storage placement, policy, and
+provenance to one recoverable history. Other systems may execute or mirror that
+state; Clotho remains the place where identity, intent, evidence, and the final
+artifact meet.
+
 Design targets, stated plainly:
 
 - **As simple as Vercel** — zero-config to first deploy/first commit, opinionated defaults, delightful UI.
@@ -17,6 +24,11 @@ Design targets, stated plainly:
 - **Ultra-performant** — sub-second clone/push/pull even for multi-gigabyte repos, chunk-level dedup, global edge caching.
 - **Open, self-hostable, and modular** — every major subsystem (compute, storage, database, network) should be swappable. No lock-in, by design, as a competitive stance against GitHub/GitLab.
 - **Agent-native, not agent-adjacent** — agents are first-class identities with their own permissions, checkpoints, and structured APIs, not humans-with-a-bot-flag bolted onto a 2008-era data model.
+- **Verifiable by default** — a release is not merely a tag; it is a commit,
+  artifact manifest, evidence graph, policy decision, and immutable digest.
+- **Protocol-friendly** — teams should be able to adopt Clotho without replacing
+  every client immediately. Git, Hugging Face, OCI, and artifact protocols can
+  project one Clotho-owned release without becoming competing sources of truth.
 
 ---
 
@@ -77,7 +89,13 @@ This is what makes Clotho legitimately better than GitHub+LFS for anything ML/da
 
 ### 3.3 Collaboration layer
 
-Don't reinvent this — fork/extend **Forgejo** (or build API-compatible with it) for: issues, PRs/MRs, org & team permissions, webhooks, federation (ForgeFed). Spend novelty budget on storage and the agent layer, not re-deriving code review UX that's already solved well.
+Don't reinvent mature collaboration plumbing. Run **Forgejo unmodified as an
+internal provider** for Git HTTP and selected issue/PR compatibility while
+Clotho owns the public web, REST, SDK, CLI, MCP, identity, policy, audit, and
+product semantics. This preserves a clean GPL boundary and lets Forgejo be
+replaced without changing the user-facing contract. Spend novelty budget on
+the VCS, storage, agent runtime, evidence, and provider fabric—not on exposing a
+second forge UI.
 
 ### 3.4 Agent interface layer — the actual differentiator
 
@@ -164,6 +182,17 @@ Two distinct things worth separating:
 - Published performance benchmarks vs. GitHub+LFS and HF Hub
 - *Agent runtime v2 (PRD v3 / ADR-0022):* durable merge-queue, sandbox sessions, provenance
   trailers before discovery/social polish (prd Stages 20–21).
+
+**Phase 5 — Verifiable autonomous development**
+- Public interface, security, recovery, accessibility, and packaging hardening
+- Versioned Handoff Capsules and an executable repository task plane
+- Lachesis evidence graph plus explainable release/evaluation policy
+- Capability-based compute bindings with warm GPU and data-local execution
+- Lazy virtual repositories and multi-protocol release projection
+- Open provider/connector conformance kit and Atropos lifecycle policy
+
+See [`release-readiness.md`](release-readiness.md) for the immediate gate and
+[`frontier-roadmap.md`](frontier-roadmap.md) for the sequenced product thesis.
 
 ---
 
