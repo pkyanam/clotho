@@ -145,7 +145,8 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
                 "diff_symbol",
                 "commit",
                 "submit_change",
-                "get_file"
+                "get_file",
+                "list_repos"
             ],
         }),
         "mint token",
@@ -199,11 +200,24 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
             "commit",
             "diff_symbol",
             "get_file",
+            "list_repos",
             "orient_repo",
             "restore_to",
             "submit_change"
         ]
     );
+
+    // Bounded platform listings preserve the canonical REST page envelope.
+    let (err, mcp_repos) = call_tool(&client, "list_repos", json!({ "limit": 1 })).await;
+    assert!(!err, "list_repos failed: {mcp_repos}");
+    let rest_repos: Value = reqwest::get(format!("{}/api/v1/repos?limit=1", env.api_url))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(mcp_repos["repos"], rest_repos["repos"]);
+    assert_eq!(mcp_repos["next_cursor"], rest_repos["next_cursor"]);
 
     // 3. Orientation: heads, main target, op log, and file tree.
     let (err, orient) = call_tool(&client, "orient_repo", json!({ "repo": repo })).await;

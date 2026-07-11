@@ -174,19 +174,15 @@ paths:
       summary: List repos owned by an org
       parameters:
         - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/repoPageLimit"
+        - $ref: "#/components/parameters/repoPageCursor"
       responses:
         "200":
           description: Repo list
           content:
             application/json:
               schema:
-                type: object
-                required: [repos]
-                properties:
-                  repos:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/RepoInfo"
+                $ref: "#/components/schemas/RepoList"
 
   /api/v1/activity:
     get:
@@ -219,19 +215,16 @@ paths:
       tags: [repos]
       operationId: listRepos
       summary: List all repos
+      parameters:
+        - $ref: "#/components/parameters/repoPageLimit"
+        - $ref: "#/components/parameters/repoPageCursor"
       responses:
         "200":
           description: Repo list
           content:
             application/json:
               schema:
-                type: object
-                required: [repos]
-                properties:
-                  repos:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/RepoInfo"
+                $ref: "#/components/schemas/RepoList"
     post:
       tags: [repos]
       operationId: createRepo
@@ -2670,6 +2663,22 @@ paths:
 
 components:
   parameters:
+    repoPageLimit:
+      name: limit
+      in: query
+      description: Repository page size; bounded to protect the control plane
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 100
+    repoPageCursor:
+      name: cursor
+      in: query
+      description: Opaque cursor returned as next_cursor by the preceding page
+      schema:
+        type: string
+        maxLength: 2048
     org:
       name: org
       in: path
@@ -2989,6 +2998,19 @@ components:
           type: string
         configured:
           type: boolean
+    RepoList:
+      type: object
+      required: [repos, next_cursor]
+      properties:
+        repos:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/RepoInfo"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Opaque cursor for the next page; null on the last page
     CreatedRepo:
       type: object
       required: [name, owner, owner_org, description, visibility, kind, large_file_threshold_bytes, network_mode, network_tags, default_branch, clone_url, provider, configured, operation_id, initial_commit_id, info]

@@ -114,11 +114,17 @@ human REST/CLI/web surfaces.
 | Tool | REST |
 |---|---|
 | `list_providers` | `GET /api/v1/providers` |
-| `list_repos` | `GET /api/v1/repos` |
+| `list_repos` | `GET /api/v1/repos?limit={1..100}&cursor={opaque}` |
 | `get_activity` | `GET /api/v1/activity` |
 | `list_secrets` | org/repo secrets **metadata only** |
 | `get_tree` | `GET …/tree` |
 | `get_file` | `GET …/file` |
+
+`list_repos` accepts optional `limit` and `cursor` arguments and returns the
+canonical REST page envelope with `repos` and `next_cursor`. Agents must treat
+the cursor as opaque, request one bounded page at a time, and stop when
+`next_cursor` is absent. Invalid cursors preserve REST's `invalid_request` code
+and request ID in MCP error data.
 
 ## Demo loop
 

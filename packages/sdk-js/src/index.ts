@@ -41,6 +41,18 @@ export interface RepoInfo {
   configured: boolean;
 }
 
+export interface RepoList {
+  repos: RepoInfo[];
+  next_cursor: string | null;
+}
+
+export interface RepoPageOptions {
+  /** Page size. REST accepts 1..100; defaults to 100. */
+  limit?: number;
+  /** Opaque cursor returned by the preceding page. */
+  cursor?: string;
+}
+
 /** One jj commit (a real git commit) from clotho-vcs. */
 export interface Commit {
   commit_id: string;
@@ -890,11 +902,18 @@ export class ClothoClient {
     });
   }
 
-  async listRepos(): Promise<RepoInfo[]> {
-    const { repos } = await this.request<{ repos: RepoInfo[] }>(
-      "/api/v1/repos",
+  listReposPage(options?: RepoPageOptions): Promise<RepoList> {
+    return this.request<RepoList>(
+      `/api/v1/repos${qs({
+        limit: options?.limit,
+        cursor: options?.cursor,
+      })}`,
     );
-    return repos;
+  }
+
+  /** Compatibility helper that follows bounded REST pages, up to 10,000 repos. */
+  async listRepos(): Promise<RepoInfo[]> {
+    return this.collectRepoPages((options) => this.listReposPage(options));
   }
 
   getRepo(name: string): Promise<RepoDetail> {
@@ -1634,11 +1653,20 @@ export class ClothoClient {
     return this.request(`/api/v1/orgs/${encodeURIComponent(org)}`);
   }
 
-  async getOrgRepos(org: string): Promise<RepoInfo[]> {
-    const { repos } = await this.request<{ repos: RepoInfo[] }>(
-      `/api/v1/orgs/${encodeURIComponent(org)}/repos`,
+  getOrgReposPage(org: string, options?: RepoPageOptions): Promise<RepoList> {
+    return this.request<RepoList>(
+      `/api/v1/orgs/${encodeURIComponent(org)}/repos${qs({
+        limit: options?.limit,
+        cursor: options?.cursor,
+      })}`,
     );
-    return repos;
+  }
+
+  /** Compatibility helper that follows bounded REST pages, up to 10,000 repos. */
+  async getOrgRepos(org: string): Promise<RepoInfo[]> {
+    return this.collectRepoPages((options) =>
+      this.getOrgReposPage(org, options),
+    );
   }
 
   async activity(options?: { limit?: number }): Promise<ActivityEvent[]> {
@@ -1988,6 +2016,26 @@ export class ClothoClient {
       `/api/v1/providers/${encodeURIComponent(provider)}/connect${q}`,
       { method: "DELETE" },
     );
+  }
+
+  private async collectRepoPages(
+    load: (options: RepoPageOptions) => Promise<RepoList>,
+  ): Promise<RepoInfo[]> {
+    const repos: RepoInfo[] = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    for (let page = 0; page < 100; page += 1) {
+      const response = await load({ limit: 100, cursor });
+      repos.push(...response.repos);
+      const next = response.next_cursor ?? undefined;
+      if (!next) return repos;
+      if (seen.has(next)) {
+        throw new Error("repository pagination returned a repeated cursor");
+      }
+      seen.add(next);
+      cursor = next;
+    }
+    throw new Error("repository pagination exceeded 10,000 items");
   }
 }
 

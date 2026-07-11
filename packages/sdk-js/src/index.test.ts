@@ -23,7 +23,29 @@ describe("ClothoClient", () => {
     const { client, fetchMock } = clientWith(jsonResponse({ repos: [] }));
     await client.listRepos();
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://gateway.test/api/v1/repos",
+      "http://gateway.test/api/v1/repos?limit=100",
+      expect.objectContaining({ headers: {} }),
+    );
+  });
+
+  it("follows opaque repository cursors for compatibility callers", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ repos: [{ name: "alpha" }], next_cursor: "cursor-2" }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ repos: [{ name: "beta" }], next_cursor: null }),
+      );
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    const repos = await client.listRepos();
+    expect(repos.map((repo) => repo.name)).toEqual(["alpha", "beta"]);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://gateway.test/api/v1/repos?limit=100&cursor=cursor-2",
       expect.objectContaining({ headers: {} }),
     );
   });

@@ -210,8 +210,19 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
             })
         }
         "list" => {
-            let body: Value =
-                request_json(config, reqwest::Method::GET, "/api/v1/repos", None).await?;
+            let limit = take_option(&mut args, "--limit").unwrap_or_else(|| "100".into());
+            let cursor = take_option(&mut args, "--cursor");
+            if !args.is_empty() {
+                bail!("usage: clotho repo list [--limit 1..100] [--cursor <opaque>]");
+            }
+            let query = repo_page_query(&limit, cursor.as_deref())?;
+            let body: Value = request_json(
+                config,
+                reqwest::Method::GET,
+                &format!("/api/v1/repos{query}"),
+                None,
+            )
+            .await?;
             emit(config, &body, || {
                 for repo in body["repos"].as_array().into_iter().flatten() {
                     println!(
@@ -221,6 +232,9 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
                         repo["open_issues_count"].as_i64().unwrap_or(0),
                         repo["open_pr_counter"].as_i64().unwrap_or(0)
                     );
+                }
+                if let Some(cursor) = body["next_cursor"].as_str() {
+                    println!("next cursor: {cursor}");
                 }
             })
         }
@@ -2027,17 +2041,29 @@ async fn cmd_org(config: &Config, mut args: Vec<String>) -> Result<()> {
             })
         }
         "repos" => {
-            let name = require_one(&args, "clotho org repos <name>")?;
+            if args.is_empty() {
+                bail!("usage: clotho org repos <name> [--limit 1..100] [--cursor <opaque>]");
+            }
+            let name = args.remove(0);
+            let limit = take_option(&mut args, "--limit").unwrap_or_else(|| "100".into());
+            let cursor = take_option(&mut args, "--cursor");
+            if !args.is_empty() {
+                bail!("usage: clotho org repos <name> [--limit 1..100] [--cursor <opaque>]");
+            }
+            let query = repo_page_query(&limit, cursor.as_deref())?;
             let body: Value = request_json(
                 config,
                 reqwest::Method::GET,
-                &format!("/api/v1/orgs/{name}/repos"),
+                &format!("/api/v1/orgs/{name}/repos{query}"),
                 None,
             )
             .await?;
             emit(config, &body, || {
                 for repo in body["repos"].as_array().into_iter().flatten() {
                     println!("{}", repo["name"].as_str().unwrap_or("?"));
+                }
+                if let Some(cursor) = body["next_cursor"].as_str() {
+                    println!("next cursor: {cursor}");
                 }
             })
         }
@@ -2077,6 +2103,29 @@ fn repo_path(path: &Path) -> String {
     path.to_string_lossy().trim_start_matches("./").to_string()
 }
 
+fn repo_page_query(limit: &str, cursor: Option<&str>) -> Result<String> {
+    let limit = limit
+        .parse::<usize>()
+        .context("--limit must be an integer from 1 to 100")?;
+    if !(1..=100).contains(&limit) {
+        bail!("--limit must be an integer from 1 to 100");
+    }
+    let mut query = format!("?limit={limit}");
+    if let Some(cursor) = cursor {
+        if cursor.is_empty()
+            || cursor.len() > 2048
+            || !cursor
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            bail!("--cursor must be an opaque cursor returned by Clotho");
+        }
+        query.push_str("&cursor=");
+        query.push_str(cursor);
+    }
+    Ok(query)
+}
+
 #[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt as _;
@@ -2108,7 +2157,7 @@ fn usage() {
 
   repo
     clotho repo init <name> [--kind code|model|dataset] [--large-file-threshold <bytes>] [--network public|tailscale] [--network-tag tag:name]...
-    clotho repo list
+    clotho repo list [--limit 1..100] [--cursor <opaque>]
     clotho repo status <repo>
     clotho repo update <name> [--description] [--visibility] [--default-branch] [--kind] [--large-file-threshold] [--network] [--network-tag]...
     clotho repo merge-policy get <repo>
@@ -2186,4 +2235,21 @@ fn usage() {
 
   Stage 8 aliases (still work): init, status, log, commit, submit, pr <repo>"
     );
+}
+
+#[cfg(test)]
+mod pagination_tests {
+    use super::*;
+
+    #[test]
+    fn repository_page_query_is_bounded_and_opaque() {
+        assert_eq!(repo_page_query("25", None).unwrap(), "?limit=25");
+        assert_eq!(
+            repo_page_query("25", Some("abc_123-def")).unwrap(),
+            "?limit=25&cursor=abc_123-def"
+        );
+        assert!(repo_page_query("0", None).is_err());
+        assert!(repo_page_query("101", None).is_err());
+        assert!(repo_page_query("25", Some("not a cursor")).is_err());
+    }
 }

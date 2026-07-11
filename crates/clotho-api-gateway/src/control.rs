@@ -1175,6 +1175,7 @@ pub(crate) async fn get_org_handler(
 pub(crate) async fn list_org_repos_handler(
     State(state): State<Arc<AppState>>,
     Path(org): Path<String>,
+    Query(query): Query<crate::repos::RepoListQuery>,
 ) -> Result<Json<crate::repos::RepoListResponse>, ApiError> {
     let provider = state.actions.default_provider();
     let configured = state.actions.provider_configured(&provider);
@@ -1223,7 +1224,7 @@ pub(crate) async fn list_org_repos_handler(
             .collect();
     }
 
-    Ok(Json(crate::repos::RepoListResponse { repos }))
+    Ok(Json(crate::repos::paginate_repos(repos, query)?))
 }
 
 pub(crate) async fn list_activity_handler(

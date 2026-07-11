@@ -91,12 +91,24 @@ clotho --json issue list demo-loop open
 clotho --json actions list demo-loop
 ```
 
+Repository listings are explicitly paged:
+
+```bash
+clotho repo list --limit 50
+clotho --json repo list --limit 50
+clotho org repos clotho --limit 50 --cursor '<opaque-next-cursor>'
+```
+
+Human output prints the next cursor when another page exists. With `--json`,
+stdout is exactly one page envelope, `{ "repos": [...], "next_cursor": ... }`.
+Pass `next_cursor` back unchanged; it is opaque. `--limit` must be `1..100`.
+
 ## Command groups
 
 | Group | Subcommands |
 |---|---|
 | `auth` | `whoami`, `token create\|list\|revoke` |
-| `repo` | `init`, `list`, `status`, `log`, `tree`, `artifacts`, `preview`, `import-hf`, `commit`, `submit`, `update`, `delete`, `merge-policy get\|set` |
+| `repo` | `init`, `list [--limit N] [--cursor C]`, `status`, `log`, `tree`, `artifacts`, `preview`, `import-hf`, `commit`, `submit`, `update`, `delete`, `merge-policy get\|set` |
 | `issue` | `list`, `create`, `get`, `comment`, `update` |
 | `label` | `list`, `create` |
 | `milestone` | `list`, `create` |
@@ -105,7 +117,7 @@ clotho --json actions list demo-loop
 | `actions` | `list`, `run` (alias `start`), `get`, `logs`, `config` |
 | `provider` | `list [--layer …\|--all]`, `get`, `connect` |
 | `secret` | `list`, `set`, `get`, `delete` (org\|repo; values write-only) |
-| `org` | `list`, `create`, `get`, `repos` |
+| `org` | `list`, `create`, `get`, `repos [--limit N] [--cursor C]` |
 | `activity` | feed (`--limit N`) |
 | `agent` | `list`, `create`, `tokens`, `mint`, `revoke`, `audit` (org admin) |
 

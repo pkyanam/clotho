@@ -6,9 +6,10 @@ edge), the web console, and `@clotho/sdk-js`.
 
 > **Pre-release contract:** `/api/v1` is the intended compatibility boundary,
 > but the public-alpha hardening gate is not complete. Consumers should pin a
-> Clotho release until pagination, idempotency, async-operation conventions,
-> and full OpenAPI schema verification land. Error envelope version `1` and
-> request correlation are stable. Track the remaining contract in
+> Clotho release until pagination across every unbounded collection,
+> idempotency, and async-operation conventions land. Error envelope version `1`,
+> request correlation, structural OpenAPI/SDK verification, and repository
+> pagination are stable. Track the remaining contract in
 > [`release-readiness.md`](release-readiness.md).
 
 ## Contract
@@ -58,6 +59,25 @@ Stable codes in envelope version `1` are `invalid_request`,
 `range_not_satisfiable`, `rate_limited`, `upstream_unavailable`,
 `service_unavailable`, `upstream_timeout`, and `internal_error`. Internal and
 provider topology is logged server-side but never returned in the safe message.
+
+### Repository pagination
+
+`GET /api/v1/repos` and `GET /api/v1/orgs/{org}/repos` use the same bounded
+cursor contract:
+
+- `limit` defaults to `100` and must be between `1` and `100`.
+- `cursor` is an opaque, URL-safe continuation token. Clients must not decode,
+  alter, or persist assumptions about its contents.
+- responses are `{ "repos": [...], "next_cursor": string | null }` and contain
+  at most `limit` repositories.
+- ordering is deterministic: newest `updated_at` first, then name ascending.
+- a missing `next_cursor` means the collection is exhausted. An invalid or
+  oversized cursor fails closed with `400 invalid_request`.
+
+The JavaScript SDK exposes `listReposPage` and `getOrgReposPage` for automation.
+Its compatibility `listRepos` and `getOrgRepos` helpers follow bounded pages,
+with loop and total-result guards. The CLI and MCP surfaces return one page so
+callers retain explicit control of work and latency.
 
 ### Auth model (Stage 17 / ADR-0018)
 
@@ -428,14 +448,15 @@ const logs = await clotho.actionLogs("weave", run.id);
 
 - `/api/v1` is the stable-path candidate. During `0.x`, release notes must call
   out any behavioral or schema incompatibility; clients should pin a release.
-- Error envelope version `1`, request correlation, and CLI error classes are
-  frozen. The remaining public-alpha gate covers cursor pagination,
-  idempotency, conditional-write, asynchronous-operation,
-  cancellation, rate/size-limit, and request/audit-correlation conventions.
+- Error envelope version `1`, request correlation, repository pagination, and
+  CLI error classes are frozen. The remaining public-alpha gate covers cursor
+  pagination for other unbounded collections, idempotency, conditional-write,
+  asynchronous-operation, cancellation, rate/size-limit, and
+  request/audit-correlation conventions.
 - Additive changes remain compatible. A removal or semantic change after the
   beta freeze requires a deprecation window, migration note, and versioned path.
 - Document a route and its complete request, success, and error schemas in
-  OpenAPI **in the same change**. Today CI checks route presence; Stage 22 must
-  upgrade this to structural OpenAPI↔implementation↔SDK verification.
+  OpenAPI **in the same change**. CI structurally verifies
+  OpenAPI↔implementation↔SDK coverage and schema shape.
 - Internal gRPC, Forgejo routes, database schemas, and provider bridge APIs are
   not public contracts unless a document explicitly promotes them.

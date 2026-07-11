@@ -30,10 +30,28 @@ use crate::AppState;
 #[derive(Serialize)]
 pub struct RepoListResponse {
     pub repos: Vec<RepoInfo>,
+    pub next_cursor: Option<String>,
+}
+
+pub const DEFAULT_REPO_PAGE_SIZE: usize = 100;
+pub const MAX_REPO_PAGE_SIZE: usize = 100;
+
+#[derive(Debug, Default, Deserialize)]
+pub struct RepoListQuery {
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct RepoCursor {
+    version: u8,
+    updated_at: String,
+    name: String,
 }
 
 pub async fn list_repos(
     State(state): State<Arc<AppState>>,
+    Query(query): Query<RepoListQuery>,
 ) -> Result<Json<RepoListResponse>, ApiError> {
     let provider = state.actions.default_provider();
     let configured = state.actions.provider_configured(&provider);
@@ -79,7 +97,171 @@ pub async fn list_repos(
             .collect();
     }
 
-    Ok(Json(RepoListResponse { repos }))
+    Ok(Json(paginate_repos(repos, query)?))
+}
+
+pub(crate) fn paginate_repos(
+    mut repos: Vec<RepoInfo>,
+    query: RepoListQuery,
+) -> Result<RepoListResponse, ApiError> {
+    let limit = query.limit.unwrap_or(DEFAULT_REPO_PAGE_SIZE);
+    if !(1..=MAX_REPO_PAGE_SIZE).contains(&limit) {
+        return Err(ApiError::InvalidRequest(format!(
+            "limit must be between 1 and {MAX_REPO_PAGE_SIZE}"
+        )));
+    }
+    let cursor = query
+        .cursor
+        .as_deref()
+        .map(decode_repo_cursor)
+        .transpose()?;
+
+    repos.sort_by(|left, right| {
+        right
+            .updated_at
+            .cmp(&left.updated_at)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    let mut page: Vec<RepoInfo> = repos
+        .into_iter()
+        .filter(|repo| {
+            cursor.as_ref().is_none_or(|cursor| {
+                repo.updated_at < cursor.updated_at
+                    || (repo.updated_at == cursor.updated_at && repo.name > cursor.name)
+            })
+        })
+        .take(limit + 1)
+        .collect();
+    let has_more = page.len() > limit;
+    if has_more {
+        page.pop();
+    }
+    let next_cursor = if has_more {
+        page.last().map(encode_repo_cursor).transpose()?
+    } else {
+        None
+    };
+    Ok(RepoListResponse {
+        repos: page,
+        next_cursor,
+    })
+}
+
+fn encode_repo_cursor(repo: &RepoInfo) -> Result<String, ApiError> {
+    let bytes = serde_json::to_vec(&RepoCursor {
+        version: 1,
+        updated_at: repo.updated_at.clone(),
+        name: repo.name.clone(),
+    })
+    .map_err(|error| ApiError::Internal(format!("encode repo cursor: {error}")))?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
+}
+
+fn decode_repo_cursor(value: &str) -> Result<RepoCursor, ApiError> {
+    if value.is_empty() || value.len() > 2048 {
+        return Err(ApiError::InvalidRequest("invalid repository cursor".into()));
+    }
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| ApiError::InvalidRequest("invalid repository cursor".into()))?;
+    let cursor: RepoCursor = serde_json::from_slice(&bytes)
+        .map_err(|_| ApiError::InvalidRequest("invalid repository cursor".into()))?;
+    // Forgejo can omit `updated_at` for older/imported repositories. An empty
+    // timestamp is therefore a legitimate sort key and a cursor emitted by
+    // this service must always be accepted on the next request.
+    if cursor.version != 1 || cursor.name.is_empty() {
+        return Err(ApiError::InvalidRequest("invalid repository cursor".into()));
+    }
+    Ok(cursor)
+}
+
+#[cfg(test)]
+mod pagination_tests {
+    use super::*;
+
+    fn repo(name: &str, updated_at: &str) -> RepoInfo {
+        RepoInfo {
+            name: name.into(),
+            updated_at: updated_at.into(),
+            ..RepoInfo::default()
+        }
+    }
+
+    #[test]
+    fn repository_cursor_pages_in_stable_order() {
+        let repos = vec![
+            repo("beta", "2026-07-11T12:00:00Z"),
+            repo("alpha", "2026-07-11T12:00:00Z"),
+            repo("older", "2026-07-10T12:00:00Z"),
+        ];
+        let first = paginate_repos(
+            repos.clone(),
+            RepoListQuery {
+                limit: Some(2),
+                cursor: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            first
+                .repos
+                .iter()
+                .map(|repo| repo.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "beta"]
+        );
+        let second = paginate_repos(
+            repos,
+            RepoListQuery {
+                limit: Some(2),
+                cursor: first.next_cursor,
+            },
+        )
+        .unwrap();
+        assert_eq!(second.repos[0].name, "older");
+        assert!(second.next_cursor.is_none());
+    }
+
+    #[test]
+    fn repository_pagination_rejects_invalid_inputs() {
+        assert!(paginate_repos(
+            vec![],
+            RepoListQuery {
+                limit: Some(0),
+                cursor: None,
+            }
+        )
+        .is_err());
+        assert!(paginate_repos(
+            vec![],
+            RepoListQuery {
+                limit: Some(1),
+                cursor: Some("not-a-cursor".into()),
+            }
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn repository_cursor_round_trips_an_empty_provider_timestamp() {
+        let first = paginate_repos(
+            vec![repo("alpha", ""), repo("beta", ""), repo("gamma", "")],
+            RepoListQuery {
+                limit: Some(1),
+                cursor: None,
+            },
+        )
+        .unwrap();
+        let second = paginate_repos(
+            vec![repo("alpha", ""), repo("beta", ""), repo("gamma", "")],
+            RepoListQuery {
+                limit: Some(1),
+                cursor: first.next_cursor,
+            },
+        )
+        .unwrap();
+        assert_eq!(second.repos[0].name, "beta");
+    }
 }
 
 #[derive(Serialize)]

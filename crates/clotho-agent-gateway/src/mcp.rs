@@ -226,7 +226,12 @@ pub struct GetActionLogsParams {
 pub struct ListProvidersParams {}
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct ListReposParams {}
+pub struct ListReposParams {
+    /// Page size. Clotho accepts 1..100 and defaults to 100.
+    pub limit: Option<u32>,
+    /// Opaque next_cursor returned by the preceding call.
+    pub cursor: Option<String>,
+}
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct GetActivityParams {
@@ -850,12 +855,25 @@ impl AgentGateway {
     )]
     async fn list_repos(
         &self,
-        Parameters(_params): Parameters<ListReposParams>,
+        Parameters(params): Parameters<ListReposParams>,
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let args = serde_json::to_value(&params).unwrap_or_default();
         let rest = self.rest.clone();
-        self.run_tool(&ctx, "list_repos", "", json!({}), async move {
-            rest.get("/api/v1/repos").await
+        self.run_tool(&ctx, "list_repos", "", args, async move {
+            let mut query = Vec::new();
+            if let Some(limit) = params.limit {
+                query.push(format!("limit={limit}"));
+            }
+            if let Some(cursor) = &params.cursor {
+                query.push(format!("cursor={}", urlencoding_query(cursor)));
+            }
+            let path = if query.is_empty() {
+                "/api/v1/repos".into()
+            } else {
+                format!("/api/v1/repos?{}", query.join("&"))
+            };
+            rest.get(&path).await
         })
         .await
     }

@@ -41,6 +41,13 @@ not_found` and added a live MCP↔REST error-equivalence assertion.
 - Corrected secret-detail parameter naming and missing Hugging Face, binary,
   and webhook OpenAPI schemas; added deterministic JSON inventory and API diff
   evidence under `docs/evidence/stage22-api-contract.md`.
+- Added bounded opaque cursor pagination to global and organization repository
+  lists across REST/OpenAPI/SDK/CLI/MCP/web, with a `1..100` maximum, stable
+  keyset ordering, explicit page envelopes, and guarded SDK compatibility
+  helpers.
+- Added live MCP↔REST page equivalence and browser pagination evidence. The GUI
+  check exposed provider repositories with empty timestamps; cursor decoding
+  now accepts that legitimate sort key and has a regression test.
 
 ## Baseline state
 
@@ -81,7 +88,7 @@ repository names was corrected in the source before final verification.
 
 For the API-structure slice, the full Rust and JavaScript host baselines passed
 with the contract verifier reporting 108 OpenAPI/Axum operations, 92 SDK calls,
-and 70 SDK interfaces. The API gateway image was rebuilt and restarted without
+and 72 SDK interfaces. The API gateway image was rebuilt and restarted without
 removing volumes; its served OpenAPI SHA-256 matched the checked-in file, the
 renamed secret-detail route returned the stable `404 not_found` envelope, and
 `just doctor --json --stack` remained ready.
@@ -89,10 +96,17 @@ renamed secret-detail route returned the stable `404 not_found` envelope, and
 No live Daytona, Box, ComputeSDK upstream, managed Clerk, private/gated Hub,
 or Tailscale credential test has been run in this slice.
 
+For the repository-pagination slice, focused cursor, CLI, SDK, and agent tests
+passed. Docker API, MCP, and web images were rebuilt without removing volumes.
+Live HTTP traversed non-overlapping pages, rejected `limit=0` with versioned
+`invalid_request`, and reused a cursor after an API restart. CLI JSON emitted
+one bounded envelope; `just test-agent` compared MCP and REST pages. The web
+repository page and visible next-page link were exercised in the browser at
+desktop and 320 px with no horizontal overflow.
+
 ## Next bounded acceptance test
 
-After the API-structure slice is green and pushed, implement bounded cursor
-pagination for canonical collections as the next Stage 22 blocker. Define one
-envelope and maximum-limit policy in REST/OpenAPI/SDK, migrate the smallest
-high-volume list family first, and preserve a documented compatibility path
-for existing SDK callers. Do not broaden into speculative Stage 23 work.
+Extend the bounded cursor convention to the next smallest high-volume list
+family, or add common persisted idempotency keys to a single retryable create
+operation if that produces the smaller end-to-end slice. Preserve REST-first
+parity and do not broaden into speculative Stage 23 work.
