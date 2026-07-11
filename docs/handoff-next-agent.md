@@ -10,12 +10,15 @@
 2. [`vision-spec.md`](vision-spec.md)
 3. [`prd.md`](prd.md), especially Stages 15 and 22
 4. [`release-readiness.md`](release-readiness.md)
-5. [`frontier-roadmap.md`](frontier-roadmap.md) — direction, not permission to
+5. [`handoff.md`](handoff.md) and
+   [`release-gap-matrix.md`](release-gap-matrix.md) — current implementation
+   evidence and next bounded acceptance
+6. [`frontier-roadmap.md`](frontier-roadmap.md) — direction, not permission to
    skip hardening
-6. [`api.md`](api.md), [`cli.md`](cli.md), [`mcp.md`](mcp.md), and
+7. [`api.md`](api.md), [`cli.md`](cli.md), [`mcp.md`](mcp.md), and
    [`openapi.yaml`](openapi.yaml)
-7. [`design/stage13-web-console.md`](design/stage13-web-console.md)
-8. [`adr/README.md`](adr/README.md) and any ADR governing files you touch
+8. [`design/stage13-web-console.md`](design/stage13-web-console.md)
+9. [`adr/README.md`](adr/README.md) and any ADR governing files you touch
 
 ## Current truth
 

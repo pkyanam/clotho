@@ -115,9 +115,9 @@ pub struct PullInfo {
     pub updated_at: String,
     #[serde(default)]
     pub comments: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub labels: Vec<IssueLabel>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub assignees: Vec<PullUser>,
 }
 
@@ -167,9 +167,9 @@ pub struct IssueInfo {
     pub body: Option<String>,
     pub state: String,
     pub user: PullUser,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub labels: Vec<IssueLabel>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub assignees: Vec<PullUser>,
     #[serde(default)]
     pub milestone: Option<MilestoneInfo>,
@@ -178,6 +178,17 @@ pub struct IssueInfo {
     pub html_url: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// Forgejo uses JSON `null` for some empty collection fields. Treat that as
+/// the empty collection at the provider boundary so the Clotho REST shape is
+/// stable across provider serialization details.
+fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

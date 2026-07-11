@@ -1658,7 +1658,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/Error"
 
   /api/v1/repos/{name}/pulls/{number}/diff:
     get:
@@ -2980,8 +2980,8 @@ components:
           type: string
         files:
           type: array
-            items:
-              $ref: "#/components/schemas/TreeEntry"
+          items:
+            $ref: "#/components/schemas/TreeEntry"
     ArtifactEntry:
       type: object
       required: [path, role, format, family, size_bytes, storage, oid_sha256, arachne_hash, conflicted]

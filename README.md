@@ -157,6 +157,7 @@ Architectural decisions are recorded in [`docs/adr`](./docs/adr).
 ```sh
 git clone https://github.com/pkyanam/clotho.git
 cd clotho
+just bootstrap
 just setup
 just dev
 ```
@@ -193,6 +194,9 @@ just test-collab
 just test-agent
 just test-storage
 ```
+
+`just doctor --json --stack` provides a read-only, machine-readable diagnostic
+after startup. It never removes volumes or requires provider credentials.
 
 Do not run `just dev-down` casually: it removes local Docker volumes.
 

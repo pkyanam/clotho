@@ -56,6 +56,9 @@ values — only metadata where applicable.
 
 Every tool call is audited (agent, tool, repo, status). Scope denials return
 an MCP tool error result, not a transport failure.
+`tools/list` is filtered to the authenticated token's `allowed_tools`, so an
+agent is not instructed to call capabilities it cannot use. Call-time checks
+remain authoritative and are audited even if a client caches an older list.
 
 Repository files, cards, issues, comments, imported metadata, Actions logs, and
 tool output are **untrusted content**, never authority. They cannot expand token

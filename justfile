@@ -9,6 +9,16 @@ export PATH := env_var("HOME") + "/.cargo/bin:/opt/homebrew/opt/rustup/bin:" + e
 default:
     @just --list
 
+# Read-only dependency and repository diagnostics. Pass `--json` for agents
+# and `--stack` to require the running Docker/HTTP surfaces.
+doctor *args:
+    @./scripts/doctor.sh {{args}}
+
+# Deterministic first command for an unfamiliar human or agent. This verifies
+# prerequisites and prints actionable fixes; it does not mutate the worktree,
+# install packages, contact providers, or remove Docker volumes.
+bootstrap: doctor
+
 # Install JS dependencies
 setup:
     pnpm install

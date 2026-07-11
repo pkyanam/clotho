@@ -12,11 +12,13 @@ use clotho_common::pb::vcs::v1::{
     ListFilesRequest, QueryOpLogRequest, RestoreToRequest,
 };
 use rmcp::handler::server::wrapper::Parameters;
+use rmcp::handler::server::{router::tool::ToolRouter, tool::ToolCallContext};
 use rmcp::model::{
-    CallToolResult, ContentBlock, ErrorData as McpError, ServerCapabilities, ServerInfo,
+    CallToolRequestParams, CallToolResult, ContentBlock, ErrorData as McpError, ListToolsResult,
+    PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
-use rmcp::{tool, tool_handler, tool_router, RoleServer, ServerHandler};
+use rmcp::{tool, tool_router, RoleServer, ServerHandler};
 use serde_json::{json, Value};
 use tonic::transport::Channel;
 
@@ -259,6 +261,7 @@ pub struct AgentGateway {
     queue: MergeQueueClient<Channel>,
     rest: RestClient,
     identity: IdentityStore,
+    tool_router: ToolRouter<Self>,
 }
 
 #[tool_router]
@@ -276,6 +279,7 @@ impl AgentGateway {
             queue: MergeQueueClient::new(queue),
             rest,
             identity,
+            tool_router: Self::tool_router(),
         }
     }
 
@@ -1068,8 +1072,39 @@ fn urlencoding_query(s: &str) -> String {
     out
 }
 
-#[tool_handler]
 impl ServerHandler for AgentGateway {
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        self.tool_router
+            .call(ToolCallContext::new(self, request, context))
+            .await
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, McpError> {
+        let agent = authed_agent(&context)?;
+        let tools = self
+            .tool_router
+            .list_all()
+            .into_iter()
+            .filter(|tool| agent.may_use_tool(tool.name.as_ref()))
+            .collect();
+        Ok(ListToolsResult {
+            tools,
+            ..Default::default()
+        })
+    }
+
+    fn get_tool(&self, name: &str) -> Option<Tool> {
+        self.tool_router.get(name).cloned()
+    }
+
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "Clotho agent gateway — VCS tools (gRPC) plus collab/Actions/platform tools \
