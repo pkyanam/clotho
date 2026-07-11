@@ -127,6 +127,31 @@ async fn load_release(
     .ok_or_else(|| ApiError::NotFound(format!("release {version:?} not found")))
 }
 
+pub(crate) struct ReleaseBinding {
+    pub commit_id: String,
+    pub manifest_sha256: String,
+    pub ready: bool,
+}
+
+pub(crate) async fn release_binding(
+    pool: &sqlx::PgPool,
+    repo_id: &str,
+    version: &str,
+) -> Result<ReleaseBinding, ApiError> {
+    let row = load_release(pool, repo_id, version).await?;
+    let release_summary = summary(&row)?;
+    if !release_summary.verified {
+        return Err(ApiError::Conflict(format!(
+            "release {version:?} failed manifest verification"
+        )));
+    }
+    Ok(ReleaseBinding {
+        commit_id: row.commit_id,
+        manifest_sha256: row.manifest_sha256,
+        ready: release_summary.ready,
+    })
+}
+
 pub async fn create_release(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

@@ -17,7 +17,7 @@ use std::sync::Arc;
 use clotho_common::pb::compute::v1::{JobFile, RunJobRequest};
 use clotho_common::pb::vcs::v1::{ExportRepoArchiveRequest, GetFileRequest, ListFilesRequest};
 
-use crate::actions::FinishedRun;
+use crate::actions::{FinishedRun, NewActionRun};
 use crate::AppState;
 
 const STATUS_CONTEXT: &str = "clotho-ci";
@@ -37,13 +37,16 @@ struct CiOutput {
 pub async fn run(state: Arc<AppState>, repo: String, sha: String) {
     let run = state
         .actions
-        .create_run(
-            repo.clone(),
-            sha.clone(),
-            "main".into(),
-            "push".into(),
-            "forgejo".into(),
-        )
+        .create_run(NewActionRun {
+            repo: repo.clone(),
+            commit_id: sha.clone(),
+            branch: "main".into(),
+            trigger: "push".into(),
+            actor: "forgejo".into(),
+            workflow: "ci".into(),
+            release_version: String::new(),
+            release_manifest_sha256: String::new(),
+        })
         .await;
     run_existing(state, run.id, repo, sha).await;
 }
@@ -54,6 +57,13 @@ pub async fn run_existing(state: Arc<AppState>, run_id: String, repo: String, sh
     let short = sha.get(..12).unwrap_or(&sha);
     let target_url = format!("{}/repos/{repo}/actions/{run_id}", state.web_url);
 
+    let run_context = match state.actions.get_run(&repo, &run_id).await {
+        Ok(run) => run,
+        Err(error) => {
+            tracing::error!(%repo, %run_id, %error, "cannot load Action provenance");
+            return;
+        }
+    };
     state.actions.mark_running(&run_id).await;
 
     // Mark pending immediately so reviewers see CI is running.
@@ -73,7 +83,7 @@ pub async fn run_existing(state: Arc<AppState>, run_id: String, repo: String, sh
     }
 
     let (state_str, conclusion, description, exit_code, logs, provider, sandbox_id) =
-        match execute(&state, &repo, &sha).await {
+        match execute(&state, &repo, &sha, &run_context).await {
             Ok(output) if output.exit_code == 0 => (
                 "success",
                 "success",
@@ -145,7 +155,12 @@ pub async fn run_existing(state: Arc<AppState>, run_id: String, repo: String, sh
 }
 
 /// Export the git objects, run the check in a sandbox, return result metadata.
-async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<CiOutput, String> {
+async fn execute(
+    state: &AppState,
+    repo: &str,
+    sha: &str,
+    run: &crate::actions::ActionRun,
+) -> Result<CiOutput, String> {
     let archive = state
         .vcs
         .clone()
@@ -193,7 +208,7 @@ async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<CiOutput, St
         }
     }
 
-    let script = ci_script(repo, &checkout);
+    let script = ci_script(repo, &checkout, &run.workflow);
     let mut job_files = vec![JobFile {
         path: format!("{SANDBOX_WORKDIR}/repo.tar"),
         content: archive.tar,
@@ -201,6 +216,15 @@ async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<CiOutput, St
     job_files.extend(materialized_large_files(state, repo, &checkout).await?);
     let mut env = std::collections::HashMap::new();
     env.insert("CLOTHO_ACCELERATOR".into(), config.accelerator.clone());
+    env.insert("CLOTHO_WORKFLOW".into(), run.workflow.clone());
+    env.insert("CLOTHO_COMMIT_ID".into(), run.commit_id.clone());
+    if !run.release_version.is_empty() {
+        env.insert("CLOTHO_RELEASE_VERSION".into(), run.release_version.clone());
+        env.insert(
+            "CLOTHO_RELEASE_MANIFEST_SHA256".into(),
+            run.release_manifest_sha256.clone(),
+        );
+    }
     if !config.gpu_types.is_empty() {
         env.insert("CLOTHO_GPU_TYPES".into(), config.gpu_types.join(","));
     }
@@ -296,11 +320,28 @@ async fn materialized_large_files(
 /// check out the pushed commit, and run a repo-defined check (else a sensible
 /// default probe). `repo` is validated `[a-z0-9-_]` and `sha` is validated hex
 /// upstream, so neither can break out of the shell.
-fn ci_script(repo: &str, sha: &str) -> String {
+fn ci_script(repo: &str, sha: &str, workflow: &str) -> String {
+    let workflow_step = match workflow {
+        "evaluate" => workflow_script("evaluate"),
+        "inference" => workflow_script("inference"),
+        "benchmark" => workflow_script("benchmark"),
+        _ => r#"if [ -f .clotho/ci.sh ]; then
+  echo "--- running .clotho/ci.sh"; sh .clotho/ci.sh
+elif [ -f Makefile ] || [ -f makefile ]; then
+  echo "--- running make"; make
+elif [ -f Cargo.toml ]; then
+  echo "--- running cargo test"; cargo test
+elif [ -f package.json ]; then
+  echo "--- running npm test"; npm install --no-audit --no-fund >/dev/null 2>&1 || true; npm test
+else
+  echo "--- no CI check defined; clean checkout treated as success"
+fi"#
+        .to_string(),
+    };
     format!(
         r#"set -eu
 cd {workdir}
-echo "=== clotho-ci: {repo}@{sha} ==="
+echo "=== clotho-{workflow}: {repo}@{sha} ==="
 tar xf repo.tar
 rm -rf checkout
 git clone --quiet repo.git checkout
@@ -316,24 +357,27 @@ find . -type f -size -1k -exec sh -c '
     fi
   done
 ' sh {{}} +
-if [ -f .clotho/ci.sh ]; then
-  echo "--- running .clotho/ci.sh"; sh .clotho/ci.sh
-elif [ -f Makefile ] || [ -f makefile ]; then
-  echo "--- running make"; make
-elif [ -f Cargo.toml ]; then
-  echo "--- running cargo test"; cargo test
-elif [ -f package.json ]; then
-  echo "--- running npm test"; npm install --no-audit --no-fund >/dev/null 2>&1 || true; npm test
-else
-  echo "--- no CI check defined; clean checkout treated as success"
-fi
+{workflow_step}
 "#,
         workdir = SANDBOX_WORKDIR,
+        workflow = workflow,
+        workflow_step = workflow_step,
         checkout_step = if sha.is_empty() {
             "echo '--- no commit to check out; using default branch'".to_string()
         } else {
             format!("git checkout --quiet {sha}")
         },
+    )
+}
+
+fn workflow_script(workflow: &str) -> String {
+    format!(
+        r#"if [ ! -f .clotho/{workflow}.sh ]; then
+  echo "missing required .clotho/{workflow}.sh for release-pinned {workflow} workflow" >&2
+  exit 64
+fi
+echo "--- running .clotho/{workflow}.sh"
+sh .clotho/{workflow}.sh"#
     )
 }
 
@@ -356,7 +400,7 @@ fn truncate(s: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::job_snapshot;
+    use super::{ci_script, job_snapshot};
     use crate::actions::ActionsConfig;
 
     fn config(accelerator: &str, image: &str) -> ActionsConfig {
@@ -385,5 +429,17 @@ mod tests {
             job_snapshot(&config("cpu", "custom-snapshot"), "daytona"),
             "custom-snapshot"
         );
+    }
+
+    #[test]
+    fn release_workflows_use_explicit_fail_closed_scripts() {
+        let evaluation = ci_script("model", "abc123", "evaluate");
+        assert!(evaluation.contains(".clotho/evaluate.sh"));
+        assert!(evaluation.contains("exit 64"));
+        assert!(!evaluation.contains("clean checkout treated as success"));
+
+        let ci = ci_script("model", "abc123", "ci");
+        assert!(ci.contains(".clotho/ci.sh"));
+        assert!(ci.contains("clean checkout treated as success"));
     }
 }

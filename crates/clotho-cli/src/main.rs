@@ -1412,12 +1412,21 @@ async fn cmd_actions(config: &Config, mut args: Vec<String>) -> Result<()> {
             emit(config, &body, || {
                 for run in body["runs"].as_array().into_iter().flatten() {
                     println!(
-                        "{}  {}  {}  {}  {}",
+                        "{}  {}  {}  {}  {}  {}{}",
                         run["id"].as_str().unwrap_or("?"),
                         run["status"].as_str().unwrap_or(""),
                         run["conclusion"].as_str().unwrap_or("-"),
                         short(run["commit_id"].as_str().unwrap_or("")),
-                        run["provider"].as_str().unwrap_or("")
+                        run["provider"].as_str().unwrap_or(""),
+                        run["workflow"].as_str().unwrap_or("ci"),
+                        if run["release_version"]
+                            .as_str()
+                            .is_some_and(|value| !value.is_empty())
+                        {
+                            format!("@{}", run["release_version"].as_str().unwrap_or(""))
+                        } else {
+                            String::new()
+                        }
                     );
                 }
             })
@@ -1426,13 +1435,15 @@ async fn cmd_actions(config: &Config, mut args: Vec<String>) -> Result<()> {
             if args.is_empty() {
                 bail!(
                     "usage: clotho actions run <repo> [--commit <id>] [--branch <name>] \
-                     [--actor <name>]"
+                     [--actor <name>] [--workflow ci|evaluate|inference|benchmark] [--release <version>]"
                 );
             }
             let repo = args.remove(0);
             let commit_id = take_option(&mut args, "--commit").unwrap_or_default();
             let branch = take_option(&mut args, "--branch").unwrap_or_else(|| "main".into());
             let actor = take_option(&mut args, "--actor").unwrap_or_else(|| "cli".into());
+            let workflow = take_option(&mut args, "--workflow").unwrap_or_else(|| "ci".into());
+            let release_version = take_option(&mut args, "--release").unwrap_or_default();
             if !args.is_empty() {
                 bail!("unrecognized arguments: {}", args.join(" "));
             }
@@ -1444,6 +1455,8 @@ async fn cmd_actions(config: &Config, mut args: Vec<String>) -> Result<()> {
                     "commit_id": commit_id,
                     "branch": branch,
                     "actor": actor,
+                    "workflow": workflow,
+                    "release_version": release_version,
                 })),
             )
             .await?;
@@ -2135,7 +2148,7 @@ fn usage() {
 
   actions
     clotho actions list <repo>
-    clotho actions run <repo> [--commit <id>] [--branch main] [--actor cli]
+    clotho actions run <repo> [--commit <id>] [--branch main] [--actor cli] [--workflow ci|evaluate|inference|benchmark] [--release <version>]
     clotho actions get <repo> <run-id>
     clotho actions logs <repo> <run-id>
     clotho actions config <repo> [--provider <id>] [--enabled true|false] [--accelerator cpu|gpu] [--gpu-type <id>]...

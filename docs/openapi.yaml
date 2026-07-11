@@ -1463,6 +1463,13 @@ paths:
                 actor:
                   type: string
                   default: manual
+                workflow:
+                  type: string
+                  enum: [ci, evaluate, inference, benchmark]
+                  default: ci
+                release_version:
+                  type: string
+                  description: Required for evaluate, inference, and benchmark; resolves and verifies the immutable release commit
       responses:
         "202":
           description: Accepted / queued
@@ -3423,6 +3430,14 @@ components:
           type: string
         actor:
           type: string
+        workflow:
+          type: string
+          enum: [ci, evaluate, inference, benchmark]
+        release_version:
+          type: string
+        release_manifest_sha256:
+          type: string
+          description: Verified immutable manifest digest injected into the sandbox
         provider:
           type: string
         sandbox_id:

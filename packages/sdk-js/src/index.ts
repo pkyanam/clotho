@@ -430,6 +430,9 @@ export interface ActionRun {
   conclusion: string;
   trigger: "push" | "manual" | "agent" | "pull_request" | string;
   actor: string;
+  workflow: "ci" | "evaluate" | "inference" | "benchmark" | string;
+  release_version: string;
+  release_manifest_sha256: string;
   provider: string;
   sandbox_id: string;
   created_at_millis: number;
@@ -1333,7 +1336,13 @@ export class ClothoClient {
 
   createActionRun(
     name: string,
-    options?: { commitId?: string; branch?: string; actor?: string },
+    options?: {
+      commitId?: string;
+      branch?: string;
+      actor?: string;
+      workflow?: "ci" | "evaluate" | "inference" | "benchmark";
+      releaseVersion?: string;
+    },
   ): Promise<ActionRun> {
     return this.request(
       `/api/v1/repos/${encodeURIComponent(name)}/actions/runs`,
@@ -1344,6 +1353,8 @@ export class ClothoClient {
           commit_id: options?.commitId ?? "",
           branch: options?.branch ?? "main",
           actor: options?.actor ?? "manual",
+          workflow: options?.workflow ?? "ci",
+          release_version: options?.releaseVersion ?? "",
         }),
       },
     );

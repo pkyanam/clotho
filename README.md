@@ -142,6 +142,10 @@ Clotho releases then freeze a human version, Git commit, semantic artifact
 manifest, and SHA-256 attestation in the control plane. Releases are immutable
 and re-verified on every read, making Clotho—not a backing Hub—the registry of
 record for model, dataset, and code provenance.
+Evaluation, inference, and benchmark Actions can be pinned to those releases;
+GPU sandboxes receive the verified release digest and exact commit, making a
+"repo linked to an H100" a reproducible platform primitive rather than an
+untracked notebook session.
 
 Tailscale is a first-class NetworkProvider: connect an org OAuth client from
 Clotho settings, verify it live, and mark repositories `public` or `tailscale`

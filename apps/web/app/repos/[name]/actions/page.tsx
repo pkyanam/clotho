@@ -22,11 +22,12 @@ export default async function ActionsPage({
 }) {
   const { name } = await params;
   const client = await api();
-  const [detail, runs, config, providers] = await Promise.all([
+  const [detail, runs, config, providers, releases] = await Promise.all([
     client.getRepo(name),
     client.actionRuns(name).catch(() => []),
     client.actionsConfig(name).catch((e) => fallbackActionsConfig(e)),
     client.computeProviders().catch(() => []),
+    client.releases(name).catch(() => []),
   ]);
   const provider = providers.find((p) => p.id === config.provider);
   const startRun = runAction.bind(null, name);
@@ -145,6 +146,12 @@ export default async function ActionsPage({
                           <span className="text-[0.8125rem] text-kumo-inactive">
                             {run.trigger} by {run.actor}
                           </span>
+                          {run.workflow !== "ci" && (
+                            <Badge variant="outline">{run.workflow}</Badge>
+                          )}
+                          {run.release_version && (
+                            <Badge variant="outline">{run.release_version}</Badge>
+                          )}
                         </div>
                         <p className="mt-1 break-all text-[0.8125rem] text-kumo-inactive">
                           {shortId(run.commit_id)} · {run.provider}
@@ -162,6 +169,56 @@ export default async function ActionsPage({
         </section>
 
         <aside className="space-y-5">
+          <Panel className="p-4">
+            <h2 className="text-[0.9375rem] font-medium text-kumo-default">
+              release workloads
+            </h2>
+            <p className="mt-2 text-[0.8125rem] leading-relaxed text-kumo-inactive">
+              run evaluation, inference, or benchmarks against an immutable
+              release. Clotho injects the release version, commit, and verified
+              manifest digest into the sandbox.
+            </p>
+            {releases.length === 0 ? (
+              <p className="mt-4 border-t border-kumo-hairline pt-4 text-[0.8125rem] text-kumo-inactive">
+                create a publishable release from the repository overview first.
+              </p>
+            ) : (
+              <form action={startRun} className="mt-4 grid gap-3">
+                <label className="text-[0.75rem] text-kumo-inactive">
+                  workflow
+                  <select
+                    name="workflow"
+                    className="mt-1 block w-full border border-kumo-hairline bg-kumo-control px-3 py-2 text-[0.8125rem] text-kumo-default"
+                  >
+                    <option value="evaluate">evaluate</option>
+                    <option value="inference">inference</option>
+                    <option value="benchmark">benchmark</option>
+                  </select>
+                </label>
+                <label className="text-[0.75rem] text-kumo-inactive">
+                  immutable release
+                  <select
+                    name="release_version"
+                    required
+                    className="mt-1 block w-full border border-kumo-hairline bg-kumo-control px-3 py-2 text-[0.8125rem] text-kumo-default"
+                  >
+                    {releases.map((release) => (
+                      <option key={release.id} value={release.version}>
+                        {release.version} · {shortId(release.commit_id)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Button
+                  type="submit"
+                  disabled={!config.enabled || !provider?.configured}
+                >
+                  run pinned workload
+                </Button>
+              </form>
+            )}
+          </Panel>
+
           <Panel className="p-4">
             <h2 className="text-[0.9375rem] font-medium text-kumo-default">
               workflow

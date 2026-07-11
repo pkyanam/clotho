@@ -170,6 +170,7 @@ clotho repo import-hf my-model hf-internal-testing/tiny-random-gpt2 --revision m
 clotho repo imports my-model
 clotho repo release my-model v1.0.0
 clotho repo releases my-model
+clotho actions run my-model --workflow evaluate --release v1.0.0
 ```
 
 Use repeated `--path` flags for a selective snapshot. Imports default to 200

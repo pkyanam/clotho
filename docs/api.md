@@ -156,6 +156,19 @@ The frozen manifest is bound to its Git commit and SHA-256 digest. Every read
 recomputes the digest and exposes `verified`; release versions cannot be
 overwritten or deleted.
 
+Release-pinned GPU workflows resolve that immutable commit and fail closed on
+missing, incomplete, or tampered releases:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/repos/tiny-gpt/actions/runs \
+  -H 'content-type: application/json' \
+  -d '{"workflow":"evaluate","release_version":"v1.0.0"}' | jq
+```
+
+The sandbox receives `CLOTHO_WORKFLOW`, `CLOTHO_COMMIT_ID`,
+`CLOTHO_RELEASE_VERSION`, and `CLOTHO_RELEASE_MANIFEST_SHA256`, then executes
+`.clotho/evaluate.sh`, `.clotho/inference.sh`, or `.clotho/benchmark.sh`.
+
 CSV, TSV, and JSONL previews are deliberately bounded: the gateway streams at
 most 256 KiB from Arachne and returns at most 100 rows. Large datasets never
 need to be materialized in gateway memory just to inspect their shape.

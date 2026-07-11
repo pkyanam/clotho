@@ -605,6 +605,8 @@ describe("ClothoClient", () => {
           commit_id: "abc",
           branch: "main",
           actor: "preetham",
+          workflow: "ci",
+          release_version: "",
         }),
       }),
     );

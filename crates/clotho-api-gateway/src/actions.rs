@@ -61,6 +61,17 @@ pub struct ActionsState {
     pool: Option<PgPool>,
 }
 
+pub(crate) struct NewActionRun {
+    pub repo: String,
+    pub commit_id: String,
+    pub branch: String,
+    pub trigger: String,
+    pub actor: String,
+    pub workflow: String,
+    pub release_version: String,
+    pub release_manifest_sha256: String,
+}
+
 impl ActionsState {
     pub fn default_provider(&self) -> String {
         self.defaults.provider.clone()
@@ -166,28 +177,24 @@ impl ActionsState {
         self.configs.lock().await.insert(repo, config);
     }
 
-    pub async fn create_run(
-        &self,
-        repo: String,
-        commit_id: String,
-        branch: String,
-        trigger: String,
-        actor: String,
-    ) -> ActionRun {
-        let config = self.config_for(&repo).await;
+    pub async fn create_run(&self, new: NewActionRun) -> ActionRun {
+        let config = self.config_for(&new.repo).await;
         let id = match self.next_run_id().await {
             Some(id) => id,
             None => format!("run-{}", self.next_id.fetch_add(1, Ordering::Relaxed)),
         };
         let run = ActionRun {
             id: id.clone(),
-            repo,
-            commit_id,
-            branch,
+            repo: new.repo,
+            commit_id: new.commit_id,
+            branch: new.branch,
             status: "queued".into(),
             conclusion: String::new(),
-            trigger,
-            actor,
+            trigger: new.trigger,
+            actor: new.actor,
+            workflow: new.workflow.clone(),
+            release_version: new.release_version,
+            release_manifest_sha256: new.release_manifest_sha256,
             provider: config.provider,
             sandbox_id: String::new(),
             created_at_millis: now_millis(),
@@ -197,7 +204,7 @@ impl ActionsState {
             jobs: vec![ActionJob {
                 id: format!("{id}-job-1"),
                 run_id: id.clone(),
-                name: "clotho-ci".into(),
+                name: format!("clotho-{}", new.workflow),
                 status: "queued".into(),
                 exit_code: None,
             }],
@@ -209,9 +216,10 @@ impl ActionsState {
                 r#"
                 insert into action_runs
                     (id, repo, commit_id, branch, status, conclusion, trigger, actor,
+                     workflow, release_version, release_manifest_sha256,
                      provider, sandbox_id, created_at_millis, started_at_millis,
                      finished_at_millis, duration_ms, jobs)
-                values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
                 "#,
             )
             .bind(&run.id)
@@ -222,6 +230,9 @@ impl ActionsState {
             .bind(&run.conclusion)
             .bind(&run.trigger)
             .bind(&run.actor)
+            .bind(&run.workflow)
+            .bind(&run.release_version)
+            .bind(&run.release_manifest_sha256)
             .bind(&run.provider)
             .bind(&run.sandbox_id)
             .bind(run.created_at_millis)
@@ -347,6 +358,7 @@ impl ActionsState {
                 sqlx::query(
                     r#"
                     select id, repo, commit_id, branch, status, conclusion, trigger, actor,
+                           workflow, release_version, release_manifest_sha256,
                            provider, sandbox_id, created_at_millis, started_at_millis,
                            finished_at_millis, duration_ms, jobs
                     from action_runs
@@ -364,6 +376,7 @@ impl ActionsState {
                 sqlx::query(
                     r#"
                     select id, repo, commit_id, branch, status, conclusion, trigger, actor,
+                           workflow, release_version, release_manifest_sha256,
                            provider, sandbox_id, created_at_millis, started_at_millis,
                            finished_at_millis, duration_ms, jobs
                     from action_runs
@@ -398,7 +411,7 @@ impl ActionsState {
         runs
     }
 
-    async fn get_run(&self, repo: &str, run_id: &str) -> Result<ActionRun, ApiError> {
+    pub(crate) async fn get_run(&self, repo: &str, run_id: &str) -> Result<ActionRun, ApiError> {
         if let Some(pool) = &self.pool {
             match db_run_by_id(pool, run_id).await {
                 Ok(Some(run)) if run.repo == repo => return Ok(run),
@@ -471,6 +484,9 @@ pub struct ActionRun {
     pub conclusion: String,
     pub trigger: String,
     pub actor: String,
+    pub workflow: String,
+    pub release_version: String,
+    pub release_manifest_sha256: String,
     pub provider: String,
     pub sandbox_id: String,
     pub created_at_millis: i64,
@@ -558,6 +574,10 @@ pub struct CreateActionRunRequest {
     pub branch: String,
     #[serde(default = "default_manual_actor")]
     pub actor: String,
+    #[serde(default = "default_workflow")]
+    pub workflow: String,
+    #[serde(default)]
+    pub release_version: String,
 }
 
 fn default_branch() -> String {
@@ -566,6 +586,10 @@ fn default_branch() -> String {
 
 fn default_manual_actor() -> String {
     "manual".into()
+}
+
+fn default_workflow() -> String {
+    "ci".into()
 }
 
 #[derive(Clone, Serialize)]
@@ -687,7 +711,7 @@ pub async fn create_run(
     Json(req): Json<CreateActionRunRequest>,
 ) -> Result<(StatusCode, Json<ActionRun>), ApiError> {
     let auth = auth::resolve_auth(&headers, &state).await?;
-    if let Some(pool) = &state.pool {
+    let repo = if let Some(pool) = &state.pool {
         let repo = control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
         if repo.repo.network_mode == "tailscale" {
             if !crate::providers::tailscale_configured(&state, Some(&repo.org_name)).await {
@@ -701,7 +725,10 @@ pub async fn create_run(
                     .into(),
             ));
         }
-    }
+        Some(repo)
+    } else {
+        None
+    };
     let config = state.actions.config_for(&name).await;
     if !config.enabled {
         return Err(ApiError::InvalidRequest(
@@ -709,7 +736,47 @@ pub async fn create_run(
         ));
     }
 
-    let commit_id = if req.commit_id.trim().is_empty() {
+    let workflow = req.workflow.trim().to_ascii_lowercase();
+    if !matches!(
+        workflow.as_str(),
+        "ci" | "evaluate" | "inference" | "benchmark"
+    ) {
+        return Err(ApiError::InvalidRequest(
+            "workflow must be ci, evaluate, inference, or benchmark".into(),
+        ));
+    }
+    let release_version = req.release_version.trim().to_string();
+    if workflow != "ci" && release_version.is_empty() {
+        return Err(ApiError::InvalidRequest(format!(
+            "{workflow} runs must be pinned to an immutable release"
+        )));
+    }
+    let release_binding = if release_version.is_empty() {
+        None
+    } else {
+        let pool = state.pool.as_ref().ok_or_else(|| {
+            ApiError::Internal("release-pinned Actions require the control plane".into())
+        })?;
+        let repo = repo.as_ref().ok_or_else(|| {
+            ApiError::Internal("release-pinned Actions require repository metadata".into())
+        })?;
+        let binding =
+            crate::releases::release_binding(pool, &repo.repo.id, &release_version).await?;
+        if !binding.ready {
+            return Err(ApiError::Conflict(format!(
+                "release {release_version:?} is not marked ready"
+            )));
+        }
+        Some(binding)
+    };
+    let commit_id = if let Some(binding) = &release_binding {
+        if !req.commit_id.trim().is_empty() && req.commit_id != binding.commit_id {
+            return Err(ApiError::Conflict(
+                "commit_id does not match the immutable release".into(),
+            ));
+        }
+        binding.commit_id.clone()
+    } else if req.commit_id.trim().is_empty() {
         let mut vcs = state.vcs.clone();
         let heads = vcs
             .get_heads(GetHeadsRequest { repo: name.clone() })
@@ -727,13 +794,22 @@ pub async fn create_run(
 
     let run = state
         .actions
-        .create_run(
-            name.clone(),
-            commit_id.clone(),
-            req.branch,
-            "manual".into(),
-            req.actor,
-        )
+        .create_run(NewActionRun {
+            repo: name.clone(),
+            commit_id: commit_id.clone(),
+            branch: req.branch,
+            trigger: if release_binding.is_some() {
+                "release".into()
+            } else {
+                "manual".into()
+            },
+            actor: req.actor,
+            workflow,
+            release_version,
+            release_manifest_sha256: release_binding
+                .map(|binding| binding.manifest_sha256)
+                .unwrap_or_default(),
+        })
         .await;
     tokio::spawn(ci::run_existing(state, run.id.clone(), name, commit_id));
     Ok((StatusCode::ACCEPTED, Json(run)))
@@ -1151,6 +1227,7 @@ async fn db_run_by_id(pool: &PgPool, run_id: &str) -> Result<Option<ActionRun>, 
     sqlx::query(
         r#"
         select id, repo, commit_id, branch, status, conclusion, trigger, actor,
+               workflow, release_version, release_manifest_sha256,
                provider, sandbox_id, created_at_millis, started_at_millis,
                finished_at_millis, duration_ms, jobs
         from action_runs
@@ -1204,6 +1281,9 @@ fn row_to_run(row: sqlx::postgres::PgRow) -> ActionRun {
         conclusion: row.get("conclusion"),
         trigger: row.get("trigger"),
         actor: row.get("actor"),
+        workflow: row.get("workflow"),
+        release_version: row.get("release_version"),
+        release_manifest_sha256: row.get("release_manifest_sha256"),
         provider: row.get("provider"),
         sandbox_id: row.get("sandbox_id"),
         created_at_millis: row.get("created_at_millis"),
