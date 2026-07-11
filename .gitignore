@@ -28,3 +28,9 @@ next-env.d.ts
 
 # Logs
 *.log
+
+# Internal product development material
+#
+# Vision/specs, PRDs, handoffs, prompts, proposals, ADRs, design notes,
+# release planning, and implementation evidence are intentionally local-only.
+docs/

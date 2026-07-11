@@ -259,7 +259,7 @@ pub fn router_with_pool(
     Ok(Router::new()
         .route("/healthz", get(healthz))
         .route("/api/v1/capabilities", get(capabilities))
-        // Stage 15: published OpenAPI contract (hand-maintained docs/openapi.yaml).
+        // Stage 15: published OpenAPI contract (hand-maintained openapi.yaml).
         .route("/openapi.yaml", get(openapi_yaml))
         // Slice A: human API tokens and current user.
         .route("/api/v1/me", get(auth::me_handler))
@@ -512,9 +512,9 @@ async fn capabilities() -> Json<serde_json::Value> {
 }
 
 /// Hand-maintained OpenAPI 3 document for `/api/v1/*` (Stage 15).
-/// Kept in `docs/openapi.yaml` and embedded so the running gateway always
+/// Kept in `openapi.yaml` and embedded so the running gateway always
 /// serves the same contract checked by `tests/openapi_drift.rs`.
-const OPENAPI_YAML: &str = include_str!("../../../docs/openapi.yaml");
+const OPENAPI_YAML: &str = include_str!("../../../openapi.yaml");
 
 async fn openapi_yaml() -> impl axum::response::IntoResponse {
     (

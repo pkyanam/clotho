@@ -2,7 +2,7 @@
 
 Clotho follows the principles of Keep a Changelog. Until the first tagged
 public alpha, entries describe the evolving `main` branch and no compatibility
-window is implied beyond the rules in `docs/api.md`.
+window is implied beyond the rules in `api.md`.
 
 ## Unreleased
 

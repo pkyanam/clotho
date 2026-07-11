@@ -12,16 +12,15 @@ REST edge** (`CLOTHO_API_URL`) so agents cannot drift from the public API
 > compatibility freeze. REST-backed errors now preserve stable codes and
 > request IDs. Public alpha still requires versioned schemas, operation
 > handles/progress/cancellation for durable work, capability classes, broader
-> REST-equivalence tests, audit correlation, and a published
-> prompt-injection authority model. See
-> [`release-readiness.md`](release-readiness.md#mcp-and-autonomous-agent-handoff).
+> REST-equivalence tests, audit correlation, and a published prompt-injection
+> authority model. See [known limitations](known-limitations.md).
 
 ## Auth
 
 1. An operator creates an agent and mints a token through the **REST edge**
    (web `/agents`, `clotho agent …`, or `POST /api/v1/agents/…`) with human
-   Bearer auth — see [ADR-0016](adr/0016-agent-admin-via-edge.md). The
-   api-gateway proxies to agent-gateway with `CLOTHO_AGENT_ADMIN_TOKEN`.
+   Bearer auth. The api-gateway proxies to agent-gateway with
+   `CLOTHO_AGENT_ADMIN_TOKEN`.
 
 ```bash
 export CLOTHO_TOKEN=clotho_tok_…

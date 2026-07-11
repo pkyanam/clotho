@@ -6,7 +6,7 @@ useDefault = true
 [[allowlists]]
 description = "Documented redacted token examples and provider credential field names"
 paths = [
-  '''docs/mcp\.md''',
+  '''mcp\.md''',
   '''docs/design/stage13-web-console\.md''',
   '''docs/design/stage23-production-tenancy\.md''',
   '''crates/clotho-api-gateway/src/auth_provider/clerk\.rs''',

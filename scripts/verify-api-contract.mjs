@@ -7,7 +7,7 @@ import ts from "typescript";
 import { parse } from "yaml";
 
 const root = resolve(import.meta.dirname, "..");
-const openapiPath = resolve(root, "docs/openapi.yaml");
+const openapiPath = resolve(root, "openapi.yaml");
 const sdkPath = resolve(root, "packages/sdk-js/src/index.ts");
 const routerPaths = [
   resolve(root, "crates/clotho-api-gateway/src/lib.rs"),
@@ -269,7 +269,7 @@ function sdkOperations() {
 }
 
 const document = parse(readFileSync(openapiPath, "utf8"));
-assert.match(document.openapi, /^3\./, "docs/openapi.yaml must be OpenAPI 3.x");
+assert.match(document.openapi, /^3\./, "openapi.yaml must be OpenAPI 3.x");
 validateRefs(document);
 
 const contract = document["x-clotho-contract"];

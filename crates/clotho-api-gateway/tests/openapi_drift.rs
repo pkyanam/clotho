@@ -1,8 +1,8 @@
-//! Stage 15: ensure every stable gateway route path appears in docs/openapi.yaml.
+//! Stage 15: ensure every stable gateway route path appears in openapi.yaml.
 //! Hand-maintained OpenAPI is the product contract; this test fails CI when a
 //! route is added to the Axum router without documenting it.
 
-const OPENAPI: &str = include_str!("../../../docs/openapi.yaml");
+const OPENAPI: &str = include_str!("../../../openapi.yaml");
 
 /// Path templates as they appear under `paths:` in the OpenAPI document.
 /// Keep in sync with `clotho_api_gateway::router` route registrations.
@@ -76,7 +76,7 @@ fn openapi_documents_every_stable_route() {
     }
     assert!(
         missing.is_empty(),
-        "docs/openapi.yaml is missing path entries for: {missing:?}\n\
+        "openapi.yaml is missing path entries for: {missing:?}\n\
          Add them to the OpenAPI document (and this list if intentional)."
     );
 }

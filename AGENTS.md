@@ -102,7 +102,7 @@ were not actually run.
 
 ## Contract ownership
 
-- `docs/openapi.yaml`: public REST inventory and schemas; maintained with the
+- `openapi.yaml`: public REST inventory and schemas; maintained with the
   Axum routes in `crates/clotho-api-gateway`.
 - `packages/sdk-js`: public JavaScript client; it must be structurally verified
   against OpenAPI until generation replaces the hand-written client.

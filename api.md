@@ -10,14 +10,14 @@ edge), the web console, and `@clotho/sdk-js`.
 > idempotency across every retryable mutation, and async-operation conventions
 > land. Error envelope version `1`, request correlation, structural OpenAPI/SDK
 > verification, repository/activity pagination, and persisted manual Action-run
-> idempotency are stable. Track the remaining contract in
-> [`release-readiness.md`](release-readiness.md).
+> idempotency are stable. See [known limitations](known-limitations.md) for the
+> current compatibility boundary.
 
 ## Contract
 
 | Artifact                     | Location                                                                      |
 | ---------------------------- | ----------------------------------------------------------------------------- |
-| OpenAPI 3                    | [`docs/openapi.yaml`](openapi.yaml)                                           |
+| OpenAPI 3                    | [`openapi.yaml`](openapi.yaml)                                                |
 | Live YAML                    | `GET /openapi.yaml` on a running gateway                                      |
 | Structural verification      | `pnpm test:contract` (`scripts/verify-api-contract.mjs`)                      |
 | Machine inventory            | `pnpm test:contract -- --json`                                                |

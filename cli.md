@@ -8,7 +8,7 @@ shells out to local `git` binaries — all reads and writes go through the gatew
 > public-alpha gate adds generated command reference, named contexts with
 > OS-keychain tokens, strict stdout/stderr and JSON tests, completions, signed
 > binaries, and retry/idempotency controls beyond manual Action starts. See
-> [`release-readiness.md`](release-readiness.md#cli).
+> [known limitations](known-limitations.md).
 
 ```bash
 cargo run -p clotho-cli -- help

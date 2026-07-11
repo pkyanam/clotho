@@ -10,18 +10,14 @@
   </p>
 
   <p>
-    <a href="./docs/vision-spec.md">Vision</a>
-    · <a href="./docs/prd.md">Product roadmap</a>
-    · <a href="./docs/release-readiness.md">Release readiness</a>
-    · <a href="./docs/frontier-roadmap.md">What comes next</a>
-    · <a href="./docs/api.md">API</a>
-    · <a href="./docs/mcp.md">MCP</a>
+    <a href="./api.md">API</a>
+    · <a href="./mcp.md">MCP</a>
     · <a href="./CONTRIBUTING.md">Contributing</a>
   </p>
 </div>
 
 <p align="center">
-  <img src="./docs/evidence/stage22-web/dashboard-light.png" alt="Clotho public-alpha operations dashboard" width="1200" />
+  <img src="./dashboard-light.png" alt="Clotho public-alpha operations dashboard" width="1200" />
 </p>
 
 ---
@@ -39,9 +35,9 @@ surface is Clotho: web, REST, SDK, CLI, Git/Hugging Face compatibility, and MCP.
 
 > **Release status:** active pre-release software. The core platform is working
 > end to end, but the public API stability, security review, accessibility,
-> packaging, migration, and recovery gates in
-> [release readiness](./docs/release-readiness.md) must close before a stable
-> production claim.
+> packaging, migration, and recovery gates must close before a stable production
+> claim. See [known limitations](./known-limitations.md) for the current public
+> operating boundaries.
 
 ## Why Clotho
 
@@ -137,8 +133,6 @@ falling back to a mutable hosted revision.
 | `clotho-compute`       | Capability-based compute interface (CCI)               |
 | Forgejo                | Internal Git/collaboration compatibility provider      |
 
-Architectural decisions are recorded in [`docs/adr`](./docs/adr).
-
 Community and release policies: [contributing](./CONTRIBUTING.md),
 [security](./SECURITY.md), [support](./SUPPORT.md),
 [governance](./GOVERNANCE.md), [code of conduct](./CODE_OF_CONDUCT.md), and
@@ -220,10 +214,10 @@ clotho actions run my-model --workflow evaluate --release v1.0.0
 
 Developer guides:
 
-- [REST and JavaScript SDK](./docs/api.md)
-- [CLI](./docs/cli.md)
-- [MCP agent gateway](./docs/mcp.md)
-- [OpenAPI contract](./docs/openapi.yaml)
+- [REST and JavaScript SDK](./api.md)
+- [CLI](./cli.md)
+- [MCP agent gateway](./mcp.md)
+- [OpenAPI contract](./openapi.yaml)
 
 ## Repository layout
 
@@ -238,7 +232,6 @@ Developer guides:
 | [`proto`](./proto)                     | Internal protobuf contracts         |
 | [`collab`](./collab)                   | Isolated Forgejo boundary           |
 | [`infra`](./infra)                     | Deployment assets                   |
-| [`docs`](./docs)                       | Vision, PRD, plans, and ADRs        |
 
 ## Roadmap
 
@@ -249,15 +242,11 @@ versioned agent handoff capsules, an evidence graph, GPU/data-local compute
 bindings, lazy virtual repositories, and a protocol mesh that can project one
 Clotho release as Git, Hugging Face, OCI, and artifact-storage interfaces.
 
-Read the prioritized [frontier roadmap](./docs/frontier-roadmap.md) and the
-stage-by-stage [PRD](./docs/prd.md).
-
 ## Open source and provider boundaries
 
 Clotho's own code is licensed under [Apache-2.0](./LICENSE). Forgejo is GPLv3
 and remains an unmodified, separately distributed internal provider behind a
-runtime/API boundary. See [the collaboration boundary](./collab/README.md) and
-[ADR-0003](./docs/adr/0003-forgejo-integration-adopt.md).
+runtime/API boundary. See [the collaboration boundary](./collab/README.md).
 
 ## The name
 

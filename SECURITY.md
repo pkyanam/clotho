@@ -41,5 +41,6 @@ security fixes. After tags begin, this table will identify the supported line:
 - Auth, private networking, artifact safety, provider readiness, release
   verification, audit persistence, and destructive actions fail closed.
 
-See `docs/threat-model.md`, `docs/release-readiness.md`, and
-`docs/known-limitations.md` for reviewed threats and current alpha boundaries.
+See [the threat model](./threat-model.md) and
+[known limitations](./known-limitations.md) for reviewed threats and current
+alpha boundaries.

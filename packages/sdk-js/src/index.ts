@@ -2,7 +2,7 @@
  * @clotho/sdk-js — typed client for the Clotho API gateway.
  *
  * Hand-written against the gateway's REST surface (crates/clotho-api-gateway)
- * and kept aligned with docs/openapi.yaml (Stage 15 product contract). CI
+ * and kept aligned with openapi.yaml (Stage 15 product contract). CI
  * checks OpenAPI path drift via clotho-api-gateway tests/openapi_drift.rs.
  * Generating the SDK from OpenAPI remains a future hardening option
  * (docs/adr/0007); for now the hand-written client is what the web app compiles

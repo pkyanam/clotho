@@ -1,7 +1,7 @@
 //! Thin HTTP client for the api-gateway REST edge.
 //!
 //! Stage 15 MCP collab/Actions/platform tools call this surface so agents
-//! cannot drift from the public product contract (docs/openapi.yaml).
+//! cannot drift from the public product contract (openapi.yaml).
 
 use std::future::Future;
 

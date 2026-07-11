@@ -8,8 +8,8 @@
 public-alpha closure. These are scoped alpha constraints, not untracked work.
 
 This register distinguishes honest alpha boundaries from release blockers. A
-listed limitation does not override the fail-closed invariants in `AGENTS.md`,
-the threat model, or `docs/release-readiness.md`.
+listed limitation does not override the fail-closed invariants in `AGENTS.md`
+or the [threat model](threat-model.md).
 
 ## Accepted alpha boundaries
 
@@ -36,9 +36,9 @@ the threat model, or `docs/release-readiness.md`.
 
 ## Stage 22 blocker status
 
-There are no unregistered Stage 22 blockers. Implemented controls and evidence
-are tracked in `docs/release-gap-matrix.md`; every remaining alpha constraint is
-owned and dated above. Stage 23 must not silently broaden any of these promises.
+There are no unregistered Stage 22 blockers. Every remaining public alpha
+constraint is owned and dated above. Later work must not silently broaden any
+of these promises.
 
 ## Support
 

@@ -12,7 +12,7 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY proto ./proto
-# Stage 15: api-gateway embeds docs/openapi.yaml via include_str!.
+# Stage 15: api-gateway embeds openapi.yaml via include_str!.
 COPY docs ./docs
 RUN --mount=type=cache,id=clotho-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=clotho-cargo-target,target=/build/target,sharing=locked \
