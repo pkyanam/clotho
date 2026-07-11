@@ -115,6 +115,8 @@ pub struct RepoDetailResponse {
     pub owner_org: String,
     pub description: String,
     pub visibility: String,
+    pub kind: String,
+    pub large_file_threshold_bytes: i64,
     pub default_branch: String,
     pub clone_url: String,
     pub provider: String,
@@ -212,12 +214,16 @@ pub async fn get_repo(
         .get_heads(GetHeadsRequest { repo: name.clone() })
         .await?
         .into_inner();
+    let kind = repo_info.kind.clone();
+    let large_file_threshold_bytes = repo_info.large_file_threshold_bytes;
     Ok(Json(RepoDetailResponse {
         name,
         owner,
         owner_org,
         description,
         visibility,
+        kind,
+        large_file_threshold_bytes,
         default_branch,
         clone_url,
         provider: state.actions.default_provider(),
@@ -266,6 +272,8 @@ pub async fn update_repo(
                     "repo_name": name,
                     "description": req.description,
                     "visibility": req.visibility,
+                    "kind": req.kind,
+                    "large_file_threshold_bytes": req.large_file_threshold_bytes,
                     "default_branch": req.default_branch,
                 }),
             },
@@ -292,6 +300,8 @@ pub async fn update_repo(
             owner_org: clotho_with_org.org_name.clone(),
             description: clotho_with_org.repo.description.clone(),
             visibility: clotho_with_org.repo.visibility.clone(),
+            kind: clotho_with_org.repo.kind.clone(),
+            large_file_threshold_bytes: clotho_with_org.repo.large_file_threshold_bytes,
             default_branch: clotho_with_org.repo.default_branch.clone(),
             clone_url,
             provider,

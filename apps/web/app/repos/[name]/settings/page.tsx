@@ -103,10 +103,13 @@ export default async function SettingsPage({
               description={description}
               visibility={detail.visibility}
               defaultBranch={detail.default_branch}
+              kind={detail.kind}
+              largeFileThresholdBytes={detail.large_file_threshold_bytes}
             />
             <dl className="mt-6 border-t border-kumo-hairline pt-4">
               <MetaRow label="owner" value={ownerOrg} />
               <MetaRow label="visibility" value={detail.visibility} />
+              <MetaRow label="kind" value={detail.kind} />
               <MetaRow label="default branch" value={detail.default_branch} />
               <MetaRow
                 label="clone url"

@@ -47,6 +47,11 @@ pub struct RepoInfo {
     pub description: String,
     #[serde(default)]
     pub visibility: String,
+    /// Clotho product kind. Forgejo does not own or interpret this field.
+    #[serde(default = "default_repo_kind")]
+    pub kind: String,
+    #[serde(default = "default_large_file_threshold")]
+    pub large_file_threshold_bytes: i64,
     #[serde(default)]
     pub has_issues: bool,
     #[serde(default)]
@@ -61,6 +66,14 @@ pub struct RepoInfo {
     pub provider: String,
     #[serde(default)]
     pub configured: bool,
+}
+
+fn default_repo_kind() -> String {
+    "code".into()
+}
+
+fn default_large_file_threshold() -> i64 {
+    10 * 1024 * 1024
 }
 
 /// One endpoint of a pull request (its head or base).

@@ -438,6 +438,8 @@ struct CreateRepoResponse {
     owner_org: String,
     description: String,
     visibility: String,
+    kind: String,
+    large_file_threshold_bytes: i64,
     default_branch: String,
     clone_url: String,
     provider: String,
@@ -487,6 +489,25 @@ impl CommitFileRequest {
             ))),
         }
     }
+}
+
+/// Reject paths before any external side effect (notably an Arachne upload).
+/// jj's internal path format is a slash-separated, normalized relative path.
+fn validate_commit_path(path: &str) -> Result<(), ApiError> {
+    if path.is_empty()
+        || path.starts_with('/')
+        || path.ends_with('/')
+        || path.contains('\\')
+        || path.contains('\0')
+        || path
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err(ApiError::InvalidRequest(format!(
+            "invalid repository path {path:?}: use a normalized relative path"
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -544,6 +565,7 @@ async fn create_repo(
     Json(req): Json<control::CreateRepoRequest>,
 ) -> Result<(StatusCode, Json<CreateRepoResponse>), ApiError> {
     control::valid_name(&req.name)?;
+    let large_file_threshold_bytes = control::effective_large_file_threshold(&req)?;
     let auth = auth::resolve_auth(&headers, &state).await?;
 
     // Resolve the owning org before provisioning anything.
@@ -650,6 +672,8 @@ async fn create_repo(
             owner_org: org_name,
             description: req.description.clone(),
             visibility: req.visibility,
+            kind: req.kind,
+            large_file_threshold_bytes,
             default_branch: req.default_branch,
             clone_url: repo_info.clone_url.clone(),
             provider,
@@ -681,10 +705,26 @@ async fn commit_repo(
             "at least one file or deleted path is required".into(),
         ));
     }
+    for file in &req.files {
+        validate_commit_path(&file.path)?;
+    }
+    for path in &req.deleted_paths {
+        validate_commit_path(path)?;
+    }
+    let large_file_threshold_bytes = if let Some(pool) = &state.pool {
+        usize::try_from(
+            control::get_repo_by_name(pool, &name)
+                .await?
+                .large_file_threshold_bytes,
+        )
+        .map_err(|_| ApiError::Internal("repository artifact threshold is invalid".into()))?
+    } else {
+        state.large_file_threshold_bytes
+    };
     let mut files = Vec::with_capacity(req.files.len());
     for file in req.files {
         let original = file.decode_content()?;
-        let content = if original.len() >= state.large_file_threshold_bytes {
+        let content = if !original.is_empty() && original.len() >= large_file_threshold_bytes {
             let (pointer, outcome) = arachne::store_payload(&state, &original).await?;
             tracing::info!(
                 repo = %name,
@@ -755,4 +795,30 @@ async fn submit_change(
         conflicted: response.conflicted,
         conflicted_paths: response.conflicted_paths,
     }))
+}
+
+#[cfg(test)]
+mod commit_path_tests {
+    use super::validate_commit_path;
+
+    #[test]
+    fn accepts_normalized_repo_paths() {
+        assert!(validate_commit_path("weights/model.safetensors").is_ok());
+        assert!(validate_commit_path("README.md").is_ok());
+    }
+
+    #[test]
+    fn rejects_paths_that_could_write_or_upload_before_vcs_rejection() {
+        for path in [
+            "",
+            "/tmp/model.bin",
+            "../model.bin",
+            "a//b",
+            "a/./b",
+            "a\\b",
+            "a/",
+        ] {
+            assert!(validate_commit_path(path).is_err(), "accepted {path:?}");
+        }
+    }
 }

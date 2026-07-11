@@ -62,7 +62,8 @@ curl -s 'http://localhost:8080/api/v1/providers?layer=network'   # stub until St
 curl -s 'http://localhost:8080/api/v1/providers?all=true'
 ```
 
-Storage/network entries report `configured: false` honestly until their stages.
+Storage reports live Arachne capacity and the optional StorageSDK bridge state.
+Network entries remain unconfigured until a provider is connected.
 
 ## Quick start
 
@@ -79,13 +80,13 @@ curl -s http://localhost:8080/api/v1/me \
 curl -s -X POST http://localhost:8080/api/v1/repos \
   -H 'content-type: application/json' \
   -H "Authorization: Bearer $CLOTHO_TOKEN" \
-  -d '{"name":"weave"}' | jq
+  -d '{"name":"weave","kind":"model"}' | jq
 
 # update repo settings
 curl -s -X PATCH http://localhost:8080/api/v1/repos/weave \
   -H 'content-type: application/json' \
   -H "Authorization: Bearer $CLOTHO_TOKEN" \
-  -d '{"description":"demo repo","visibility":"private"}' | jq
+  -d '{"description":"demo repo","visibility":"private","large_file_threshold_bytes":1048576}' | jq
 
 # open an issue with labels and assignee
 curl -s -X POST http://localhost:8080/api/v1/repos/weave/issues \

@@ -156,19 +156,43 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
     args.remove(0);
     match sub.as_str() {
         "init" | "create" => {
-            let name = require_one(&args, "clotho repo init <name>")?;
+            if args.is_empty() {
+                bail!("usage: clotho repo init <name> [--kind code|model|dataset] [--description <text>] [--visibility public|private|internal] [--large-file-threshold <bytes>]");
+            }
+            let name = args.remove(0);
+            let kind = take_option(&mut args, "--kind").unwrap_or_else(|| "code".into());
+            let description = take_option(&mut args, "--description").unwrap_or_default();
+            let visibility =
+                take_option(&mut args, "--visibility").unwrap_or_else(|| "public".into());
+            let threshold = take_option(&mut args, "--large-file-threshold")
+                .map(|value| {
+                    value
+                        .parse::<i64>()
+                        .context("--large-file-threshold must be an integer")
+                })
+                .transpose()?;
+            if !args.is_empty() {
+                bail!("unrecognized repo init arguments: {}", args.join(" "));
+            }
             let body = request_value(
                 config,
                 reqwest::Method::POST,
                 "/api/v1/repos",
-                Some(json!({ "name": name })),
+                Some(json!({
+                    "name": name,
+                    "description": description,
+                    "visibility": visibility,
+                    "kind": kind,
+                    "large_file_threshold_bytes": threshold,
+                })),
             )
             .await?;
             emit(config, &body, || {
                 println!(
-                    "created {}/{} at {}",
+                    "created {}/{} ({}) at {}",
                     body["owner"].as_str().unwrap_or("?"),
                     body["name"].as_str().unwrap_or(&name),
+                    body["kind"].as_str().unwrap_or("code"),
                     body["initial_commit_id"].as_str().unwrap_or("")
                 );
             })
@@ -282,8 +306,21 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
             let description = take_option(&mut args, "--description");
             let visibility = take_option(&mut args, "--visibility");
             let default_branch = take_option(&mut args, "--default-branch");
-            if description.is_none() && visibility.is_none() && default_branch.is_none() {
-                bail!("usage: clotho repo update <name> [--description] [--visibility] [--default-branch]");
+            let kind = take_option(&mut args, "--kind");
+            let threshold = take_option(&mut args, "--large-file-threshold")
+                .map(|value| {
+                    value
+                        .parse::<i64>()
+                        .context("--large-file-threshold must be an integer")
+                })
+                .transpose()?;
+            if description.is_none()
+                && visibility.is_none()
+                && default_branch.is_none()
+                && kind.is_none()
+                && threshold.is_none()
+            {
+                bail!("usage: clotho repo update <name> [--description] [--visibility] [--default-branch] [--kind code|model|dataset] [--large-file-threshold <bytes>]");
             }
             let mut patch = serde_json::Map::new();
             if let Some(d) = description {
@@ -295,6 +332,12 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
             if let Some(b) = default_branch {
                 patch.insert("default_branch".into(), json!(b));
             }
+            if let Some(kind) = kind {
+                patch.insert("kind".into(), json!(kind));
+            }
+            if let Some(threshold) = threshold {
+                patch.insert("large_file_threshold_bytes".into(), json!(threshold));
+            }
             let body = request_json(
                 config,
                 reqwest::Method::PATCH,
@@ -304,8 +347,9 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
             .await?;
             emit(config, &body, || {
                 println!(
-                    "updated {} visibility={} branch={}",
+                    "updated {} kind={} visibility={} branch={}",
                     body["name"].as_str().unwrap_or(&repo),
+                    body["kind"].as_str().unwrap_or("code"),
                     body["visibility"].as_str().unwrap_or(""),
                     body["default_branch"].as_str().unwrap_or("")
                 );
@@ -1733,10 +1777,10 @@ fn usage() {
     clotho auth token revoke <id>
 
   repo
-    clotho repo init <name>
+    clotho repo init <name> [--kind code|model|dataset] [--large-file-threshold <bytes>]
     clotho repo list
     clotho repo status <repo>
-    clotho repo update <name> [--description] [--visibility] [--default-branch]
+    clotho repo update <name> [--description] [--visibility] [--default-branch] [--kind] [--large-file-threshold]
     clotho repo merge-policy get <repo>
     clotho repo merge-policy set <repo> [--require-actions] [--block-conflicted|--no-block-conflicted] [--approvals N] [--protect-default]
     clotho repo delete <name> [--yes]

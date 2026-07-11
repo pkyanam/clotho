@@ -18,7 +18,8 @@ info:
 
     **Provider Fabric (Stage 17):** `GET /api/v1/providers?layer=compute|storage|network|auth`
     (omit `layer` for compute-only backward compatibility; `?all=true` for every
-    layer). Storage/network are honest stubs until Stages 18–19.
+    layer). Arachne and StorageSDK back the storage layer; networking remains
+    unconfigured until a provider is connected.
   version: 0.1.0
   license:
     name: Apache-2.0
@@ -237,6 +238,15 @@ paths:
                 visibility:
                   type: string
                   enum: [public, private, internal]
+                kind:
+                  type: string
+                  enum: [code, model, dataset]
+                  default: code
+                large_file_threshold_bytes:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: Kind-aware default when omitted (10 MiB code, 1 MiB model/dataset)
                 default_branch:
                   type: string
                   default: main
@@ -360,7 +370,7 @@ paths:
     patch:
       tags: [repos]
       operationId: updateRepo
-      summary: Update repo settings (description, visibility, default branch)
+      summary: Update Clotho-owned repository metadata and artifact policy
       security:
         - bearerAuth: []
       parameters:
@@ -377,6 +387,13 @@ paths:
                 visibility:
                   type: string
                   enum: [public, private, internal]
+                kind:
+                  type: string
+                  enum: [code, model, dataset]
+                large_file_threshold_bytes:
+                  type: integer
+                  format: int64
+                  minimum: 0
                 default_branch:
                   type: string
       responses:
@@ -2224,6 +2241,12 @@ components:
           type: string
         visibility:
           type: string
+        kind:
+          type: string
+          enum: [code, model, dataset]
+        large_file_threshold_bytes:
+          type: integer
+          format: int64
         has_issues:
           type: boolean
         has_pull_requests:
@@ -2251,6 +2274,12 @@ components:
           type: string
         visibility:
           type: string
+        kind:
+          type: string
+          enum: [code, model, dataset]
+        large_file_threshold_bytes:
+          type: integer
+          format: int64
         default_branch:
           type: string
         clone_url:
@@ -2298,6 +2327,12 @@ components:
           type: string
         visibility:
           type: string
+        kind:
+          type: string
+          enum: [code, model, dataset]
+        large_file_threshold_bytes:
+          type: integer
+          format: int64
         default_branch:
           type: string
         clone_url:

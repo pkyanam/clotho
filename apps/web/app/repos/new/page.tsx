@@ -47,6 +47,22 @@ export default async function NewRepoPage() {
         </label>
 
         <label className="block text-[0.8125rem] text-kumo-inactive">
+          repository kind
+          <select
+            name="kind"
+            defaultValue="code"
+            className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2.5 text-[0.9375rem] text-kumo-default outline-none focus:border-kumo-contrast"
+          >
+            <option value="code">code — source, packages, and services</option>
+            <option value="model">model — weights, cards, and evaluations</option>
+            <option value="dataset">dataset — data, schemas, and lineage</option>
+          </select>
+          <span className="mt-1.5 block text-[0.75rem] leading-relaxed">
+            Model and dataset repos route artifacts over 1 MiB through Arachne automatically; code repos use 10 MiB.
+          </span>
+        </label>
+
+        <label className="block text-[0.8125rem] text-kumo-inactive">
           visibility
           <select
             name="visibility"

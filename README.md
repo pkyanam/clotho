@@ -112,6 +112,11 @@ humans / agents
 | `clotho-diff` | Tree-sitter structured diffs for humans and agents |
 | Forgejo | Internal collaboration provider for git HTTP, issues, PRs, comments, statuses, and webhooks |
 
+Clotho repositories are typed as `code`, `model`, or `dataset`. Model and
+dataset repos automatically route artifacts at or above 1 MiB through Arachne
+(10 MiB for code), with a per-repository policy editable from the web app, CLI,
+or API. The standard stack needs no `.env` file for this behavior.
+
 ---
 
 ## Repository Layout

@@ -123,7 +123,7 @@ BYO storage
 
 #### 1.1 Migration
 
-**File:** `crates/clotho-api-gateway/migrations/1008_object_store.sql`
+**File:** `crates/clotho-api-gateway/migrations/1009_object_store.sql`
 
 ```sql
 -- Org-scoped object store connection (optional repo override later).

@@ -34,10 +34,11 @@ export default async function RepoPage({
     if (e instanceof ClothoApiError && e.status === 404) notFound();
     throw e;
   });
-  const [tree, commits, opLog] = await Promise.all([
+  const [tree, commits, opLog, storage] = await Promise.all([
     client.tree(name),
     client.commits(name, { limit: 20 }),
     client.opLog(name, 20),
+    client.storageStats(name),
   ]);
   const [pulls, issues, branches, statuses, sessions, actionRuns] =
     await Promise.all([
@@ -62,7 +63,9 @@ export default async function RepoPage({
     (detail as { description?: string }).description ||
     "";
   const clone = publicCloneUrl(detail.clone_url, detail.owner, name);
-  const storageBytes = tree.files.reduce((t, f) => t + f.size_bytes, 0);
+  const logicalFileBytes = new Map(
+    storage.large_files.map((file) => [file.path, file.logical_bytes]),
+  );
 
   let actionsLabel = "actions idle";
   if (failedActions > 0) actionsLabel = `${failedActions} failing`;
@@ -93,6 +96,7 @@ export default async function RepoPage({
 
           {/* Status strip — designed chips, not badge soup */}
           <div className="mt-5 flex flex-wrap gap-2">
+            <StatusChip label="kind" value={detail.kind} />
             <StatusChip label="branch" value={detail.default_branch} />
             <StatusChip label="visibility" value={detail.visibility} />
             <StatusChip
@@ -145,7 +149,7 @@ export default async function RepoPage({
           </Link>
           <StatCell label="files" value={tree.files.length} />
           <Link href={`/repos/${name}/storage`} className="block">
-            <StatCell label="storage" value={formatBytes(storageBytes)} />
+            <StatCell label="storage" value={formatBytes(storage.logical_bytes)} />
           </Link>
         </div>
       </div>
@@ -183,7 +187,10 @@ export default async function RepoPage({
                         )}
                       </span>
                       <span className="shrink-0 text-[0.8125rem] text-kumo-inactive">
-                        {formatBytes(file.size_bytes)}
+                        {logicalFileBytes.has(file.path) && (
+                          <Badge variant="outline">Arachne</Badge>
+                        )}
+                        {formatBytes(logicalFileBytes.get(file.path) ?? file.size_bytes)}
                       </span>
                     </Link>
                   </li>

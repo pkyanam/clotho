@@ -28,6 +28,8 @@ export interface RepoInfo {
   default_branch: string;
   description: string;
   visibility: string;
+  kind: "code" | "model" | "dataset" | string;
+  large_file_threshold_bytes: number;
   has_issues: boolean;
   has_pull_requests: boolean;
   open_issues_count: number;
@@ -57,6 +59,8 @@ export interface RepoDetail {
   owner_org: string;
   description: string;
   visibility: string;
+  kind: "code" | "model" | "dataset" | string;
+  large_file_threshold_bytes: number;
   default_branch: string;
   clone_url: string;
   provider: string;
@@ -76,6 +80,8 @@ export interface CreatedRepo {
   owner_org: string;
   description: string;
   visibility: string;
+  kind: "code" | "model" | "dataset" | string;
+  large_file_threshold_bytes: number;
   default_branch: string;
   clone_url: string;
   provider: string;
@@ -692,6 +698,8 @@ export class ClothoClient {
       description?: string;
       visibility?: "public" | "private" | "internal" | string;
       defaultBranch?: string;
+      kind?: "code" | "model" | "dataset";
+      largeFileThresholdBytes?: number;
       ownerOrg?: string;
     },
   ): Promise<CreatedRepo> {
@@ -704,6 +712,8 @@ export class ClothoClient {
         visibility: options?.visibility ?? "public",
         default_branch: options?.defaultBranch ?? "main",
         owner_org: options?.ownerOrg,
+        kind: options?.kind ?? "code",
+        large_file_threshold_bytes: options?.largeFileThresholdBytes,
       }),
     });
   }
@@ -1302,6 +1312,8 @@ export class ClothoClient {
       description?: string;
       visibility?: "public" | "private" | "internal" | string;
       defaultBranch?: string;
+      kind?: "code" | "model" | "dataset";
+      largeFileThresholdBytes?: number;
     },
   ): Promise<RepoDetail> {
     return this.request(`/api/v1/repos/${encodeURIComponent(name)}`, {
@@ -1311,6 +1323,8 @@ export class ClothoClient {
         description: options.description,
         visibility: options.visibility,
         default_branch: options.defaultBranch,
+        kind: options.kind,
+        large_file_threshold_bytes: options.largeFileThresholdBytes,
       }),
     });
   }

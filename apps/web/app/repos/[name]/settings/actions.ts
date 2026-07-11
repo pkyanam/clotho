@@ -9,11 +9,15 @@ export async function updateRepoSettings(repo: string, formData: FormData) {
   const description = String(formData.get("description") ?? "").trim();
   const visibility = String(formData.get("visibility") ?? "").trim();
   const defaultBranch = String(formData.get("default_branch") ?? "").trim();
+  const kind = String(formData.get("kind") ?? "").trim();
+  const threshold = Number(formData.get("large_file_threshold_bytes"));
 
   await (await api()).updateRepo(repo, {
     description: description || undefined,
     visibility: visibility || undefined,
     defaultBranch: defaultBranch || undefined,
+    kind: (kind || undefined) as "code" | "model" | "dataset" | undefined,
+    largeFileThresholdBytes: Number.isFinite(threshold) ? threshold : undefined,
   });
 
   revalidatePath(`/repos/${repo}`);

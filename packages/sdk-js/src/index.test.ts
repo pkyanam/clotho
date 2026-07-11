@@ -76,13 +76,15 @@ describe("ClothoClient", () => {
     );
   });
 
-  it("posts repo creation as JSON with Stage 11 metadata", async () => {
+  it("posts Clotho repo kind and artifact policy metadata", async () => {
     const { client, fetchMock } = clientWith(jsonResponse({ name: "weave" }));
     await client.createRepo("weave", {
       description: "a woven repo",
       visibility: "private",
       defaultBranch: "main",
       ownerOrg: "clotho",
+      kind: "model",
+      largeFileThresholdBytes: 524288,
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://gateway.test/api/v1/repos",
@@ -94,6 +96,8 @@ describe("ClothoClient", () => {
           visibility: "private",
           default_branch: "main",
           owner_org: "clotho",
+          kind: "model",
+          large_file_threshold_bytes: 524288,
         }),
       }),
     );

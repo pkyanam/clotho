@@ -112,6 +112,8 @@ async fn token_mint_patch_and_delete_repo() {
         name: repo_name.clone(),
         description: "before".into(),
         visibility: "public".into(),
+        kind: "code".into(),
+        large_file_threshold_bytes: None,
         default_branch: "main".into(),
         owner_org: String::new(),
     };
@@ -226,6 +228,8 @@ async fn non_admin_gets_forbidden_on_patch_repo() {
         name: repo_name.clone(),
         description: "x".into(),
         visibility: "public".into(),
+        kind: "code".into(),
+        large_file_threshold_bytes: None,
         default_branch: "main".into(),
         owner_org: String::new(),
     };

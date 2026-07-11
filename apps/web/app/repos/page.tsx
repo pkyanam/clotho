@@ -57,6 +57,7 @@ export default async function ReposPage() {
                 <span className="min-w-0">
                   <span className="flex flex-wrap items-center gap-2">
                     <span className="text-[0.9375rem]">{repo.name}</span>
+                    <Badge variant="outline">{repo.kind}</Badge>
                     <Badge variant="outline">{repo.visibility}</Badge>
                   </span>
                   {repo.description && (

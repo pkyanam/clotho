@@ -38,7 +38,7 @@ export CLOTHO_API_URL=http://localhost:8080
 export CLOTHO_TOKEN=clotho_tok_…   # from clotho auth token create or bootstrap logs
 
 clotho auth whoami
-clotho repo init demo-loop
+clotho repo init demo-loop --kind model
 clotho issue create demo-loop --title "flaky" --label bug
 clotho pr create demo-loop --title "fix" --head feature --base main
 clotho actions run demo-loop --actor cli
@@ -57,7 +57,7 @@ clotho label create demo-loop --name bug --color d73a4a
 clotho milestone create demo-loop --title "v0.1"
 clotho notification list --unread
 clotho repo merge-policy get demo-loop
-clotho repo update demo-loop --description "demo"
+clotho repo update demo-loop --description "demo" --large-file-threshold 1048576
 ```
 
 Machine-readable:
@@ -127,10 +127,14 @@ closing the terminal. Agent mint is **CLI/web only**; MCP has no admin tools.
 ## Repo settings
 
 ```bash
-clotho repo update my-demo --description "…" --visibility private --default-branch main
+clotho repo update my-demo --description "…" --visibility private --default-branch main --kind dataset --large-file-threshold 1048576
 clotho repo merge-policy set my-demo --require-actions --approvals 1
 clotho repo delete my-demo --yes
 ```
+
+Repository kinds are `code`, `model`, and `dataset`. When no threshold is
+provided, Clotho uses 10 MiB for code and 1 MiB for model/dataset artifacts;
+no environment variable is required.
 
 ## Secrets
 

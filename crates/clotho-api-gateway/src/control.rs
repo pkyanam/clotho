@@ -113,6 +113,8 @@ pub struct Repo {
     pub name: String,
     pub description: String,
     pub visibility: String,
+    pub kind: String,
+    pub large_file_threshold_bytes: i64,
     pub default_branch: String,
     pub forgejo_owner: String,
     pub forgejo_repo_id: Option<i64>,
@@ -196,6 +198,10 @@ pub struct UpdateRepoRequest {
     #[serde(default)]
     pub visibility: Option<String>,
     #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub large_file_threshold_bytes: Option<i64>,
+    #[serde(default)]
     pub default_branch: Option<String>,
 }
 
@@ -206,6 +212,12 @@ pub struct CreateRepoRequest {
     pub description: String,
     #[serde(default = "default_visibility")]
     pub visibility: String,
+    #[serde(default = "default_repo_kind")]
+    pub kind: String,
+    /// Omit to use the kind-aware default: 10 MiB for code, 1 MiB for model
+    /// and dataset repos. Zero routes every non-empty payload through Arachne.
+    #[serde(default)]
+    pub large_file_threshold_bytes: Option<i64>,
     #[serde(default = "default_default_branch")]
     pub default_branch: String,
     #[serde(default)]
@@ -220,6 +232,37 @@ pub struct ActivityQuery {
 
 fn default_visibility() -> String {
     "public".into()
+}
+
+fn default_repo_kind() -> String {
+    "code".into()
+}
+
+pub fn validate_repo_kind(kind: &str) -> Result<(), ApiError> {
+    if matches!(kind, "code" | "model" | "dataset") {
+        Ok(())
+    } else {
+        Err(ApiError::InvalidRequest(format!(
+            "repository kind {kind:?} must be code, model, or dataset"
+        )))
+    }
+}
+
+pub fn effective_large_file_threshold(req: &CreateRepoRequest) -> Result<i64, ApiError> {
+    validate_repo_kind(&req.kind)?;
+    let threshold = req.large_file_threshold_bytes.unwrap_or_else(|| {
+        if req.kind == "code" {
+            10 * 1024 * 1024
+        } else {
+            1024 * 1024
+        }
+    });
+    if threshold < 0 {
+        return Err(ApiError::InvalidRequest(
+            "large_file_threshold_bytes cannot be negative".into(),
+        ));
+    }
+    Ok(threshold)
 }
 
 fn default_default_branch() -> String {
@@ -444,7 +487,8 @@ pub async fn get_repo_with_org(pool: &PgPool, name: &str) -> Result<Option<RepoW
     sqlx::query_as::<_, RepoWithOrg>(
         r#"
         select
-            r.id, r.org_id, r.name, r.description, r.visibility,
+            r.id, r.org_id, r.name, r.description, r.visibility, r.kind,
+            r.large_file_threshold_bytes,
             r.default_branch, r.forgejo_owner, r.forgejo_repo_id,
             r.forgejo_full_name, r.created_by, r.created_at, r.updated_at,
             o.name as org_name, o.display_name as org_display_name
@@ -465,7 +509,8 @@ pub async fn list_repos_with_orgs(pool: &PgPool) -> Result<Vec<RepoWithOrg>, Api
     sqlx::query_as::<_, RepoWithOrg>(
         r#"
         select
-            r.id, r.org_id, r.name, r.description, r.visibility,
+            r.id, r.org_id, r.name, r.description, r.visibility, r.kind,
+            r.large_file_threshold_bytes,
             r.default_branch, r.forgejo_owner, r.forgejo_repo_id,
             r.forgejo_full_name, r.created_by, r.created_at, r.updated_at,
             o.name as org_name, o.display_name as org_display_name
@@ -483,7 +528,8 @@ pub async fn list_repos_for_org(pool: &PgPool, org: &str) -> Result<Vec<RepoWith
     sqlx::query_as::<_, RepoWithOrg>(
         r#"
         select
-            r.id, r.org_id, r.name, r.description, r.visibility,
+            r.id, r.org_id, r.name, r.description, r.visibility, r.kind,
+            r.large_file_threshold_bytes,
             r.default_branch, r.forgejo_owner, r.forgejo_repo_id,
             r.forgejo_full_name, r.created_by, r.created_at, r.updated_at,
             o.name as org_name, o.display_name as org_display_name
@@ -537,17 +583,20 @@ pub async fn insert_repo(
     forgejo_repo: &RepoInfo,
 ) -> Result<RepoWithOrg, ApiError> {
     valid_name(&req.name)?;
+    let large_file_threshold_bytes = effective_large_file_threshold(req)?;
     let id = Uuid::new_v4().to_string();
     let full_name = format!("{forgejo_owner}/{}", req.name);
 
     let row = sqlx::query(
         r#"
         insert into repos (
-            id, org_id, name, description, visibility, default_branch,
+            id, org_id, name, description, visibility, kind,
+            large_file_threshold_bytes, default_branch,
             forgejo_owner, forgejo_repo_id, forgejo_full_name, created_by
         )
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        returning id, org_id, name, description, visibility, default_branch,
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        returning id, org_id, name, description, visibility, kind,
+                large_file_threshold_bytes, default_branch,
                 forgejo_owner, forgejo_repo_id, forgejo_full_name,
                 created_by, created_at, updated_at
         "#,
@@ -557,6 +606,8 @@ pub async fn insert_repo(
     .bind(&req.name)
     .bind(&req.description)
     .bind(&req.visibility)
+    .bind(&req.kind)
+    .bind(large_file_threshold_bytes)
     .bind(&req.default_branch)
     .bind(forgejo_owner)
     .bind(forgejo_repo.id)
@@ -581,6 +632,8 @@ pub async fn insert_repo(
         name: row.get("name"),
         description: row.get("description"),
         visibility: row.get("visibility"),
+        kind: row.get("kind"),
+        large_file_threshold_bytes: row.get("large_file_threshold_bytes"),
         default_branch: row.get("default_branch"),
         forgejo_owner: row.get("forgejo_owner"),
         forgejo_repo_id: row.get("forgejo_repo_id"),
@@ -610,6 +663,8 @@ pub async fn insert_repo(
                 "repo_name": req.name,
                 "org_name": org_name,
                 "visibility": req.visibility,
+                "kind": req.kind,
+                "large_file_threshold_bytes": large_file_threshold_bytes,
                 "default_branch": req.default_branch,
             }),
         },
@@ -796,10 +851,25 @@ pub async fn update_repo_row(
     let description = req.description.as_deref();
     let visibility = req.visibility.as_deref();
     let default_branch = req.default_branch.as_deref();
+    let kind = req.kind.as_deref();
+    let large_file_threshold_bytes = req.large_file_threshold_bytes;
 
-    if description.is_none() && visibility.is_none() && default_branch.is_none() {
+    if description.is_none()
+        && visibility.is_none()
+        && default_branch.is_none()
+        && kind.is_none()
+        && large_file_threshold_bytes.is_none()
+    {
         return Err(ApiError::InvalidRequest(
-            "at least one of description, visibility, or default_branch is required".into(),
+            "at least one repository setting is required".into(),
+        ));
+    }
+    if let Some(kind) = kind {
+        validate_repo_kind(kind)?;
+    }
+    if large_file_threshold_bytes.is_some_and(|value| value < 0) {
+        return Err(ApiError::InvalidRequest(
+            "large_file_threshold_bytes cannot be negative".into(),
         ));
     }
 
@@ -817,9 +887,12 @@ pub async fn update_repo_row(
             description = coalesce($2, description),
             visibility = coalesce($3, visibility),
             default_branch = coalesce($4, default_branch),
+            kind = coalesce($5, kind),
+            large_file_threshold_bytes = coalesce($6, large_file_threshold_bytes),
             updated_at = now()
         where id = $1
-        returning id, org_id, name, description, visibility, default_branch,
+        returning id, org_id, name, description, visibility, kind,
+                large_file_threshold_bytes, default_branch,
                 forgejo_owner, forgejo_repo_id, forgejo_full_name,
                 created_by, created_at, updated_at
         "#,
@@ -828,6 +901,8 @@ pub async fn update_repo_row(
     .bind(description)
     .bind(visibility)
     .bind(default_branch)
+    .bind(kind)
+    .bind(large_file_threshold_bytes)
     .fetch_optional(pool)
     .await
     .map_err(|e| ApiError::Internal(format!("update repo: {e}")))?
@@ -839,6 +914,8 @@ pub async fn update_repo_row(
         name: row.get("name"),
         description: row.get("description"),
         visibility: row.get("visibility"),
+        kind: row.get("kind"),
+        large_file_threshold_bytes: row.get("large_file_threshold_bytes"),
         default_branch: row.get("default_branch"),
         forgejo_owner: row.get("forgejo_owner"),
         forgejo_repo_id: row.get("forgejo_repo_id"),
@@ -898,6 +975,8 @@ pub fn build_repo_info(
         info.description = clotho.repo.description.clone();
     }
     info.visibility = clotho.repo.visibility.clone();
+    info.kind = clotho.repo.kind.clone();
+    info.large_file_threshold_bytes = clotho.repo.large_file_threshold_bytes;
     info.provider = provider.into();
     info.configured = configured;
     info
@@ -924,6 +1003,8 @@ pub fn fallback_repo_info(
         default_branch: "main".into(),
         description: String::new(),
         visibility: "public".into(),
+        kind: "code".into(),
+        large_file_threshold_bytes: 10 * 1024 * 1024,
         has_issues: true,
         has_pull_requests: true,
         open_issues_count: 0,
@@ -1206,6 +1287,8 @@ mod tests {
             name: format!("testrepo-{suffix}"),
             description: "a test repo".into(),
             visibility: "public".into(),
+            kind: "model".into(),
+            large_file_threshold_bytes: None,
             default_branch: "main".into(),
             owner_org: String::new(),
         };
@@ -1230,6 +1313,8 @@ mod tests {
             .unwrap()
             .expect("repo should exist");
         assert_eq!(one.repo.visibility, "public");
+        assert_eq!(one.repo.kind, "model");
+        assert_eq!(one.repo.large_file_threshold_bytes, 1024 * 1024);
 
         let events = list_activity(&pool, 10).await.unwrap();
         assert!(events.iter().any(|e| e.event_type == "repo.created"));
@@ -1246,6 +1331,8 @@ mod tests {
                 name: "weave".into(),
                 description: "woven".into(),
                 visibility: "public".into(),
+                kind: "code".into(),
+                large_file_threshold_bytes: 10 * 1024 * 1024,
                 default_branch: "main".into(),
                 forgejo_owner: "clotho".into(),
                 forgejo_repo_id: Some(42),
