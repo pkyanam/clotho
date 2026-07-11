@@ -137,6 +137,9 @@ Imports run as durable control-plane jobs. Clotho persists preflight totals,
 per-file byte progress, Arachne counts, scanner summaries, commits, and terminal
 errors; the web app polls live state. Queued/running jobs are replayed after a
 gateway restart, with content-addressed uploads deduplicating completed work.
+Thirty-second database leases are renewed by worker heartbeats; an expired job
+is reclaimed automatically, while a healthy worker cannot be stolen by another
+gateway replica.
 
 CSV, TSV, and JSONL previews are deliberately bounded: the gateway streams at
 most 256 KiB from Arachne and returns at most 100 rows. Large datasets never

@@ -367,6 +367,22 @@ async fn load_job(pool: &sqlx::PgPool, id: &str) -> Result<HubImportJob, ApiErro
     .ok_or_else(|| ApiError::NotFound(format!("Hub import job {id:?} not found")))
 }
 
+#[derive(Clone)]
+struct JobLease {
+    id: String,
+    worker_id: String,
+}
+
+async fn require_job_lease(result: sqlx::postgres::PgQueryResult) -> Result<(), ApiError> {
+    if result.rows_affected() == 1 {
+        Ok(())
+    } else {
+        Err(ApiError::Conflict(
+            "Hub import lease moved to another gateway".into(),
+        ))
+    }
+}
+
 fn spawn_job(
     state: Arc<AppState>,
     name: String,
@@ -378,38 +394,94 @@ fn spawn_job(
         let Some(pool) = state.pool.as_ref() else {
             return;
         };
-        let _ = sqlx::query(
-            "update hub_import_jobs set status = 'running', started_at = coalesce(started_at, now()), error = '' where id = $1",
+        let lease = JobLease {
+            id: job_id,
+            worker_id: Uuid::new_v4().to_string(),
+        };
+        let claimed = sqlx::query(
+            r#"update hub_import_jobs set
+                 files_imported = case when status = 'running' then 0 else files_imported end,
+                 bytes_imported = case when status = 'running' then 0 else bytes_imported end,
+                 arachne_files = case when status = 'running' then 0 else arachne_files end,
+                 status = 'running', started_at = coalesce(started_at, now()),
+                 locked_by = $2, lease_expires_at = now() + interval '30 seconds',
+                 completed_at = null, error = ''
+               where id = $1 and (
+                 status = 'queued' or
+                 (status = 'running' and (lease_expires_at is null or lease_expires_at < now()))
+               )"#,
         )
-        .bind(&job_id)
+        .bind(&lease.id)
+        .bind(&lease.worker_id)
         .execute(pool)
         .await;
-        match perform_import(state.clone(), name, user_id, request, Some(&job_id)).await {
+        let Ok(claimed) = claimed else {
+            tracing::error!(job_id = %lease.id, "failed to claim Hub import job");
+            return;
+        };
+        if claimed.rows_affected() != 1 {
+            return;
+        }
+
+        let (stop_heartbeat, mut heartbeat_stopped) = tokio::sync::oneshot::channel();
+        let heartbeat_pool = pool.clone();
+        let heartbeat_lease = lease.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(10));
+            interval.tick().await;
+            loop {
+                tokio::select! {
+                    _ = &mut heartbeat_stopped => break,
+                    _ = interval.tick() => {
+                        let result = sqlx::query(
+                            "update hub_import_jobs set lease_expires_at = now() + interval '30 seconds' where id = $1 and locked_by = $2 and status = 'running'",
+                        )
+                        .bind(&heartbeat_lease.id)
+                        .bind(&heartbeat_lease.worker_id)
+                        .execute(&heartbeat_pool)
+                        .await;
+                        if !matches!(result, Ok(ref value) if value.rows_affected() == 1) {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        let result = perform_import(state.clone(), name, user_id, request, Some(&lease)).await;
+        let _ = stop_heartbeat.send(());
+        match result {
             Ok(result) => {
-                let _ = sqlx::query(
+                let terminal = sqlx::query(
                     r#"update hub_import_jobs set
                          status = 'succeeded', files_imported = $2,
                          bytes_imported = $3, arachne_files = $4,
                          security_counts = $5, commit_id = $6, operation_id = $7,
-                         completed_at = now(), error = '' where id = $1"#,
+                         completed_at = now(), error = '', locked_by = null,
+                         lease_expires_at = null where id = $1 and locked_by = $8"#,
                 )
-                .bind(&job_id)
+                .bind(&lease.id)
                 .bind(result.files_imported as i64)
                 .bind(result.logical_bytes as i64)
                 .bind(result.arachne_files as i64)
                 .bind(serde_json::to_value(&result.security_counts).unwrap_or_default())
                 .bind(result.commit_id)
                 .bind(result.operation_id)
+                .bind(&lease.worker_id)
                 .execute(pool)
                 .await;
+                if !matches!(terminal, Ok(ref value) if value.rows_affected() == 1) {
+                    tracing::error!(job_id = %lease.id, "failed to finalize Hub import job lease");
+                }
             }
             Err(error) => {
-                tracing::error!(job_id = %job_id, error = %error, "Hub import job failed");
+                tracing::error!(job_id = %lease.id, error = %error, "Hub import job failed");
                 let _ = sqlx::query(
-                    "update hub_import_jobs set status = 'failed', error = $2, completed_at = now() where id = $1",
+                    "update hub_import_jobs set status = 'failed', error = $2, completed_at = now(), locked_by = null, lease_expires_at = null where id = $1 and locked_by = $3",
                 )
-                .bind(&job_id)
+                .bind(&lease.id)
                 .bind(error.to_string())
+                .bind(&lease.worker_id)
                 .execute(pool)
                 .await;
             }
@@ -511,8 +583,9 @@ struct RecoverableJob {
     request: serde_json::Value,
 }
 
-/// Resume queued/running imports after a gateway restart. Replayed uploads are
-/// content-addressed, so Arachne deduplicates work completed before a crash.
+/// Continuously claim queued work and expired leases. The database lease makes
+/// this safe across gateway replicas; Arachne deduplicates bytes replayed after
+/// a worker crash.
 pub fn recover_hub_import_jobs(state: Arc<AppState>) {
     if state.pool.is_none() {
         return;
@@ -522,47 +595,49 @@ pub fn recover_hub_import_jobs(state: Arc<AppState>) {
     };
     runtime.spawn(async move {
         let pool = state.pool.as_ref().expect("pool checked");
-        let jobs = match sqlx::query_as::<_, RecoverableJob>(
-            r#"select j.id, r.name as repo_name, j.created_by, j.request
-               from hub_import_jobs j join repos r on r.id = j.repo_id
-               where j.status in ('queued', 'running') order by j.created_at"#,
-        )
-        .fetch_all(pool)
-        .await
-        {
-            Ok(jobs) => jobs,
-            Err(err) => {
-                tracing::error!(error = %err, "failed to recover Hub import jobs");
-                return;
-            }
-        };
-        for job in jobs {
-            let request = match serde_json::from_value::<ImportHubRequest>(job.request) {
-                Ok(request) => request,
+        loop {
+            let jobs = match sqlx::query_as::<_, RecoverableJob>(
+                r#"select j.id, r.name as repo_name, j.created_by, j.request
+                   from hub_import_jobs j join repos r on r.id = j.repo_id
+                   where j.status = 'queued' or (
+                     j.status = 'running' and
+                     (j.lease_expires_at is null or j.lease_expires_at < now())
+                   )
+                   order by j.created_at limit 50"#,
+            )
+            .fetch_all(pool)
+            .await
+            {
+                Ok(jobs) => jobs,
                 Err(err) => {
-                    let _ = sqlx::query(
-                        "update hub_import_jobs set status = 'failed', error = $2, completed_at = now() where id = $1",
-                    )
-                    .bind(&job.id)
-                    .bind(format!("cannot recover import request: {err}"))
-                    .execute(pool)
-                    .await;
+                    tracing::error!(error = %err, "failed to discover Hub import jobs");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
                     continue;
                 }
             };
-            let _ = sqlx::query(
-                "update hub_import_jobs set status = 'queued', files_imported = 0, bytes_imported = 0, arachne_files = 0, error = 'resuming after gateway restart' where id = $1",
-            )
-            .bind(&job.id)
-            .execute(pool)
-            .await;
-            spawn_job(
-                state.clone(),
-                job.repo_name,
-                job.created_by,
-                job.id,
-                request,
-            );
+            for job in jobs {
+                let request = match serde_json::from_value::<ImportHubRequest>(job.request) {
+                    Ok(request) => request,
+                    Err(err) => {
+                        let _ = sqlx::query(
+                            "update hub_import_jobs set status = 'failed', error = $2, completed_at = now() where id = $1 and status in ('queued', 'running')",
+                        )
+                        .bind(&job.id)
+                        .bind(format!("cannot recover import request: {err}"))
+                        .execute(pool)
+                        .await;
+                        continue;
+                    }
+                };
+                spawn_job(
+                    state.clone(),
+                    job.repo_name,
+                    job.created_by,
+                    job.id,
+                    request,
+                );
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
         }
     });
 }
@@ -587,7 +662,7 @@ async fn perform_import(
     name: String,
     user_id: String,
     request: ImportHubRequest,
-    job_id: Option<&str>,
+    job: Option<&JobLease>,
 ) -> Result<ImportHubResponse, ApiError> {
     validate_import_limits(&request)?;
     let repo = match &state.pool {
@@ -694,17 +769,19 @@ async fn perform_import(
             .unwrap_or("unscanned");
         *security_counts.entry(status.to_string()).or_insert(0) += 1;
     }
-    if let (Some(pool), Some(job_id)) = (&state.pool, job_id) {
-        sqlx::query(
-            "update hub_import_jobs set files_total = $2, logical_bytes = $3, security_counts = $4 where id = $1",
+    if let (Some(pool), Some(job)) = (&state.pool, job) {
+        let updated = sqlx::query(
+            "update hub_import_jobs set files_total = $2, logical_bytes = $3, security_counts = $4 where id = $1 and locked_by = $5",
         )
-        .bind(job_id)
+        .bind(&job.id)
         .bind(files.len() as i64)
         .bind(logical_bytes as i64)
         .bind(serde_json::to_value(&security_counts).unwrap_or_default())
+        .bind(&job.worker_id)
         .execute(pool)
         .await
         .map_err(|err| ApiError::Internal(format!("update Hub import preflight: {err}")))?;
+        require_job_lease(updated).await?;
     }
     let mut bytes_imported = 0u64;
     for file in &files {
@@ -757,16 +834,18 @@ async fn perform_import(
             executable: false,
         });
         bytes_imported = bytes_imported.saturating_add(file.size);
-        if let (Some(pool), Some(job_id)) = (&state.pool, job_id) {
-            sqlx::query(
-                "update hub_import_jobs set files_imported = files_imported + 1, bytes_imported = $2, arachne_files = $3 where id = $1",
+        if let (Some(pool), Some(job)) = (&state.pool, job) {
+            let updated = sqlx::query(
+                "update hub_import_jobs set files_imported = files_imported + 1, bytes_imported = $2, arachne_files = $3 where id = $1 and locked_by = $4",
             )
-            .bind(job_id)
+            .bind(&job.id)
             .bind(bytes_imported as i64)
             .bind(arachne_files as i64)
+            .bind(&job.worker_id)
             .execute(pool)
             .await
             .map_err(|err| ApiError::Internal(format!("update Hub import progress: {err}")))?;
+            require_job_lease(updated).await?;
         }
     }
 
@@ -786,14 +865,16 @@ async fn perform_import(
         })
         .await?
         .into_inner();
-    if let (Some(pool), Some(job_id)) = (&state.pool, job_id) {
-        sqlx::query("update hub_import_jobs set commit_id = $2, operation_id = $3 where id = $1")
-            .bind(job_id)
+    if let (Some(pool), Some(job)) = (&state.pool, job) {
+        let updated = sqlx::query("update hub_import_jobs set commit_id = $2, operation_id = $3 where id = $1 and locked_by = $4")
+            .bind(&job.id)
             .bind(&commit.commit_id)
             .bind(&commit.operation_id)
+            .bind(&job.worker_id)
             .execute(pool)
             .await
             .map_err(|err| ApiError::Internal(format!("record Hub import commit: {err}")))?;
+        require_job_lease(updated).await?;
     }
     let mut queue = state.queue.clone();
     let submitted = queue

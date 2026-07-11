@@ -136,6 +136,8 @@ files into Arachne, and land as ordinary Clotho commits. Public imports need no
 configuration; private/gated access uses an encrypted in-app token.
 Large imports are durable jobs with live file/byte progress, scanner summaries,
 commit provenance, errors, and automatic replay after gateway restarts.
+Database leases and worker heartbeats fence stale workers, so multiple gateway
+replicas can share the queue without importing the same snapshot concurrently.
 
 Tailscale is a first-class NetworkProvider: connect an org OAuth client from
 Clotho settings, verify it live, and mark repositories `public` or `tailscale`
