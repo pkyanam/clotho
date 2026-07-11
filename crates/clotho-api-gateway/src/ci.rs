@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use clotho_common::pb::compute::v1::{JobFile, RunJobRequest};
 use clotho_common::pb::vcs::v1::{ExportRepoArchiveRequest, GetFileRequest, ListFilesRequest};
+use serde::Serialize;
 
 use crate::actions::{FinishedRun, NewActionRun};
 use crate::AppState;
@@ -249,6 +250,23 @@ async fn execute(
             "CLOTHO_RELEASE_MANIFEST_SHA256".into(),
             run.release_manifest_sha256.clone(),
         );
+        let pool = state
+            .pool
+            .as_ref()
+            .ok_or_else(|| "release runtime requires the Clotho control plane".to_string())?;
+        let repo_metadata = crate::control::get_repo_with_org(pool, repo)
+            .await
+            .map_err(|error| format!("resolve release runtime repository: {error}"))?
+            .ok_or_else(|| format!("repository {repo:?} disappeared before Action dispatch"))?;
+        let (manifest, release_env) = release_runtime(
+            &format!("{}/{}", repo_metadata.org_name, repo),
+            &repo_metadata.repo.kind,
+            &run.release_version,
+            &run.commit_id,
+            &run.release_manifest_sha256,
+        )?;
+        job_files.push(manifest);
+        env.extend(release_env);
     }
     if !config.gpu_types.is_empty() {
         env.insert("CLOTHO_GPU_TYPES".into(), config.gpu_types.join(","));
@@ -276,6 +294,65 @@ async fn execute(
         provider: result.provider,
         sandbox_id: result.sandbox_id,
     })
+}
+
+#[derive(Serialize)]
+struct ReleaseRuntimeManifest<'a> {
+    schema_version: u8,
+    repo_id: &'a str,
+    repo_kind: &'a str,
+    version: &'a str,
+    commit_id: &'a str,
+    manifest_sha256: &'a str,
+    artifact_root: &'static str,
+    source_of_truth: &'static str,
+}
+
+fn release_runtime(
+    repo_id: &str,
+    repo_kind: &str,
+    version: &str,
+    commit_id: &str,
+    manifest_sha256: &str,
+) -> Result<(JobFile, std::collections::HashMap<String, String>), String> {
+    let artifact_root = format!("{SANDBOX_WORKDIR}/checkout");
+    let metadata_path = format!("{SANDBOX_WORKDIR}/release.json");
+    let manifest = ReleaseRuntimeManifest {
+        schema_version: 1,
+        repo_id,
+        repo_kind,
+        version,
+        commit_id,
+        manifest_sha256,
+        artifact_root: "/tmp/clotho-ci/checkout",
+        source_of_truth: "clotho",
+    };
+    let content = serde_json::to_vec_pretty(&manifest)
+        .map_err(|error| format!("encode release runtime manifest: {error}"))?;
+    let mut env = std::collections::HashMap::from([
+        ("CLOTHO_RELEASE_PATH".into(), artifact_root.clone()),
+        ("CLOTHO_ARTIFACT_ROOT".into(), artifact_root),
+        ("CLOTHO_RELEASE_METADATA".into(), metadata_path.clone()),
+        ("CLOTHO_REPO_ID".into(), repo_id.into()),
+        ("CLOTHO_REPO_KIND".into(), repo_kind.into()),
+        (
+            "CLOTHO_RELEASE_URI".into(),
+            format!("clotho://{repo_id}@{version}"),
+        ),
+        ("HF_HUB_OFFLINE".into(), "1".into()),
+    ]);
+    if repo_kind == "model" {
+        env.insert("TRANSFORMERS_OFFLINE".into(), "1".into());
+    } else if repo_kind == "dataset" {
+        env.insert("HF_DATASETS_OFFLINE".into(), "1".into());
+    }
+    Ok((
+        JobFile {
+            path: metadata_path,
+            content,
+        },
+        env,
+    ))
 }
 
 fn job_snapshot(config: &crate::actions::ActionsConfig, provider_id: &str) -> String {
@@ -425,7 +502,7 @@ fn truncate(s: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ci_script, job_snapshot};
+    use super::{ci_script, job_snapshot, release_runtime};
     use crate::actions::ActionsConfig;
 
     fn config(accelerator: &str, image: &str) -> ActionsConfig {
@@ -466,5 +543,21 @@ mod tests {
         let ci = ci_script("model", "abc123", "ci");
         assert!(ci.contains(".clotho/ci.sh"));
         assert!(ci.contains("clean checkout treated as success"));
+    }
+
+    #[test]
+    fn model_releases_are_self_describing_offline_runtimes() {
+        let (file, env) =
+            release_runtime("clotho/llm", "model", "v1.0.0", "abc123", "digest123").unwrap();
+        assert_eq!(file.path, "/tmp/clotho-ci/release.json");
+        let manifest: serde_json::Value = serde_json::from_slice(&file.content).unwrap();
+        assert_eq!(manifest["repo_id"], "clotho/llm");
+        assert_eq!(manifest["source_of_truth"], "clotho");
+        assert_eq!(manifest["manifest_sha256"], "digest123");
+        assert_eq!(env["CLOTHO_RELEASE_PATH"], "/tmp/clotho-ci/checkout");
+        assert_eq!(env["CLOTHO_RELEASE_URI"], "clotho://clotho/llm@v1.0.0");
+        assert_eq!(env["HF_HUB_OFFLINE"], "1");
+        assert_eq!(env["TRANSFORMERS_OFFLINE"], "1");
+        assert!(!env.contains_key("HF_DATASETS_OFFLINE"));
     }
 }

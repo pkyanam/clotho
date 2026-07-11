@@ -145,7 +145,10 @@ record for model, dataset, and code provenance.
 Evaluation, inference, and benchmark Actions can be pinned to those releases;
 GPU sandboxes receive the verified release digest and exact commit, making a
 "repo linked to an H100" a reproducible platform primitive rather than an
-untracked notebook session.
+untracked notebook session. Release-pinned sandboxes are self-describing
+offline ML runtimes: Clotho injects a local artifact root, canonical release
+URI, repo identity/kind, and JSON provenance manifest while preventing
+frameworks from silently falling back to a mutable hosted Hub revision.
 Action workers use database leases and heartbeats too: gateway restarts and
 replica failures are reclaimed automatically, with stale workers fenced and
 the recovery attempt visible in Clotho.

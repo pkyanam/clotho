@@ -168,6 +168,13 @@ curl -s -X POST http://localhost:8080/api/v1/repos/tiny-gpt/actions/runs \
 The sandbox receives `CLOTHO_WORKFLOW`, `CLOTHO_COMMIT_ID`,
 `CLOTHO_RELEASE_VERSION`, and `CLOTHO_RELEASE_MANIFEST_SHA256`, then executes
 `.clotho/evaluate.sh`, `.clotho/inference.sh`, or `.clotho/benchmark.sh`.
+It also receives `CLOTHO_RELEASE_PATH` (the fully materialized checkout),
+`CLOTHO_RELEASE_URI`, `CLOTHO_REPO_ID`, `CLOTHO_REPO_KIND`, and
+`CLOTHO_RELEASE_METADATA` (a generated JSON provenance manifest). Model and
+dataset runs enable the relevant framework offline guards automatically, so
+`AutoModel.from_pretrained(os.environ["CLOTHO_RELEASE_PATH"],
+local_files_only=True)` cannot silently drift to a hosted Hub revision. No user
+environment configuration is required.
 Queued/running Actions use 30-second database leases and ten-second worker
 heartbeats. Expired runs are reclaimed by any healthy gateway replica; the
 `attempt` counter records recovery and stale workers cannot overwrite results.
