@@ -149,6 +149,10 @@ untracked notebook session.
 Action workers use database leases and heartbeats too: gateway restarts and
 replica failures are reclaimed automatically, with stale workers fenced and
 the recovery attempt visible in Clotho.
+Release files have a Clotho-native `HEAD`/streaming `GET` distribution path.
+Multi-GB weights flow from Arachne with immutable cache headers, SHA-256 ETags,
+and commit/manifest provenance—never through Forgejo and never through a JSON
+base64 response.
 
 Tailscale is a first-class NetworkProvider: connect an org OAuth client from
 Clotho settings, verify it live, and mark repositories `public` or `tailscale`

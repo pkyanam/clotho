@@ -4,12 +4,19 @@
 
 use std::sync::Arc;
 
+use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, ETAG};
+use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
 use axum::Json;
 use chrono::{DateTime, Utc};
+use clotho_common::lfs_pointer::{LfsPointer, PointerError};
+use clotho_common::pb::storage::v1::DownloadFileRequest;
+use clotho_common::pb::vcs::v1::GetFileRequest;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
 use crate::auth;
@@ -278,6 +285,189 @@ pub async fn get_release(
     }))
 }
 
+pub async fn get_release_file(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((name, version, path)): Path<(String, String, String)>,
+) -> Result<Response<Body>, ApiError> {
+    serve_release_file(state, headers, name, version, path, false).await
+}
+
+pub async fn head_release_file(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((name, version, path)): Path<(String, String, String)>,
+) -> Result<Response<Body>, ApiError> {
+    serve_release_file(state, headers, name, version, path, true).await
+}
+
+async fn serve_release_file(
+    state: Arc<AppState>,
+    headers: HeaderMap,
+    name: String,
+    version: String,
+    path: String,
+    head_only: bool,
+) -> Result<Response<Body>, ApiError> {
+    crate::validate_commit_path(&path)?;
+    let auth = auth::resolve_auth(&headers, &state).await?;
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("release downloads require the control plane".into()))?;
+    let repo = control::require_repo_permission(pool, &name, &auth.user_id, "read").await?;
+    let release = load_release(pool, &repo.repo.id, &version).await?;
+    let release_summary = summary(&release)?;
+    if !release_summary.verified {
+        return Err(ApiError::Conflict(format!(
+            "release {version:?} failed manifest verification"
+        )));
+    }
+    let in_manifest = release.manifest["artifacts"]
+        .as_array()
+        .is_some_and(|artifacts| artifacts.iter().any(|artifact| artifact["path"] == path));
+    if !in_manifest {
+        return Err(ApiError::NotFound(format!(
+            "file {path:?} is not part of release {version:?}"
+        )));
+    }
+
+    let file = state
+        .vcs
+        .clone()
+        .get_file(GetFileRequest {
+            repo: name,
+            commit_id: release.commit_id.clone(),
+            path: path.clone(),
+        })
+        .await?
+        .into_inner();
+    if file.conflicted {
+        return Err(ApiError::Conflict(
+            "conflicted files cannot be served from an immutable release".into(),
+        ));
+    }
+
+    let (body, size, oid, arachne_hash) = match LfsPointer::parse(&file.content) {
+        Ok(pointer) => {
+            let body = if head_only {
+                Body::empty()
+            } else {
+                stream_arachne_release(&state, pointer.clone()).await?
+            };
+            (body, pointer.size, pointer.oid_sha256, pointer.arachne_hash)
+        }
+        Err(PointerError::NotPointer) => {
+            let oid = format!("{:x}", Sha256::digest(&file.content));
+            let size = file.content.len() as u64;
+            let body = if head_only {
+                Body::empty()
+            } else {
+                Body::from(file.content)
+            };
+            (body, size, oid, String::new())
+        }
+        Err(error) => return Err(ApiError::Upstream(error.to_string())),
+    };
+    let mut response = Response::new(body);
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static(content_type(&path)));
+    insert_header(response.headers_mut(), CONTENT_LENGTH, &size.to_string())?;
+    insert_header(response.headers_mut(), ETAG, &format!("\"sha256:{oid}\""))?;
+    response.headers_mut().insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static(if repo.repo.visibility == "public" {
+            "public, max-age=31536000, immutable"
+        } else {
+            "private, max-age=31536000, immutable"
+        }),
+    );
+    insert_named_header(&mut response, "x-clotho-release-version", &version)?;
+    insert_named_header(&mut response, "x-clotho-commit-id", &release.commit_id)?;
+    insert_named_header(
+        &mut response,
+        "x-clotho-manifest-sha256",
+        &release.manifest_sha256,
+    )?;
+    if !arachne_hash.is_empty() {
+        insert_named_header(&mut response, "x-clotho-arachne-hash", &arachne_hash)?;
+    }
+    Ok(response)
+}
+
+async fn stream_arachne_release(state: &AppState, pointer: LfsPointer) -> Result<Body, ApiError> {
+    let mut stream = state
+        .storage
+        .clone()
+        .download_file(DownloadFileRequest {
+            file_hash: pointer.arachne_hash.clone(),
+        })
+        .await?
+        .into_inner();
+    let (sender, receiver) = mpsc::channel::<Result<Bytes, std::io::Error>>(4);
+    tokio::spawn(async move {
+        let mut hasher = Sha256::new();
+        let mut received = 0u64;
+        while let Ok(Some(block)) = stream.message().await {
+            received = received.saturating_add(block.data.len() as u64);
+            hasher.update(&block.data);
+            if sender.send(Ok(Bytes::from(block.data))).await.is_err() {
+                return;
+            }
+        }
+        let digest = format!("{:x}", hasher.finalize());
+        if received != pointer.size || digest != pointer.oid_sha256 {
+            let _ = sender
+                .send(Err(std::io::Error::other(format!(
+                    "Arachne release integrity failure: expected {}/{}, received {received}/{digest}",
+                    pointer.size, pointer.oid_sha256
+                ))))
+                .await;
+        }
+    });
+    Ok(Body::from_stream(ReceiverStream::new(receiver)))
+}
+
+fn insert_header(
+    headers: &mut HeaderMap,
+    name: axum::http::header::HeaderName,
+    value: &str,
+) -> Result<(), ApiError> {
+    headers.insert(
+        name,
+        HeaderValue::from_str(value)
+            .map_err(|error| ApiError::Internal(format!("release response header: {error}")))?,
+    );
+    Ok(())
+}
+
+fn insert_named_header(
+    response: &mut Response<Body>,
+    name: &'static str,
+    value: &str,
+) -> Result<(), ApiError> {
+    insert_header(
+        response.headers_mut(),
+        axum::http::header::HeaderName::from_static(name),
+        value,
+    )
+}
+
+fn content_type(path: &str) -> &'static str {
+    match path
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+    {
+        Some(extension) if extension == "json" || extension == "jsonl" => "application/json",
+        Some(extension) if extension == "md" || extension == "txt" => "text/plain; charset=utf-8",
+        Some(extension) if extension == "csv" => "text/csv; charset=utf-8",
+        Some(extension) if extension == "safetensors" => "application/x-safetensors",
+        Some(extension) if extension == "onnx" => "application/onnx",
+        _ => "application/octet-stream",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,6 +490,19 @@ mod tests {
         assert_ne!(
             manifest_digest(&one).unwrap(),
             manifest_digest(&two).unwrap()
+        );
+    }
+
+    #[test]
+    fn release_downloads_use_portable_content_types() {
+        assert_eq!(
+            content_type("weights/model.safetensors"),
+            "application/x-safetensors"
+        );
+        assert_eq!(content_type("README.md"), "text/plain; charset=utf-8");
+        assert_eq!(
+            content_type("weights/model.bin"),
+            "application/octet-stream"
         );
     }
 }

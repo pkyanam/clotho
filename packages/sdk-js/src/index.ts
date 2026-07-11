@@ -998,6 +998,31 @@ export class ClothoClient {
     });
   }
 
+  async downloadReleaseFile(
+    name: string,
+    version: string,
+    path: string,
+    options?: { head?: boolean },
+  ): Promise<Response> {
+    const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+    const endpoint = `/api/v1/repos/${encodeURIComponent(name)}/releases/${encodeURIComponent(version)}/resolve/${encodedPath}`;
+    const response = await this.fetchImpl(`${this.baseUrl}${endpoint}`, {
+      method: options?.head ? "HEAD" : "GET",
+      headers: this.headers(),
+    });
+    if (!response.ok) {
+      let message = `${options?.head ? "HEAD" : "GET"} ${endpoint} failed: ${response.status}`;
+      try {
+        const body = (await response.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Binary endpoints can still fail without a JSON edge envelope.
+      }
+      throw new ClothoApiError(response.status, message);
+    }
+    return response;
+  }
+
   file(name: string, path: string, commitId?: string): Promise<FileContent> {
     return this.request(
       `/api/v1/repos/${encodeURIComponent(name)}/file${qs({ path, commit_id: commitId })}`,

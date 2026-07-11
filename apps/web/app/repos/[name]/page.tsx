@@ -89,6 +89,9 @@ export default async function RepoPage({
       : Promise.resolve(null),
   ]);
   const metadataChips = artifactMetadataChips(manifest.metadata);
+  const latestRelease = releases[0]
+    ? await client.release(name, releases[0].version).catch(() => null)
+    : null;
 
   let actionsLabel = "actions idle";
   if (failedActions > 0) actionsLabel = `${failedActions} failing`;
@@ -323,6 +326,36 @@ export default async function RepoPage({
                   </span>
                 )}
               </form>
+              {latestRelease && (
+                <div className="border-t border-kumo-hairline px-4 py-3">
+                  <p className="text-[0.75rem] text-kumo-inactive">
+                    frozen files · {latestRelease.version} · sha256:
+                    {shortId(latestRelease.manifest_sha256)}
+                  </p>
+                  <ul className="mt-2 grid gap-1 sm:grid-cols-2">
+                    {latestRelease.manifest.artifacts.slice(0, 10).map((artifact) => {
+                      const encodedPath = artifact.path
+                        .split("/")
+                        .map(encodeURIComponent)
+                        .join("/");
+                      return (
+                        <li key={artifact.path}>
+                          <a
+                            href={`/api/repos/${encodeURIComponent(name)}/releases/${encodeURIComponent(latestRelease.version)}/resolve/${encodedPath}`}
+                            download
+                            className="flex items-center justify-between gap-3 border border-kumo-hairline px-3 py-2 text-[0.8125rem] hover:bg-kumo-elevated"
+                          >
+                            <span className="min-w-0 truncate">{artifact.path}</span>
+                            <span className="shrink-0 text-kumo-inactive">
+                              {formatBytes(artifact.size_bytes)} ↓
+                            </span>
+                          </a>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
             </div>
           </section>
 

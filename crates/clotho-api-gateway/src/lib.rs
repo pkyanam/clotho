@@ -302,6 +302,10 @@ pub fn router_with_pool(
             get(releases::get_release),
         )
         .route(
+            "/api/v1/repos/{name}/releases/{version}/resolve/{*path}",
+            get(releases::get_release_file).head(releases::head_release_file),
+        )
+        .route(
             "/api/v1/repos/{name}/commits",
             get(repos::commits)
                 .post(commit_repo)

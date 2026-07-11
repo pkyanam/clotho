@@ -172,6 +172,15 @@ Queued/running Actions use 30-second database leases and ten-second worker
 heartbeats. Expired runs are reclaimed by any healthy gateway replica; the
 `attempt` counter records recovery and stale workers cannot overwrite results.
 
+Consumers resolve exact release files from Clotho—not Forgejo or the source
+Hub. `HEAD` returns logical size, SHA-256 ETag, commit, manifest digest, and
+Arachne hash. `GET` streams large payloads directly from Arachne:
+
+```bash
+curl -I http://localhost:8080/api/v1/repos/tiny-gpt/releases/v1.0.0/resolve/model.safetensors
+curl -o model.safetensors http://localhost:8080/api/v1/repos/tiny-gpt/releases/v1.0.0/resolve/model.safetensors
+```
+
 CSV, TSV, and JSONL previews are deliberately bounded: the gateway streams at
 most 256 KiB from Arachne and returns at most 100 rows. Large datasets never
 need to be materialized in gateway memory just to inspect their shape.

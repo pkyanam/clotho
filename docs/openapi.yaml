@@ -616,6 +616,74 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
+  /api/v1/repos/{name}/releases/{version}/resolve/{path}:
+    get:
+      tags: [repos]
+      operationId: downloadRepoReleaseFile
+      summary: Stream an exact file from an immutable Clotho release
+      description: Large files stream directly from Arachne and are never buffered by the gateway.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: path
+          required: true
+          description: Slash-containing repository path
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Byte-identical release file
+          headers:
+            ETag:
+              schema:
+                type: string
+            X-Clotho-Commit-Id:
+              schema:
+                type: string
+            X-Clotho-Manifest-Sha256:
+              schema:
+                type: string
+            X-Clotho-Arachne-Hash:
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+    head:
+      tags: [repos]
+      operationId: headRepoReleaseFile
+      summary: Inspect immutable release file size, digest, and provenance
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Release file metadata in headers
+
   /api/v1/repos/{name}/hub-imports:
     get:
       tags: [repos, providers]

@@ -201,6 +201,37 @@ describe("ClothoClient", () => {
     );
   });
 
+  it("streams exact release files without JSON materialization", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([0, 1, 2, 255]), {
+        headers: {
+          "content-type": "application/octet-stream",
+          "x-clotho-release-version": "v1.0.0",
+        },
+      }),
+    );
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      token: "secret",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    const response = await client.downloadReleaseFile(
+      "weave",
+      "v1.0.0",
+      "weights/model.bin",
+    );
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(
+      new Uint8Array([0, 1, 2, 255]),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://gateway.test/api/v1/repos/weave/releases/v1.0.0/resolve/weights/model.bin",
+      expect.objectContaining({
+        method: "GET",
+        headers: { authorization: "Bearer secret" },
+      }),
+    );
+  });
+
   it("surfaces gateway error bodies as ClothoApiError", async () => {
     const { client } = clientWith(
       jsonResponse({ error: 'repo "weave" already exists' }, 409),
