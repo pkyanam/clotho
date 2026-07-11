@@ -37,6 +37,9 @@ fn clerk_config() -> GatewayConfig {
         agent_gateway_url: "http://localhost:8090".into(),
         agent_admin_token: String::new(),
         compute_grpc_url: "http://localhost:50057".into(),
+        storage_grpc_url: "http://localhost:50052".into(),
+        large_file_threshold_bytes: 10 * 1024 * 1024,
+        storage_sdk_bridge_url: String::new(),
         webhook_secret: String::new(),
         webhook_url: String::new(),
         web_url: "http://localhost:3100".into(),
@@ -223,7 +226,13 @@ async fn fabric_layer_auth_lists_providers() {
         .json()
         .await
         .unwrap();
-    assert_eq!(storage["providers"][0]["configured"], false);
+    assert_eq!(storage["providers"][0]["id"], "minio");
+    assert!(storage["providers"][0]["configured"].is_boolean());
+    assert!(storage["providers"][0]["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|capability| capability == "dedup"));
 
     let network: serde_json::Value = reqwest::Client::new()
         .get(format!("http://{addr}/api/v1/providers?layer=network"))

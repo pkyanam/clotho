@@ -87,7 +87,10 @@ export interface CreatedRepo {
 
 export interface CommitFileInput {
   path: string;
-  content: string;
+  /** UTF-8 payload. Use content_base64 instead for binary artifacts. */
+  content?: string;
+  /** Standard base64 payload; mutually exclusive with content. */
+  content_base64?: string;
   executable?: boolean;
 }
 
@@ -128,7 +131,32 @@ export interface FileContent {
   size_bytes: number;
   /** UTF-8 text contents; null when the file is binary. */
   content: string | null;
+  /** Standard base64 bytes when binary is true. */
+  content_base64?: string;
   binary: boolean;
+}
+
+export interface ArachneFile {
+  path: string;
+  logical_bytes: number;
+  pointer_bytes: number;
+  oid_sha256: string;
+  arachne_hash: string;
+}
+
+export interface RepoStorageStats {
+  commit_id: string;
+  git_tree_bytes: number;
+  logical_bytes: number;
+  arachne_file_count: number;
+  arachne_logical_bytes: number;
+  large_files: ArachneFile[];
+  store_scope: string;
+  xorb_count: number;
+  xorb_bytes: number;
+  shard_count: number;
+  shard_bytes: number;
+  store_total_bytes: number;
 }
 
 /** One jj operation-log entry — checkpoints, commits, restores, imports. */
@@ -733,6 +761,12 @@ export class ClothoClient {
   file(name: string, path: string, commitId?: string): Promise<FileContent> {
     return this.request(
       `/api/v1/repos/${encodeURIComponent(name)}/file${qs({ path, commit_id: commitId })}`,
+    );
+  }
+
+  storageStats(name: string): Promise<RepoStorageStats> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/storage`,
     );
   }
 

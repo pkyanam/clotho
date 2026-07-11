@@ -57,7 +57,7 @@ Filter by fabric layer:
 
 ```bash
 curl -s 'http://localhost:8080/api/v1/providers?layer=auth'
-curl -s 'http://localhost:8080/api/v1/providers?layer=storage'   # stub until Stage 18
+curl -s 'http://localhost:8080/api/v1/providers?layer=storage'   # live Arachne + StorageSDK state
 curl -s 'http://localhost:8080/api/v1/providers?layer=network'   # stub until Stage 19
 curl -s 'http://localhost:8080/api/v1/providers?all=true'
 ```

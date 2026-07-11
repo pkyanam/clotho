@@ -15,6 +15,7 @@
 
 mod actions;
 mod agents;
+mod arachne;
 pub mod auth;
 pub mod auth_provider;
 mod ci;
@@ -36,7 +37,7 @@ mod webhooks;
 
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
@@ -44,6 +45,7 @@ use clotho_common::pb::compute::v1::compute_client::ComputeClient;
 use clotho_common::pb::diff::v1::diff_client::DiffClient;
 use clotho_common::pb::mergequeue::v1::merge_queue_client::MergeQueueClient;
 use clotho_common::pb::mergequeue::v1::SubmitChangeRequest;
+use clotho_common::pb::storage::v1::storage_client::StorageClient;
 use clotho_common::pb::vcs::v1::vcs_client::VcsClient;
 use clotho_common::pb::vcs::v1::{CommitRequest, FileChange, InitRepoRequest};
 use serde::{Deserialize, Serialize};
@@ -68,6 +70,13 @@ pub struct GatewayConfig {
     pub agent_admin_token: String,
     /// clotho-compute gRPC endpoint, e.g. `http://clotho-compute:50057`.
     pub compute_grpc_url: String,
+    /// Arachne storage gRPC endpoint, e.g. `http://clotho-storage:50052`.
+    pub storage_grpc_url: String,
+    /// Payloads at or above this size are stored through Arachne and committed
+    /// to git/jj as git-LFS-compatible pointers.
+    pub large_file_threshold_bytes: usize,
+    /// Optional internal StorageSDK bridge HTTP base.
+    pub storage_sdk_bridge_url: String,
     /// Shared secret Forgejo signs push webhooks with (HMAC-SHA256). Empty
     /// disables signature verification (dev only).
     pub webhook_secret: String,
@@ -111,6 +120,9 @@ pub(crate) struct AppState {
     pub(crate) diff: DiffClient<Channel>,
     pub(crate) queue: MergeQueueClient<Channel>,
     pub(crate) compute: ComputeClient<Channel>,
+    pub(crate) storage: StorageClient<Channel>,
+    pub(crate) large_file_threshold_bytes: usize,
+    pub(crate) storage_sdk_bridge_url: String,
     pub(crate) forgejo: ForgejoClient,
     pub(crate) http: reqwest::Client,
     pub(crate) agent_gateway_url: String,
@@ -212,6 +224,14 @@ pub fn router_with_pool(
             // CI archives can be large; lift the default 4 MiB decode cap.
             .max_decoding_message_size(256 * 1024 * 1024)
             .max_encoding_message_size(256 * 1024 * 1024),
+        storage: StorageClient::new(lazy_channel(&config.storage_grpc_url, "storage")?)
+            .max_decoding_message_size(256 * 1024 * 1024)
+            .max_encoding_message_size(4 * 1024 * 1024),
+        large_file_threshold_bytes: config.large_file_threshold_bytes,
+        storage_sdk_bridge_url: config
+            .storage_sdk_bridge_url
+            .trim_end_matches('/')
+            .to_string(),
         forgejo: ForgejoClient::new(config.forgejo),
         http: reqwest::Client::new(),
         agent_gateway_url: config.agent_gateway_url.trim_end_matches('/').to_string(),
@@ -260,9 +280,14 @@ pub fn router_with_pool(
         )
         .route("/api/v1/repos/{name}/tree", get(repos::tree))
         .route("/api/v1/repos/{name}/file", get(repos::file))
+        .route("/api/v1/repos/{name}/storage", get(repos::storage_stats))
         .route(
             "/api/v1/repos/{name}/commits",
-            get(repos::commits).post(commit_repo),
+            get(repos::commits)
+                .post(commit_repo)
+                // Binary payloads are base64 in this JSON compatibility path.
+                // Truly multi-GB artifacts will use the streaming upload API.
+                .layer(DefaultBodyLimit::max(256 * 1024 * 1024)),
         )
         .route("/api/v1/repos/{name}/oplog", get(repos::op_log))
         .route("/api/v1/repos/{name}/submit", post(submit_change))
@@ -427,9 +452,41 @@ struct CreateRepoResponse {
 #[derive(Deserialize)]
 struct CommitFileRequest {
     path: String,
-    content: String,
+    #[serde(default)]
+    content: Option<String>,
+    /// Binary-safe alternative to `content`. Exactly one representation is
+    /// required so model and dataset artifacts never pass through UTF-8.
+    #[serde(default)]
+    content_base64: Option<String>,
     #[serde(default)]
     executable: bool,
+}
+
+impl CommitFileRequest {
+    fn decode_content(&self) -> Result<Vec<u8>, ApiError> {
+        match (&self.content, &self.content_base64) {
+            (Some(content), None) => Ok(content.as_bytes().to_vec()),
+            (None, Some(encoded)) => {
+                use base64::Engine;
+                base64::engine::general_purpose::STANDARD
+                    .decode(encoded)
+                    .map_err(|err| {
+                        ApiError::InvalidRequest(format!(
+                            "file {:?} has invalid content_base64: {err}",
+                            self.path
+                        ))
+                    })
+            }
+            (Some(_), Some(_)) => Err(ApiError::InvalidRequest(format!(
+                "file {:?} must use either content or content_base64, not both",
+                self.path
+            ))),
+            (None, None) => Err(ApiError::InvalidRequest(format!(
+                "file {:?} requires content or content_base64",
+                self.path
+            ))),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -624,20 +681,36 @@ async fn commit_repo(
             "at least one file or deleted path is required".into(),
         ));
     }
+    let mut files = Vec::with_capacity(req.files.len());
+    for file in req.files {
+        let original = file.decode_content()?;
+        let content = if original.len() >= state.large_file_threshold_bytes {
+            let (pointer, outcome) = arachne::store_payload(&state, &original).await?;
+            tracing::info!(
+                repo = %name,
+                path = %file.path,
+                size = outcome.file_size,
+                new_bytes = outcome.new_bytes,
+                deduped_bytes = outcome.deduped_bytes,
+                arachne_hash = %outcome.file_hash,
+                "large repo payload stored through Arachne"
+            );
+            pointer
+        } else {
+            original
+        };
+        files.push(FileChange {
+            path: file.path,
+            content,
+            executable: file.executable,
+        });
+    }
     let mut vcs = state.vcs.clone();
     let response = vcs
         .commit(CommitRequest {
             repo: name,
             parent_commit_ids: req.parent_commit_ids,
-            files: req
-                .files
-                .into_iter()
-                .map(|f| FileChange {
-                    path: f.path,
-                    content: f.content.into_bytes(),
-                    executable: f.executable,
-                })
-                .collect(),
+            files,
             deleted_paths: req.deleted_paths,
             message: req.message,
             author_name: req.author_name,

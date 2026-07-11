@@ -520,6 +520,16 @@ reachable by humans (CLI) and agents (MCP) with the same semantics as the SDK.
   when publishable key set. Tests: `auth_slice_a` + `auth_clerk` mocks.
 
 ### Stage 18 — Arachne on the VCS path + BYO object store *(PRD v3 Phase B)*
+
+*Implementation note (2026-07-11):* the first production path is live. REST,
+SDK, and CLI commits accept UTF-8 or base64 payloads; payloads at the default
+10 MiB threshold are uploaded to Arachne and committed to jj/git as standard
+git-LFS pointers with a Clotho Arachne hash extension. File reads reconstruct
+the payload and verify its size and SHA-256 before returning it. The storage
+fabric probes live Arachne state. An optional open StorageSDK bridge supplies
+S3/MinIO/R2/filesystem adapters and snapshot/fork primitives for agent artifact
+namespaces. Remaining Stage 18 work: org/repo BYO credential persistence,
+repo kinds/policies, materialized CI export, and streaming download/LFS Batch.
 - Ship `ObjectStoreProvider`: org (optional repo) BYO S3/R2/GCS-compatible
   bucket via secrets (ADR-0014/0019); MinIO remains the managed default.
 - Wire Arachne into commit/fetch for large files; git-LFS pointer bridge at

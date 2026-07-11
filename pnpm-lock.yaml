@@ -62,7 +62,7 @@ importers:
         version: 9.39.4(jiti@2.7.0)
       eslint-config-next:
         specifier: 16.2.7
-        version: 16.2.7(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
+        version: 16.2.7(@typescript-eslint/parser@8.63.0(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
       tailwindcss:
         specifier: ^4
         version: 4.3.2
@@ -74,7 +74,7 @@ importers:
     dependencies:
       '@clerk/nextjs':
         specifier: ^7.5.14
-        version: 7.5.14(next@16.2.7(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        version: 7.5.14(next@16.2.7(@opentelemetry/api@1.9.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@clotho/sdk-js':
         specifier: workspace:*
         version: link:../../packages/sdk-js
@@ -120,7 +120,7 @@ importers:
         version: 9.39.4(jiti@2.7.0)
       eslint-config-next:
         specifier: 16.2.7
-        version: 16.2.7(@typescript-eslint/parser@8.63.0(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
+        version: 16.2.7(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
       tailwindcss:
         specifier: ^4
         version: 4.3.2
@@ -211,6 +211,18 @@ importers:
       '@computesdk/vercel':
         specifier: ^1.7.30
         version: 1.7.30
+
+  services/storage-sdk-bridge:
+    dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.1078.0
+        version: 3.1081.0
+      '@storagesdk/adapters':
+        specifier: 0.9.0
+        version: 0.9.0(@aws-sdk/client-s3@3.1081.0)(@aws-sdk/lib-storage@3.1081.0(@aws-sdk/client-s3@3.1081.0))
+      '@storagesdk/core':
+        specifier: 0.4.2
+        version: 0.4.2
 
 packages:
 
@@ -1958,6 +1970,55 @@ packages:
 
   '@stablelib/base64@1.0.1':
     resolution: {integrity: sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ==}
+
+  '@storagesdk/adapters@0.9.0':
+    resolution: {integrity: sha512-ipmie38ZdlSZY2UVI/a6h/N4jzI3WzrnKnoDTJo5woycobgG+3Y7EXepnqhkTtw4tSsYFuyGFoCmBGkW1ZgbXA==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@aws-sdk/client-s3': ^3.0.0
+      '@aws-sdk/lib-storage': ^3.0.0
+      '@aws-sdk/s3-presigned-post': ^3.0.0
+      '@aws-sdk/s3-request-presigner': ^3.0.0
+      '@azure/storage-blob': ^12.0.0
+      '@google-cloud/storage': ^7.0.0
+      '@mesadev/sdk': ^0.38.0
+      '@octokit/rest': ^21.0.0
+      '@pierre/storage': ^1.13.0
+      '@tigrisdata/storage': ^3.11.0
+      '@vercel/blob': ^2.3.0
+      vitest: ^4.0.0
+      webdav: ^5.10.0
+    peerDependenciesMeta:
+      '@aws-sdk/client-s3':
+        optional: true
+      '@aws-sdk/lib-storage':
+        optional: true
+      '@aws-sdk/s3-presigned-post':
+        optional: true
+      '@aws-sdk/s3-request-presigner':
+        optional: true
+      '@azure/storage-blob':
+        optional: true
+      '@google-cloud/storage':
+        optional: true
+      '@mesadev/sdk':
+        optional: true
+      '@octokit/rest':
+        optional: true
+      '@pierre/storage':
+        optional: true
+      '@tigrisdata/storage':
+        optional: true
+      '@vercel/blob':
+        optional: true
+      vitest:
+        optional: true
+      webdav:
+        optional: true
+
+  '@storagesdk/core@0.4.2':
+    resolution: {integrity: sha512-TASJvFpf4tHM52Sgg3AWMF1VsW6tiZAf6cG1PWktyqKWm+P4Iaz8cILEpD1VncvC4DzFYKeXRkq/xgaY3phKtg==}
+    engines: {node: '>=20'}
 
   '@swc/helpers@0.5.15':
     resolution: {integrity: sha512-JQ5TuMi45Owi4/BIMAJBoSQoOJu12oOk/gADqlcUL9JEdHB8vyjUSsxqeNXnmXHjYKMi2WcYtezGEEhqUI/E2g==}
@@ -5577,7 +5638,6 @@ snapshots:
       '@smithy/core': 3.29.1
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/client-bedrock-agentcore@3.1081.0':
     dependencies:
@@ -5604,7 +5664,6 @@ snapshots:
       '@smithy/node-http-handler': 4.9.3
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/core@3.974.29':
     dependencies:
@@ -5616,7 +5675,6 @@ snapshots:
       '@smithy/types': 4.15.1
       bowser: 2.14.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-env@3.972.55':
     dependencies:
@@ -5625,7 +5683,6 @@ snapshots:
       '@smithy/core': 3.29.1
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-http@3.972.57':
     dependencies:
@@ -5636,7 +5693,6 @@ snapshots:
       '@smithy/node-http-handler': 4.9.3
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-ini@3.972.62':
     dependencies:
@@ -5653,7 +5709,6 @@ snapshots:
       '@smithy/credential-provider-imds': 4.4.6
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-login@3.972.61':
     dependencies:
@@ -5663,7 +5718,6 @@ snapshots:
       '@smithy/core': 3.29.1
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-node@3.972.64':
     dependencies:
@@ -5678,7 +5732,6 @@ snapshots:
       '@smithy/credential-provider-imds': 4.4.6
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-process@3.972.55':
     dependencies:
@@ -5687,7 +5740,6 @@ snapshots:
       '@smithy/core': 3.29.1
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-sso@3.972.61':
     dependencies:
@@ -5698,7 +5750,6 @@ snapshots:
       '@smithy/core': 3.29.1
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-web-identity@3.972.61':
     dependencies:
@@ -5708,7 +5759,6 @@ snapshots:
       '@smithy/core': 3.29.1
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/lib-storage@3.1081.0(@aws-sdk/client-s3@3.1081.0)':
     dependencies:
@@ -5729,7 +5779,6 @@ snapshots:
       '@smithy/core': 3.29.1
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/nested-clients@3.997.29':
     dependencies:
@@ -5741,7 +5790,6 @@ snapshots:
       '@smithy/node-http-handler': 4.9.3
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/signature-v4-multi-region@3.996.38':
     dependencies:
@@ -5749,7 +5797,6 @@ snapshots:
       '@smithy/signature-v4': 5.6.2
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/token-providers@3.1081.0':
     dependencies:
@@ -5759,22 +5806,18 @@ snapshots:
       '@smithy/core': 3.29.1
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/types@3.973.15':
     dependencies:
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/xml-builder@3.972.33':
     dependencies:
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
-  '@aws/lambda-invoke-store@0.3.0':
-    optional: true
+  '@aws/lambda-invoke-store@0.3.0': {}
 
   '@babel/code-frame@7.29.7':
     dependencies:
@@ -5979,7 +6022,7 @@ snapshots:
       - react
       - react-dom
 
-  '@clerk/nextjs@7.5.14(next@16.2.7(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+  '@clerk/nextjs@7.5.14(next@16.2.7(@opentelemetry/api@1.9.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
       '@clerk/backend': 3.11.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@clerk/react': 6.12.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -7850,42 +7893,45 @@ snapshots:
     dependencies:
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@smithy/credential-provider-imds@4.4.6':
     dependencies:
       '@smithy/core': 3.29.1
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@smithy/fetch-http-handler@5.6.3':
     dependencies:
       '@smithy/core': 3.29.1
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@smithy/node-http-handler@4.9.3':
     dependencies:
       '@smithy/core': 3.29.1
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@smithy/signature-v4@5.6.2':
     dependencies:
       '@smithy/core': 3.29.1
       '@smithy/types': 4.15.1
       tslib: 2.8.1
-    optional: true
 
   '@smithy/types@4.15.1':
     dependencies:
       tslib: 2.8.1
-    optional: true
 
   '@stablelib/base64@1.0.1': {}
+
+  '@storagesdk/adapters@0.9.0(@aws-sdk/client-s3@3.1081.0)(@aws-sdk/lib-storage@3.1081.0(@aws-sdk/client-s3@3.1081.0))':
+    dependencies:
+      '@storagesdk/core': 0.4.2
+    optionalDependencies:
+      '@aws-sdk/client-s3': 3.1081.0
+      '@aws-sdk/lib-storage': 3.1081.0(@aws-sdk/client-s3@3.1081.0)
+
+  '@storagesdk/core@0.4.2': {}
 
   '@swc/helpers@0.5.15':
     dependencies:
@@ -8643,8 +8689,7 @@ snapshots:
       - supports-color
     optional: true
 
-  bowser@2.14.1:
-    optional: true
+  bowser@2.14.1: {}
 
   brace-expansion@1.1.15:
     dependencies:

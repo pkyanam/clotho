@@ -7,6 +7,7 @@ mod client;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
+use base64::Engine;
 use serde_json::{json, Value};
 
 use crate::args::{
@@ -431,13 +432,19 @@ async fn repo_commit(config: &Config, mut args: Vec<String>) -> Result<()> {
 
     let mut file_payloads = Vec::with_capacity(files.len());
     for path in &files {
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("read text file {}", path.display()))?;
-        file_payloads.push(json!({
+        let bytes = std::fs::read(path).with_context(|| format!("read file {}", path.display()))?;
+        let mut file = json!({
             "path": repo_path(path),
-            "content": content,
             "executable": is_executable(path),
-        }));
+        });
+        match String::from_utf8(bytes) {
+            Ok(content) => file["content"] = json!(content),
+            Err(err) => {
+                file["content_base64"] =
+                    json!(base64::engine::general_purpose::STANDARD.encode(err.into_bytes()));
+            }
+        }
+        file_payloads.push(file);
     }
 
     let mut body = json!({

@@ -12,6 +12,8 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
+use base64::Engine;
+use clotho_common::pb::storage::v1::GetStorageStatsRequest;
 use clotho_common::pb::vcs::v1::{
     CommitSummary, GetFileRequest, GetHeadsRequest, ListFilesRequest, LogCommitsRequest,
     QueryOpLogRequest,
@@ -407,6 +409,9 @@ pub struct FileResponse {
     pub size_bytes: u64,
     /// UTF-8 text contents; `null` when the file is binary.
     pub content: Option<String>,
+    /// Base64 bytes when the materialized file is not UTF-8.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_base64: Option<String>,
     pub binary: bool,
 }
 
@@ -424,8 +429,14 @@ pub async fn file(
         })
         .await?
         .into_inner();
-    let size_bytes = file.content.len() as u64;
-    let content = String::from_utf8(file.content).ok();
+    let bytes = crate::arachne::materialize_pointer(&state, &file.content)
+        .await?
+        .unwrap_or(file.content);
+    let size_bytes = bytes.len() as u64;
+    let content = String::from_utf8(bytes.clone()).ok();
+    let content_base64 = content
+        .is_none()
+        .then(|| base64::engine::general_purpose::STANDARD.encode(bytes));
     Ok(Json(FileResponse {
         commit_id: file.commit_id,
         path: file.path,
@@ -434,6 +445,101 @@ pub async fn file(
         size_bytes,
         binary: content.is_none(),
         content,
+        content_base64,
+    }))
+}
+
+#[derive(Serialize)]
+pub struct ArachneFileJson {
+    pub path: String,
+    pub logical_bytes: u64,
+    pub pointer_bytes: u64,
+    pub oid_sha256: String,
+    pub arachne_hash: String,
+}
+
+#[derive(Serialize)]
+pub struct RepoStorageStatsResponse {
+    pub commit_id: String,
+    pub git_tree_bytes: u64,
+    pub logical_bytes: u64,
+    pub arachne_file_count: u64,
+    pub arachne_logical_bytes: u64,
+    pub large_files: Vec<ArachneFileJson>,
+    /// Physical metrics are store-scoped until per-org buckets land.
+    pub store_scope: String,
+    pub xorb_count: u64,
+    pub xorb_bytes: u64,
+    pub shard_count: u64,
+    pub shard_bytes: u64,
+    pub store_total_bytes: u64,
+}
+
+/// Canonical repository storage view: logical payload sizes from Arachne
+/// pointers plus honest physical metrics for the active managed store.
+pub async fn storage_stats(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<RepoStorageStatsResponse>, ApiError> {
+    let mut vcs = state.vcs.clone();
+    let tree = vcs
+        .list_files(ListFilesRequest {
+            repo: name.clone(),
+            commit_id: String::new(),
+        })
+        .await?
+        .into_inner();
+    let git_tree_bytes: u64 = tree.files.iter().map(|entry| entry.size_bytes).sum();
+    let mut logical_bytes = git_tree_bytes;
+    let mut arachne_logical_bytes = 0u64;
+    let mut large_files = Vec::new();
+    for entry in tree.files {
+        // Clotho pointers are tiny. Avoid reading ordinary large git blobs.
+        if entry.size_bytes > 1024 {
+            continue;
+        }
+        let file = vcs
+            .get_file(GetFileRequest {
+                repo: name.clone(),
+                commit_id: tree.commit_id.clone(),
+                path: entry.path.clone(),
+            })
+            .await?
+            .into_inner();
+        let Ok(pointer) = clotho_common::lfs_pointer::LfsPointer::parse(&file.content) else {
+            continue;
+        };
+        logical_bytes = logical_bytes
+            .saturating_sub(entry.size_bytes)
+            .saturating_add(pointer.size);
+        arachne_logical_bytes = arachne_logical_bytes.saturating_add(pointer.size);
+        large_files.push(ArachneFileJson {
+            path: entry.path,
+            logical_bytes: pointer.size,
+            pointer_bytes: entry.size_bytes,
+            oid_sha256: pointer.oid_sha256,
+            arachne_hash: pointer.arachne_hash,
+        });
+    }
+    let store = state
+        .storage
+        .clone()
+        .get_storage_stats(GetStorageStatsRequest {})
+        .await?
+        .into_inner();
+    Ok(Json(RepoStorageStatsResponse {
+        commit_id: tree.commit_id,
+        git_tree_bytes,
+        logical_bytes,
+        arachne_file_count: large_files.len() as u64,
+        arachne_logical_bytes,
+        large_files,
+        store_scope: "managed-default".into(),
+        xorb_count: store.xorb_count,
+        xorb_bytes: store.xorb_bytes,
+        shard_count: store.shard_count,
+        shard_bytes: store.shard_bytes,
+        store_total_bytes: store.total_bytes,
     }))
 }
 

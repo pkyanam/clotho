@@ -1,6 +1,6 @@
 # Stage 18 — Execution plan: Arachne on the VCS path + BYO object store
 
-**Status:** Ready for implementation  
+**Status:** In progress — pointer/commit/read path and StorageSDK bridge shipped
 **Date:** 2026-07-10  
 **Owner:** Clotho core  
 **PRD:** [docs/prd.md](../prd.md) §5 Stage 18, §6 PRD v3 success criteria  
@@ -123,7 +123,7 @@ BYO storage
 
 #### 1.1 Migration
 
-**File:** `crates/clotho-api-gateway/migrations/1007_object_store.sql`
+**File:** `crates/clotho-api-gateway/migrations/1008_object_store.sql`
 
 ```sql
 -- Org-scoped object store connection (optional repo override later).

@@ -457,6 +457,23 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
+  /api/v1/repos/{name}/storage:
+    get:
+      tags: [repos]
+      operationId: getRepoStorageStats
+      summary: Get logical repository and physical Arachne storage metrics
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      responses:
+        "200":
+          description: Repository storage composition and active-store metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepoStorageStats"
+        "404":
+          $ref: "#/components/responses/Error"
+
   /api/v1/repos/{name}/commits:
     get:
       tags: [repos]
@@ -505,12 +522,17 @@ paths:
                   type: array
                   items:
                     type: object
-                    required: [path, content]
+                    required: [path]
                     properties:
                       path:
                         type: string
                       content:
                         type: string
+                        description: UTF-8 payload; mutually exclusive with content_base64
+                      content_base64:
+                        type: string
+                        format: byte
+                        description: Binary-safe payload; mutually exclusive with content
                       executable:
                         type: boolean
                 deleted_paths:
@@ -2354,8 +2376,67 @@ components:
         content:
           type: string
           nullable: true
+        content_base64:
+          type: string
+          format: byte
+          description: Present when the materialized file is binary
         binary:
           type: boolean
+    ArachneFile:
+      type: object
+      required: [path, logical_bytes, pointer_bytes, oid_sha256, arachne_hash]
+      properties:
+        path:
+          type: string
+        logical_bytes:
+          type: integer
+          format: int64
+        pointer_bytes:
+          type: integer
+          format: int64
+        oid_sha256:
+          type: string
+        arachne_hash:
+          type: string
+    RepoStorageStats:
+      type: object
+      required: [commit_id, git_tree_bytes, logical_bytes, arachne_file_count, arachne_logical_bytes, large_files, store_scope, xorb_count, xorb_bytes, shard_count, shard_bytes, store_total_bytes]
+      properties:
+        commit_id:
+          type: string
+        git_tree_bytes:
+          type: integer
+          format: int64
+        logical_bytes:
+          type: integer
+          format: int64
+        arachne_file_count:
+          type: integer
+          format: int64
+        arachne_logical_bytes:
+          type: integer
+          format: int64
+        large_files:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArachneFile"
+        store_scope:
+          type: string
+        xorb_count:
+          type: integer
+          format: int64
+        xorb_bytes:
+          type: integer
+          format: int64
+        shard_count:
+          type: integer
+          format: int64
+        shard_bytes:
+          type: integer
+          format: int64
+        store_total_bytes:
+          type: integer
+          format: int64
     OpLogEntry:
       type: object
       properties:

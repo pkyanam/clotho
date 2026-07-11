@@ -48,7 +48,7 @@ impl IntoResponse for ApiError {
 /// distinction between bad requests and upstream failures.
 impl From<tonic::Status> for ApiError {
     fn from(status: tonic::Status) -> Self {
-        let msg = format!("clotho-vcs: {}", status.message());
+        let msg = format!("Clotho internal service: {}", status.message());
         match status.code() {
             tonic::Code::InvalidArgument => Self::InvalidRequest(msg),
             tonic::Code::NotFound => Self::NotFound(msg),

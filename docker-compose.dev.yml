@@ -291,6 +291,21 @@ services:
       - "8091:8091"
     restart: unless-stopped
 
+  # Optional StorageSDK adapter sidecar (ADR-0019). It supplies a modular
+  # provider catalog plus probe/snapshot/fork primitives; managed MinIO works
+  # without it.
+  clotho-storage-sdk-bridge:
+    profiles: ["storage-bridge"]
+    build:
+      context: ./services/storage-sdk-bridge
+      dockerfile: Dockerfile
+    environment:
+      PORT: "8092"
+      CLOTHO_STORAGE_SDK_BRIDGE_TOKEN: ${CLOTHO_STORAGE_SDK_BRIDGE_TOKEN:-}
+    ports:
+      - "8092:8092"
+    restart: unless-stopped
+
   clotho-api-gateway:
     <<: *clotho-service
     build:
@@ -317,6 +332,8 @@ services:
       # calls for pushes (reachable by service name on this network), the
       # shared HMAC secret, and the web app base for status target links.
       CLOTHO_COMPUTE_GRPC_URL: http://clotho-compute:50057
+      CLOTHO_STORAGE_GRPC_URL: http://clotho-storage:50052
+      CLOTHO_STORAGE_SDK_BRIDGE_URL: ${CLOTHO_STORAGE_SDK_BRIDGE_URL:-http://clotho-storage-sdk-bridge:8092}
       CLOTHO_COMPUTE_PROVIDER: ${CLOTHO_COMPUTE_PROVIDER:-daytona}
       CLOTHO_COMPUTE_SNAPSHOT: ${CLOTHO_COMPUTE_SNAPSHOT:-}
       CLOTHO_ACTIONS_TIMEOUT_SECONDS: ${CLOTHO_ACTIONS_TIMEOUT_SECONDS:-900}

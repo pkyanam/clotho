@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use clotho_common::pb::compute::v1::{JobFile, RunJobRequest};
-use clotho_common::pb::vcs::v1::ExportRepoArchiveRequest;
+use clotho_common::pb::vcs::v1::{ExportRepoArchiveRequest, GetFileRequest, ListFilesRequest};
 
 use crate::actions::FinishedRun;
 use crate::AppState;
@@ -201,13 +201,15 @@ async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<CiOutput, St
     }
 
     let script = ci_script(repo, &checkout);
+    let mut job_files = vec![JobFile {
+        path: format!("{SANDBOX_WORKDIR}/repo.tar"),
+        content: archive.tar,
+    }];
+    job_files.extend(materialized_large_files(state, repo, &checkout).await?);
     let job = RunJobRequest {
         label: format!("{repo}@{}", checkout.get(..12).unwrap_or(&checkout)),
         snapshot,
-        files: vec![JobFile {
-            path: format!("{SANDBOX_WORKDIR}/repo.tar"),
-            content: archive.tar,
-        }],
+        files: job_files,
         commands: vec![script],
         env: Default::default(),
         timeout_secs,
@@ -229,6 +231,53 @@ async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<CiOutput, St
     })
 }
 
+/// Ship Arachne payloads beside the bare-repo archive. Sandboxes may have no
+/// route back to a local/private Clotho control plane, so CI materializes
+/// pointers from these files after checkout instead of requiring credentials.
+async fn materialized_large_files(
+    state: &AppState,
+    repo: &str,
+    commit_id: &str,
+) -> Result<Vec<JobFile>, String> {
+    let mut vcs = state.vcs.clone();
+    let tree = vcs
+        .list_files(ListFilesRequest {
+            repo: repo.to_string(),
+            commit_id: commit_id.to_string(),
+        })
+        .await
+        .map_err(|err| format!("list files for Arachne materialization: {}", err.message()))?
+        .into_inner();
+    let mut payloads = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for entry in tree.files {
+        let file = vcs
+            .get_file(GetFileRequest {
+                repo: repo.to_string(),
+                commit_id: tree.commit_id.clone(),
+                path: entry.path,
+            })
+            .await
+            .map_err(|err| format!("read file for Arachne materialization: {}", err.message()))?
+            .into_inner();
+        let Ok(pointer) = clotho_common::lfs_pointer::LfsPointer::parse(&file.content) else {
+            continue;
+        };
+        if !seen.insert(pointer.arachne_hash.clone()) {
+            continue;
+        }
+        let payload = crate::arachne::materialize_pointer(state, &file.content)
+            .await
+            .map_err(|err| format!("materialize Arachne payload: {err}"))?
+            .ok_or_else(|| "Arachne pointer unexpectedly parsed as ordinary blob".to_string())?;
+        payloads.push(JobFile {
+            path: format!("{SANDBOX_WORKDIR}/arachne/{}", pointer.arachne_hash),
+            content: payload,
+        });
+    }
+    Ok(payloads)
+}
+
 /// The check script run inside the sandbox: unpack the git objects, clone,
 /// check out the pushed commit, and run a repo-defined check (else a sensible
 /// default probe). `repo` is validated `[a-z0-9-_]` and `sha` is validated hex
@@ -243,6 +292,16 @@ rm -rf checkout
 git clone --quiet repo.git checkout
 cd checkout
 {checkout_step}
+# Hosted sandboxes may not be able to reach Clotho. Replace Arachne pointer
+# blobs from the payload bundle shipped with this job before running checks.
+find . -type f -size -1k -exec sh -c '
+  for path do
+    hash=$(sed -n "s/^x-clotho-arachne-hash //p" "$path")
+    if [ -n "$hash" ] && [ -f "../arachne/$hash" ]; then
+      cp "../arachne/$hash" "$path"
+    fi
+  done
+' sh {{}} +
 if [ -f .clotho/ci.sh ]; then
   echo "--- running .clotho/ci.sh"; sh .clotho/ci.sh
 elif [ -f Makefile ] || [ -f makefile ]; then

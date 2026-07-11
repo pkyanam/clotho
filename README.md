@@ -107,6 +107,7 @@ humans / agents
 | `clotho-agent-gateway` | MCP server, scoped agent tokens, authorization, audit log, and agent-facing tools |
 | `clotho-vcs` | jj-lib-backed VCS engine with real git-compatible object storage |
 | `clotho-storage` | Arachne storage engine: Xet-style chunk dedup over S3-compatible object storage |
+| `storage-sdk-bridge` | Optional open StorageSDK adapter layer for external stores plus agent snapshots/forks |
 | `clotho-merge-queue` | Per-repo serialized integration and first-class conflict commits |
 | `clotho-diff` | Tree-sitter structured diffs for humans and agents |
 | Forgejo | Internal collaboration provider for git HTTP, issues, PRs, comments, statuses, and webhooks |

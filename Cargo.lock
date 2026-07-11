@@ -514,6 +514,7 @@ dependencies = [
  "sqlx",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tonic",
  "tower-http",
  "tracing",
@@ -525,6 +526,7 @@ name = "clotho-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -536,6 +538,7 @@ name = "clotho-common"
 version = "0.1.0"
 dependencies = [
  "prost",
+ "sha2 0.10.9",
  "thiserror",
  "tokio",
  "tokio-stream",

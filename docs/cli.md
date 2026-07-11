@@ -102,7 +102,7 @@ clotho auth token revoke <id>
 ```bash
 clotho provider list                          # compute (default)
 clotho provider list --layer auth
-clotho provider list --layer storage          # stub until Stage 18
+clotho provider list --layer storage          # live Arachne + StorageSDK state
 clotho provider list --layer network          # stub until Stage 19
 clotho provider list --all
 ```

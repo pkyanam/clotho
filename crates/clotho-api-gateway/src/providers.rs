@@ -1,8 +1,9 @@
 //! Provider Fabric skeleton (ADR-0019 / Stage 17).
 //!
 //! Shared list metadata across layers: compute | storage | network | auth.
-//! Compute is real (CCI registry). Storage/network are honest stubs until
-//! Stages 18–19. Auth reports the active AuthProvider.
+//! Compute is real (CCI registry). Storage probes the live Arachne service;
+//! network remains an honest stub until Stage 19. Auth reports the active
+//! AuthProvider.
 
 use std::sync::Arc;
 
@@ -97,18 +98,84 @@ impl From<ComputeProviderJson> for FabricProvider {
     }
 }
 
-fn storage_stubs() -> Vec<FabricProvider> {
-    vec![FabricProvider {
+async fn storage_providers(state: &AppState) -> Vec<FabricProvider> {
+    use clotho_common::pb::storage::v1::GetStorageStatsRequest;
+
+    let probe = state
+        .storage
+        .clone()
+        .get_storage_stats(GetStorageStatsRequest {})
+        .await;
+    let (configured, configured_reason, notes) = match probe {
+        Ok(response) => {
+            let stats = response.into_inner();
+            (
+                true,
+                format!(
+                    "Arachne online · {} xorbs · {} stored bytes",
+                    stats.xorb_count, stats.total_bytes
+                ),
+                "Managed default; large repo payloads are chunked and deduplicated".into(),
+            )
+        }
+        Err(err) => (
+            false,
+            format!("Arachne probe failed: {}", err.message()),
+            "Start clotho-storage or connect a storage provider".into(),
+        ),
+    };
+    let mut providers = vec![FabricProvider {
         id: "minio".into(),
-        name: "Clotho MinIO (managed default)".into(),
+        name: "Arachne managed object store".into(),
         layer: ProviderLayer::Storage.as_str().into(),
-        kind: "stub".into(),
+        kind: "direct".into(),
         enabled: true,
+        configured,
+        configured_reason,
+        capabilities: vec![
+            "object-store".into(),
+            "content-defined-chunking".into(),
+            "dedup".into(),
+            "git-lfs-pointer".into(),
+        ],
+        notes,
+    }];
+    let bridge_online = if state.storage_sdk_bridge_url.is_empty() {
+        false
+    } else {
+        state
+            .http
+            .get(format!("{}/health", state.storage_sdk_bridge_url))
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .map(|response| response.status().is_success())
+            .unwrap_or(false)
+    };
+    providers.push(FabricProvider {
+        id: "storagesdk".into(),
+        name: "StorageSDK provider bridge".into(),
+        layer: ProviderLayer::Storage.as_str().into(),
+        kind: "bridge".into(),
+        enabled: true,
+        // Bridge availability alone never claims customer storage works.
         configured: false,
-        configured_reason: "BYO object store connect ships in Stage 18 (ADR-0020)".into(),
-        capabilities: vec!["object-store".into()],
-        notes: "Not connected — ObjectStoreProvider skeleton only".into(),
-    }]
+        configured_reason: if bridge_online {
+            "Bridge online · connect and probe an external provider".into()
+        } else {
+            "Optional bridge offline · managed Arachne remains available".into()
+        },
+        capabilities: vec![
+            "s3".into(),
+            "minio".into(),
+            "r2".into(),
+            "snapshots".into(),
+            "forks".into(),
+        ],
+        notes: "StorageSDK keeps external provider operations modular; no credentials are returned"
+            .into(),
+    });
+    providers
 }
 
 fn network_stubs() -> Vec<FabricProvider> {
@@ -195,7 +262,7 @@ pub async fn list_fabric_providers(
         let default_provider_id = compute.default_provider_id.clone();
         let mut providers = Vec::new();
         providers.extend(compute.providers.into_iter().map(FabricProvider::from));
-        providers.extend(storage_stubs());
+        providers.extend(storage_providers(&state).await);
         providers.extend(network_stubs());
         providers.extend(auth_providers(&state));
         let list = FabricProviderListResponse {
@@ -226,7 +293,7 @@ async fn fabric_for_layer(state: &AppState, layer: ProviderLayer) -> FabricProvi
             }
         }
         ProviderLayer::Storage => FabricProviderListResponse {
-            providers: storage_stubs(),
+            providers: storage_providers(state).await,
             default_provider_id: "minio".into(),
             layer: Some(layer.as_str().into()),
         },
@@ -267,11 +334,10 @@ pub async fn get_fabric_provider(
         return Ok(Json(serde_json::to_value(found).unwrap()));
     }
 
-    for p in storage_stubs()
-        .into_iter()
-        .chain(network_stubs())
-        .chain(auth_providers(&state))
-    {
+    let mut non_compute = storage_providers(&state).await;
+    non_compute.extend(network_stubs());
+    non_compute.extend(auth_providers(&state));
+    for p in non_compute {
         if p.id.eq_ignore_ascii_case(&provider) {
             return Ok(Json(serde_json::to_value(p).unwrap()));
         }

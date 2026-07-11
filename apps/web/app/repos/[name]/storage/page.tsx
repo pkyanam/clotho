@@ -21,20 +21,28 @@ export default async function StoragePage({
   params: Promise<{ name: string }>;
 }) {
   const { name } = await params;
-  const tree = await (await api())
-    .tree(name)
-    .catch((e) => {
+  const client = await api();
+  const [tree, storage] = await Promise.all([
+    client.tree(name),
+    client.storageStats(name),
+  ]).catch((e) => {
       if (e instanceof ClothoApiError && e.status === 404) notFound();
       throw e;
     });
 
-  const totalBytes = tree.files.reduce((total, file) => total + file.size_bytes, 0);
-  const largest = [...tree.files]
+  const arachneSizes = new Map(
+    storage.large_files.map((file) => [file.path, file.logical_bytes]),
+  );
+  const displayFiles = tree.files.map((file) => ({
+    ...file,
+    size_bytes: arachneSizes.get(file.path) ?? file.size_bytes,
+    arachne: arachneSizes.has(file.path),
+  }));
+  const largest = [...displayFiles]
     .sort((a, b) => b.size_bytes - a.size_bytes)
     .slice(0, 25);
   const maxBytes = largest[0]?.size_bytes ?? 1;
-  const conflicted = tree.files.filter((f) => f.conflicted).length;
-  const byType = typeBreakdown(tree.files);
+  const byType = typeBreakdown(displayFiles);
 
   return (
     <PageFrame>
@@ -48,9 +56,9 @@ export default async function StoragePage({
           storage
         </h1>
         <p className="mt-2 max-w-3xl text-[0.9375rem] leading-relaxed text-kumo-inactive">
-          file footprint at the current main tree
-          {tree.commit_id ? ` (${shortId(tree.commit_id)})` : ""}. deep object
-          store metrics are not part of this view.
+          logical repository payload at the current main tree
+          {tree.commit_id ? ` (${shortId(tree.commit_id)})` : ""}, composed
+          from git/jj history and Arachne object storage.
         </p>
       </div>
 
@@ -64,16 +72,16 @@ export default async function StoragePage({
       ) : (
         <>
           <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCell label="total size" value={formatBytes(totalBytes)} />
-            <StatCell label="files" value={tree.files.length} />
+            <StatCell label="logical size" value={formatBytes(storage.logical_bytes)} />
+            <StatCell label="arachne payloads" value={storage.arachne_file_count} />
             <StatCell
-              label="largest file"
-              value={largest[0] ? formatBytes(largest[0].size_bytes) : "—"}
+              label="managed store"
+              value={formatBytes(storage.store_total_bytes)}
             />
             <StatCell
-              label="conflicted"
-              value={conflicted}
-              muted={conflicted === 0}
+              label="xorbs"
+              value={storage.xorb_count}
+              muted={storage.xorb_count === 0}
             />
           </div>
 
@@ -98,6 +106,7 @@ export default async function StoragePage({
                           {file.conflicted && (
                             <Badge variant="outline">conflict</Badge>
                           )}
+                          {file.arachne && <Badge variant="outline">arachne</Badge>}
                         </span>
                         <span className="shrink-0 text-[0.8125rem] text-kumo-inactive">
                           {formatBytes(file.size_bytes)}
@@ -139,6 +148,29 @@ export default async function StoragePage({
                     </li>
                   ))}
                 </ul>
+              </Panel>
+              <Panel className="mt-4 p-4">
+                <h2 className="text-[0.9375rem] font-medium text-kumo-default">
+                  arachne engine
+                </h2>
+                <dl className="mt-4 space-y-2 text-[0.8125rem]">
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-kumo-inactive">logical artifacts</dt>
+                    <dd className="text-kumo-default">{formatBytes(storage.arachne_logical_bytes)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-kumo-inactive">xorb bytes</dt>
+                    <dd className="text-kumo-default">{formatBytes(storage.xorb_bytes)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-kumo-inactive">shards</dt>
+                    <dd className="text-kumo-default">{storage.shard_count}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-kumo-inactive">scope</dt>
+                    <dd className="text-kumo-default">{storage.store_scope}</dd>
+                  </div>
+                </dl>
               </Panel>
             </aside>
           </div>

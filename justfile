@@ -35,6 +35,14 @@ dev-compute-bridge:
 dev-compute-bridge-host:
     pnpm --filter @clotho/compute-sdk-bridge start
 
+# Optional StorageSDK provider bridge (:8092). The managed Arachne/MinIO path
+# remains the zero-config default.
+dev-storage-bridge:
+    docker compose -f docker-compose.dev.yml --profile storage-bridge up -d --build clotho-storage-sdk-bridge
+
+dev-storage-bridge-host:
+    pnpm --filter @clotho/storage-sdk-bridge start
+
 # Run all tests across both workspaces
 test: test-rust test-js
 

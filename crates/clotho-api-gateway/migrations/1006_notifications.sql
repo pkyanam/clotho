@@ -1,5 +1,3 @@
--- Product-owned notification inbox. Keep this migration version distinct from
--- 1006_clerk_identity so sqlx applies both deterministically.
 create table if not exists notifications (
   id bigserial primary key,
   user_id text not null references users(id) on delete cascade,

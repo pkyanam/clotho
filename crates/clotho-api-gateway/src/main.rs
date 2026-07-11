@@ -54,6 +54,11 @@ async fn main() -> Result<(), Error> {
         agent_gateway_url: env_or("CLOTHO_AGENT_GATEWAY_URL", "http://localhost:8090"),
         agent_admin_token: env_or("CLOTHO_AGENT_ADMIN_TOKEN", ""),
         compute_grpc_url: env_or("CLOTHO_COMPUTE_GRPC_URL", "http://localhost:50057"),
+        storage_grpc_url: env_or("CLOTHO_STORAGE_GRPC_URL", "http://localhost:50052"),
+        large_file_threshold_bytes: env_u32_or("CLOTHO_LARGE_FILE_THRESHOLD_MIB", 10) as usize
+            * 1024
+            * 1024,
+        storage_sdk_bridge_url: env_or("CLOTHO_STORAGE_SDK_BRIDGE_URL", ""),
         webhook_secret: env_or("CLOTHO_WEBHOOK_SECRET", ""),
         webhook_url: env_or(
             "CLOTHO_WEBHOOK_URL",

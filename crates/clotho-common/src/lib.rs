@@ -3,6 +3,7 @@
 
 pub mod error;
 pub mod health;
+pub mod lfs_pointer;
 pub mod telemetry;
 
 pub use error::Error;
