@@ -1263,18 +1263,19 @@ mod tests {
     }
 
     fn test_bootstrap() -> Bootstrap {
+        let suffix = Uuid::new_v4().to_string().replace('-', "");
         Bootstrap {
-            user_id: "testuser".into(),
-            user_name: "testuser".into(),
-            user_email: "test@clotho.internal".into(),
-            org_id: "testorg".into(),
-            org_name: "testorg".into(),
+            user_id: format!("testuser-{suffix}"),
+            user_name: format!("testuser-{suffix}"),
+            user_email: format!("test-{suffix}@clotho.internal"),
+            org_id: format!("testorg-{suffix}"),
+            org_name: format!("testorg-{suffix}"),
             org_display_name: "Test Org".into(),
             forgejo_owner: "clotho".into(),
         }
     }
 
-    async fn cleanup(pool: &PgPool, org: &str, repo: &str) {
+    async fn cleanup(pool: &PgPool, org: &str, repo: &str, user: &str) {
         let _ = sqlx::query("delete from activity_events where org_id = $1 or repo_id in (select id from repos where name = $2)")
             .bind(org)
             .bind(repo)
@@ -1299,7 +1300,7 @@ mod tests {
             .execute(pool)
             .await;
         let _ = sqlx::query("delete from users where id = $1")
-            .bind(test_bootstrap().user_id)
+            .bind(user)
             .execute(pool)
             .await;
     }
@@ -1316,7 +1317,7 @@ mod tests {
         let orgs = list_orgs(&pool).await.unwrap();
         assert!(orgs.iter().any(|o| o.name == b.org_name));
 
-        cleanup(&pool, &b.org_id, "no-such-repo").await;
+        cleanup(&pool, &b.org_id, "no-such-repo", &b.user_id).await;
     }
 
     #[tokio::test]
@@ -1343,7 +1344,8 @@ mod tests {
         assert_eq!(detail.org.name, created.name);
         assert!(detail.members.iter().any(|m| m.role == "admin"));
 
-        cleanup(&pool, &created.id, "no-such-repo").await;
+        cleanup(&pool, &created.id, "no-such-repo", &b.user_id).await;
+        cleanup(&pool, &b.org_id, "no-such-repo", &b.user_id).await;
     }
 
     #[tokio::test]
@@ -1391,7 +1393,7 @@ mod tests {
         let events = list_activity(&pool, 10).await.unwrap();
         assert!(events.iter().any(|e| e.event_type == "repo.created"));
 
-        cleanup(&pool, &resolved.0, &req.name).await;
+        cleanup(&pool, &resolved.0, &req.name, &b.user_id).await;
     }
 
     #[test]

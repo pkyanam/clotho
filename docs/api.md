@@ -110,6 +110,13 @@ The response includes logical sizes, Git/Arachne placement, format and role
 counts, and publication-readiness warnings. This is Clotho-owned metadata;
 Forgejo remains an implementation detail.
 
+Hugging Face-compatible YAML frontmatter in `README.md` is exposed as
+structured `metadata` (license, language, task, library, datasets, tags, base
+model, metrics, and version links). Selected portable fields from `config.json`
+and `dataset_info.json` are composed into the same manifest, with
+`metadata_sources` preserving provenance. Parsing is bounded and ignores
+unknown or nested YAML rather than executing a general-purpose YAML runtime.
+
 CSV, TSV, and JSONL previews are deliberately bounded: the gateway streams at
 most 256 KiB from Arachne and returns at most 100 rows. Large datasets never
 need to be materialized in gateway memory just to inspect their shape.

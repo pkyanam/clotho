@@ -336,6 +336,13 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
                 {
                     println!("warning: {}", warning.as_str().unwrap_or(""));
                 }
+                if body["metadata"]
+                    .as_object()
+                    .is_some_and(|value| !value.is_empty())
+                {
+                    println!("metadata: {}", body["metadata"]);
+                    println!("sources: {}", body["metadata_sources"]);
+                }
             })
         }
         "preview" => {

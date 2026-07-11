@@ -10,6 +10,12 @@ function repositoryHref(repo: string, href?: string) {
   return `/repos/${encodeURIComponent(repo)}/blob/${normalized}`;
 }
 
+function withoutFrontmatter(content: string) {
+  if (!content.startsWith("---\n") && !content.startsWith("---\r\n")) return content;
+  const match = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
+  return match ? content.slice(match[0].length) : content;
+}
+
 export function MarkdownCard({ repo, content }: { repo: string; content: string }) {
   const components: Components = {
     h1: ({ children }) => (
@@ -77,7 +83,7 @@ export function MarkdownCard({ repo, content }: { repo: string; content: string 
   return (
     <div className="border border-kumo-hairline px-5 py-4 text-[0.875rem]">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {content}
+        {withoutFrontmatter(content)}
       </ReactMarkdown>
     </div>
   );

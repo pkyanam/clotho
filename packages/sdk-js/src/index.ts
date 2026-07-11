@@ -153,6 +153,9 @@ export interface ArtifactManifest {
   arachne_files: number;
   role_counts: Record<string, number>;
   format_counts: Record<string, number>;
+  /** Card frontmatter plus bounded model/dataset config metadata. */
+  metadata: Record<string, unknown>;
+  metadata_sources: string[];
   readiness: {
     card: boolean;
     primary_artifacts: boolean;

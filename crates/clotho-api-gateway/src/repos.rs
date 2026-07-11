@@ -445,6 +445,10 @@ pub struct ArtifactManifestResponse {
     pub arachne_files: u64,
     pub role_counts: BTreeMap<String, u64>,
     pub format_counts: BTreeMap<String, u64>,
+    /// Structured, portable metadata extracted from card frontmatter and
+    /// bounded model/dataset JSON configs.
+    pub metadata: BTreeMap<String, serde_json::Value>,
+    pub metadata_sources: Vec<String>,
     pub readiness: ArtifactReadinessJson,
     pub artifacts: Vec<ArtifactEntryJson>,
 }
@@ -608,6 +612,113 @@ fn extension_format(extension: &str) -> &'static str {
     }
 }
 
+const ARTIFACT_INSPECTION_MAX_BYTES: usize = 256 * 1024;
+const CARD_METADATA_KEYS: &[&str] = &[
+    "license",
+    "license_name",
+    "license_link",
+    "language",
+    "tags",
+    "pipeline_tag",
+    "library_name",
+    "datasets",
+    "base_model",
+    "metrics",
+    "model_name",
+    "pretty_name",
+    "task_categories",
+    "size_categories",
+    "new_version",
+];
+
+fn yaml_scalar(value: &str) -> serde_json::Value {
+    let value = value.trim();
+    if value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+    {
+        return serde_json::Value::String(value[1..value.len() - 1].to_string());
+    }
+    if value.starts_with('[') && value.ends_with(']') {
+        return serde_json::Value::Array(
+            value[1..value.len() - 1]
+                .split(',')
+                .map(yaml_scalar)
+                .collect(),
+        );
+    }
+    serde_json::from_str(value).unwrap_or_else(|_| serde_json::Value::String(value.to_string()))
+}
+
+/// Parse the bounded, top-level subset used by Hugging Face model/dataset
+/// cards. Nested YAML is intentionally ignored: discovery metadata should not
+/// require a general-purpose, unsafe YAML runtime in the gateway.
+fn card_frontmatter(content: &[u8]) -> BTreeMap<String, serde_json::Value> {
+    let Ok(text) = std::str::from_utf8(content) else {
+        return BTreeMap::new();
+    };
+    let mut lines = text.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        return BTreeMap::new();
+    }
+    let mut metadata = BTreeMap::new();
+    let mut list_key: Option<String> = None;
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed == "---" {
+            break;
+        }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some(item) = trimmed.strip_prefix("- ") {
+            if let Some(key) = &list_key {
+                if let Some(serde_json::Value::Array(values)) = metadata.get_mut(key) {
+                    values.push(yaml_scalar(item));
+                }
+            }
+            continue;
+        }
+        // Indented nested maps are outside the portable discovery subset.
+        if line.starts_with(char::is_whitespace) {
+            list_key = None;
+            continue;
+        }
+        let Some((key, raw_value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let key = key.trim();
+        if !CARD_METADATA_KEYS.contains(&key) {
+            list_key = None;
+            continue;
+        }
+        let raw_value = raw_value.trim();
+        if raw_value.is_empty() {
+            metadata.insert(key.to_string(), serde_json::Value::Array(vec![]));
+            list_key = Some(key.to_string());
+        } else {
+            metadata.insert(key.to_string(), yaml_scalar(raw_value));
+            list_key = None;
+        }
+    }
+    metadata
+}
+
+fn selected_json_metadata(content: &[u8], keys: &[&str]) -> Option<serde_json::Value> {
+    let value: serde_json::Value = serde_json::from_slice(content).ok()?;
+    let object = value.as_object()?;
+    let selected = keys
+        .iter()
+        .filter_map(|key| {
+            object
+                .get(*key)
+                .cloned()
+                .map(|value| ((*key).to_string(), value))
+        })
+        .collect::<serde_json::Map<_, _>>();
+    (!selected.is_empty()).then_some(serde_json::Value::Object(selected))
+}
+
 /// Semantic inventory for code, model, and dataset repositories. Clotho owns
 /// this view: clients do not need to download multi-GB payloads or inspect the
 /// backing Forgejo repository to understand what a repository contains.
@@ -632,10 +743,17 @@ pub async fn artifact_manifest(
     let mut arachne_files = 0u64;
     let mut role_counts = BTreeMap::new();
     let mut format_counts = BTreeMap::new();
+    let mut metadata = BTreeMap::new();
+    let mut metadata_sources = Vec::new();
     for entry in tree.files {
+        let class = artifact_class(&entry.path);
         let mut logical_bytes = entry.size_bytes;
         let mut storage = "git";
-        if entry.size_bytes <= 1024 {
+        let inspect_metadata = matches!(class.role, "card" | "model_config" | "dataset_schema");
+        let should_read = entry.size_bytes <= 1024
+            || (inspect_metadata && entry.size_bytes <= ARTIFACT_INSPECTION_MAX_BYTES as u64);
+        let mut inspection = None;
+        if should_read {
             let file = vcs
                 .get_file(GetFileRequest {
                     repo: name.clone(),
@@ -648,9 +766,62 @@ pub async fn artifact_manifest(
                 logical_bytes = pointer.size;
                 storage = "arachne";
                 arachne_files += 1;
+                if inspect_metadata && pointer.size <= ARTIFACT_INSPECTION_MAX_BYTES as u64 {
+                    inspection = Some(
+                        crate::arachne::read_prefix(
+                            &state,
+                            &file.content,
+                            ARTIFACT_INSPECTION_MAX_BYTES,
+                        )
+                        .await?
+                        .0,
+                    );
+                }
+            } else if inspect_metadata {
+                inspection = Some(file.content);
             }
         }
-        let class = artifact_class(&entry.path);
+        if let Some(content) = inspection {
+            if class.role == "card" {
+                let card_metadata = card_frontmatter(&content);
+                if !card_metadata.is_empty() {
+                    metadata.extend(card_metadata);
+                    metadata_sources.push(entry.path.clone());
+                }
+            } else if class.role == "model_config" {
+                if let Some(config) = selected_json_metadata(
+                    &content,
+                    &[
+                        "architectures",
+                        "model_type",
+                        "torch_dtype",
+                        "transformers_version",
+                        "num_hidden_layers",
+                        "hidden_size",
+                        "vocab_size",
+                        "max_position_embeddings",
+                    ],
+                ) {
+                    metadata.insert("model_config".into(), config);
+                    metadata_sources.push(entry.path.clone());
+                }
+            } else if class.role == "dataset_schema" {
+                if let Some(schema) = selected_json_metadata(
+                    &content,
+                    &[
+                        "pretty_name",
+                        "description",
+                        "features",
+                        "splits",
+                        "download_size",
+                        "dataset_size",
+                    ],
+                ) {
+                    metadata.insert("dataset_schema".into(), schema);
+                    metadata_sources.push(entry.path.clone());
+                }
+            }
+        }
         *role_counts.entry(class.role.to_string()).or_insert(0) += 1;
         *format_counts.entry(class.format.to_string()).or_insert(0) += 1;
         total_bytes = total_bytes.saturating_add(logical_bytes);
@@ -671,12 +842,7 @@ pub async fn artifact_manifest(
     });
 
     let card = role_counts.contains_key("card");
-    let metadata = role_counts.keys().any(|role| {
-        matches!(
-            role.as_str(),
-            "model_config" | "dataset_schema" | "metadata"
-        )
-    });
+    let has_metadata = !metadata.is_empty();
     let primary_role = if kind == "model" {
         "weights"
     } else if kind == "dataset" {
@@ -692,11 +858,11 @@ pub async fn artifact_manifest(
     if !primary_artifacts {
         warnings.push(format!("no {primary_role} artifacts detected"));
     }
-    if matches!(kind.as_str(), "model" | "dataset") && !metadata {
+    if matches!(kind.as_str(), "model" | "dataset") && !has_metadata {
         warnings.push(format!("add structured {kind} metadata"));
     }
     let ready = if matches!(kind.as_str(), "model" | "dataset") {
-        card && primary_artifacts && metadata
+        card && primary_artifacts && has_metadata
     } else {
         primary_artifacts
     };
@@ -709,10 +875,12 @@ pub async fn artifact_manifest(
         arachne_files,
         role_counts,
         format_counts,
+        metadata,
+        metadata_sources,
         readiness: ArtifactReadinessJson {
             card,
             primary_artifacts,
-            metadata,
+            metadata: has_metadata,
             ready,
             warnings,
         },
@@ -1102,6 +1270,45 @@ mod artifact_tests {
             parse_tabular_preview("jsonl", b"{\"id\":1}\n{\"id\":", 10, true).unwrap();
         assert_eq!(rows.len(), 1);
         assert!(truncated);
+    }
+
+    #[test]
+    fn extracts_hugging_face_card_discovery_metadata() {
+        let metadata = card_frontmatter(
+            br#"---
+license: apache-2.0
+language:
+- en
+- fr
+pipeline_tag: text-generation
+library_name: transformers
+datasets: [HuggingFaceFW/fineweb, clotho/weave]
+unknown_nested:
+  ignored: true
+---
+# Model card
+"#,
+        );
+        assert_eq!(metadata["license"], "apache-2.0");
+        assert_eq!(metadata["language"], serde_json::json!(["en", "fr"]));
+        assert_eq!(metadata["pipeline_tag"], "text-generation");
+        assert_eq!(
+            metadata["datasets"],
+            serde_json::json!(["HuggingFaceFW/fineweb", "clotho/weave"])
+        );
+        assert!(!metadata.contains_key("unknown_nested"));
+    }
+
+    #[test]
+    fn selects_portable_model_config_fields() {
+        let selected = selected_json_metadata(
+            br#"{"architectures":["ClothoForCausalLM"],"model_type":"clotho","hidden_size":4096,"internal_secret":"ignored"}"#,
+            &["architectures", "model_type", "hidden_size"],
+        )
+        .unwrap();
+        assert_eq!(selected["model_type"], "clotho");
+        assert_eq!(selected["hidden_size"], 4096);
+        assert!(selected.get("internal_secret").is_none());
     }
 }
 

@@ -125,6 +125,9 @@ CLI, and SDK consume that control-plane view without exposing Forgejo or
 downloading multi-gigabyte Arachne payloads.
 Dataset repositories add bounded CSV, TSV, and JSONL row previews; repository
 cards render CommonMark plus GFM while refusing implicit remote-image loads.
+Hugging Face-style card frontmatter and portable model/dataset configs become
+structured discovery metadata with source provenance, not presentation-only
+tags trapped in a README renderer.
 
 Tailscale is a first-class NetworkProvider: connect an org OAuth client from
 Clotho settings, verify it live, and mark repositories `public` or `tailscale`

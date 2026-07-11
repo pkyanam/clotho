@@ -86,6 +86,7 @@ export default async function RepoPage({
           .catch(() => null)
       : Promise.resolve(null),
   ]);
+  const metadataChips = artifactMetadataChips(manifest.metadata);
 
   let actionsLabel = "actions idle";
   if (failedActions > 0) actionsLabel = `${failedActions} failing`;
@@ -210,6 +211,19 @@ export default async function RepoPage({
                     </Badge>
                   ))}
                 </div>
+                {metadataChips.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 border-b border-kumo-hairline px-4 py-3 text-[0.75rem]">
+                    <span className="mr-1 text-kumo-inactive">discovery metadata</span>
+                    {metadataChips.map(({ key, value }, index) => (
+                      <Badge key={`${key}-${value}-${index}`} variant="outline">
+                        {key} · {value}
+                      </Badge>
+                    ))}
+                    <span className="text-kumo-inactive">
+                      from {manifest.metadata_sources.join(", ")}
+                    </span>
+                  </div>
+                )}
                 {manifest.readiness.warnings.length > 0 && (
                   <ul className="border-b border-kumo-hairline bg-kumo-base px-4 py-2 text-[0.8125rem] text-kumo-inactive">
                     {manifest.readiness.warnings.map((warning) => (
@@ -448,6 +462,47 @@ function previewCell(value: unknown) {
   }
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function artifactMetadataChips(metadata: Record<string, unknown>) {
+  const chips: Array<{ key: string; value: string }> = [];
+  const pushValue = (key: string, value: unknown) => {
+    if (chips.length >= 16 || value === null || value === undefined) return;
+    if (["string", "number", "boolean"].includes(typeof value)) {
+      chips.push({ key: key.replaceAll("_", " "), value: String(value) });
+    } else if (Array.isArray(value)) {
+      const summary = value
+        .filter((item) => ["string", "number", "boolean"].includes(typeof item))
+        .slice(0, 4)
+        .join(", ");
+      if (summary) chips.push({ key: key.replaceAll("_", " "), value: summary });
+    }
+  };
+  const priority = [
+    "license",
+    "pipeline_tag",
+    "library_name",
+    "language",
+    "datasets",
+    "base_model",
+    "task_categories",
+    "size_categories",
+    "tags",
+    "metrics",
+    "pretty_name",
+  ];
+  for (const key of priority) pushValue(key, metadata[key]);
+  for (const [key, value] of Object.entries(metadata)) {
+    if (priority.includes(key)) continue;
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      for (const [nestedKey, nestedValue] of Object.entries(value)) {
+        pushValue(nestedKey, nestedValue);
+      }
+    } else {
+      pushValue(key, value);
+    }
+  }
+  return chips;
 }
 
 function ReadinessItem({ label, ready }: { label: string; ready: boolean }) {
