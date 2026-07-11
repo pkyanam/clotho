@@ -235,7 +235,10 @@ pub struct ListReposParams {
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct GetActivityParams {
+    /// Page size. Clotho accepts 1..100 and defaults to 50.
     pub limit: Option<u32>,
+    /// Opaque next_cursor returned by the preceding call.
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -889,8 +892,19 @@ impl AgentGateway {
         let args = serde_json::to_value(&params).unwrap_or_default();
         let rest = self.rest.clone();
         self.run_tool(&ctx, "get_activity", "", args, async move {
-            let limit = params.limit.unwrap_or(20);
-            rest.get(&format!("/api/v1/activity?limit={limit}")).await
+            let mut query = Vec::new();
+            if let Some(limit) = params.limit {
+                query.push(format!("limit={limit}"));
+            }
+            if let Some(cursor) = &params.cursor {
+                query.push(format!("cursor={}", urlencoding_query(cursor)));
+            }
+            let path = if query.is_empty() {
+                "/api/v1/activity".into()
+            } else {
+                format!("/api/v1/activity?{}", query.join("&"))
+            };
+            rest.get(&path).await
         })
         .await
     }

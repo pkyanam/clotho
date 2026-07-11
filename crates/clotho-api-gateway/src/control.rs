@@ -11,6 +11,7 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
@@ -182,6 +183,7 @@ pub struct OrgDetailResponse {
 #[derive(Clone, Debug, Serialize)]
 pub struct ActivityListResponse {
     pub events: Vec<ActivityEvent>,
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -234,10 +236,20 @@ pub struct CreateRepoRequest {
     pub owner_org: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct ActivityQuery {
-    #[serde(default = "default_activity_limit")]
-    pub limit: u32,
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
+}
+
+pub const DEFAULT_ACTIVITY_PAGE_SIZE: usize = 50;
+pub const MAX_ACTIVITY_PAGE_SIZE: usize = 100;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ActivityCursor {
+    version: u8,
+    created_at: DateTime<Utc>,
+    id: i64,
 }
 
 fn default_visibility() -> String {
@@ -306,10 +318,6 @@ pub fn effective_large_file_threshold(req: &CreateRepoRequest) -> Result<i64, Ap
 
 fn default_default_branch() -> String {
     "main".into()
-}
-
-fn default_activity_limit() -> u32 {
-    50
 }
 
 pub fn valid_name(name: &str) -> Result<(), ApiError> {
@@ -747,18 +755,62 @@ pub async fn log_activity(pool: &PgPool, event: ActivityEventInput) -> Result<()
     Ok(())
 }
 
-pub async fn list_activity(pool: &PgPool, limit: i64) -> Result<Vec<ActivityEvent>, ApiError> {
-    sqlx::query_as::<_, ActivityEvent>(
-        r#"
-        select * from activity_events
-        order by created_at desc
-        limit $1
-        "#,
-    )
-    .bind(limit)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| ApiError::Internal(format!("list activity: {e}")))
+async fn list_activity(
+    pool: &PgPool,
+    limit: i64,
+    cursor: Option<&ActivityCursor>,
+) -> Result<Vec<ActivityEvent>, ApiError> {
+    let query = if let Some(cursor) = cursor {
+        sqlx::query_as::<_, ActivityEvent>(
+            r#"
+            select * from activity_events
+            where created_at < $2 or (created_at = $2 and id < $3)
+            order by created_at desc, id desc
+            limit $1
+            "#,
+        )
+        .bind(limit)
+        .bind(cursor.created_at)
+        .bind(cursor.id)
+    } else {
+        sqlx::query_as::<_, ActivityEvent>(
+            r#"
+            select * from activity_events
+            order by created_at desc, id desc
+            limit $1
+            "#,
+        )
+        .bind(limit)
+    };
+    query
+        .fetch_all(pool)
+        .await
+        .map_err(|e| ApiError::Internal(format!("list activity: {e}")))
+}
+
+fn encode_activity_cursor(event: &ActivityEvent) -> Result<String, ApiError> {
+    let bytes = serde_json::to_vec(&ActivityCursor {
+        version: 1,
+        created_at: event.created_at,
+        id: event.id,
+    })
+    .map_err(|error| ApiError::Internal(format!("encode activity cursor: {error}")))?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
+}
+
+fn decode_activity_cursor(value: &str) -> Result<ActivityCursor, ApiError> {
+    if value.is_empty() || value.len() > 2048 {
+        return Err(ApiError::InvalidRequest("invalid activity cursor".into()));
+    }
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| ApiError::InvalidRequest("invalid activity cursor".into()))?;
+    let cursor: ActivityCursor = serde_json::from_slice(&bytes)
+        .map_err(|_| ApiError::InvalidRequest("invalid activity cursor".into()))?;
+    if cursor.version != 1 || cursor.id <= 0 {
+        return Err(ApiError::InvalidRequest("invalid activity cursor".into()));
+    }
+    Ok(cursor)
 }
 
 fn org_role_rank(role: &str) -> i32 {
@@ -1231,13 +1283,35 @@ pub(crate) async fn list_activity_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ActivityQuery>,
 ) -> Result<Json<ActivityListResponse>, ApiError> {
-    let limit = query.limit.clamp(1, 500) as i64;
-    let events = if let Some(pool) = &state.pool {
-        list_activity(pool, limit).await?
+    let limit = query.limit.unwrap_or(DEFAULT_ACTIVITY_PAGE_SIZE);
+    if !(1..=MAX_ACTIVITY_PAGE_SIZE).contains(&limit) {
+        return Err(ApiError::InvalidRequest(format!(
+            "limit must be between 1 and {MAX_ACTIVITY_PAGE_SIZE}"
+        )));
+    }
+    let cursor = query
+        .cursor
+        .as_deref()
+        .map(decode_activity_cursor)
+        .transpose()?;
+    let mut events = if let Some(pool) = &state.pool {
+        list_activity(pool, (limit + 1) as i64, cursor.as_ref()).await?
     } else {
         vec![]
     };
-    Ok(Json(ActivityListResponse { events }))
+    let has_more = events.len() > limit;
+    if has_more {
+        events.pop();
+    }
+    let next_cursor = if has_more {
+        events.last().map(encode_activity_cursor).transpose()?
+    } else {
+        None
+    };
+    Ok(Json(ActivityListResponse {
+        events,
+        next_cursor,
+    }))
 }
 
 #[cfg(test)]
@@ -1391,10 +1465,32 @@ mod tests {
         assert_eq!(one.repo.kind, "model");
         assert_eq!(one.repo.large_file_threshold_bytes, 1024 * 1024);
 
-        let events = list_activity(&pool, 10).await.unwrap();
+        let events = list_activity(&pool, 10, None).await.unwrap();
         assert!(events.iter().any(|e| e.event_type == "repo.created"));
 
         cleanup(&pool, &resolved.0, &req.name, &b.user_id).await;
+    }
+
+    #[test]
+    fn activity_cursor_round_trips_and_rejects_invalid_values() {
+        let event = ActivityEvent {
+            id: 42,
+            actor_id: "user".into(),
+            org_id: None,
+            repo_id: None,
+            event_type: "repo.created".into(),
+            payload: serde_json::json!({}),
+            created_at: Utc::now(),
+        };
+        let encoded = encode_activity_cursor(&event).unwrap();
+        let decoded = decode_activity_cursor(&encoded).unwrap();
+        assert_eq!(decoded.version, 1);
+        assert_eq!(decoded.created_at, event.created_at);
+        assert_eq!(decoded.id, event.id);
+
+        assert!(decode_activity_cursor("").is_err());
+        assert!(decode_activity_cursor("not-a-cursor").is_err());
+        assert!(decode_activity_cursor(&"a".repeat(2049)).is_err());
     }
 
     #[test]

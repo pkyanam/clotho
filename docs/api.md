@@ -79,6 +79,21 @@ Its compatibility `listRepos` and `getOrgRepos` helpers follow bounded pages,
 with loop and total-result guards. The CLI and MCP surfaces return one page so
 callers retain explicit control of work and latency.
 
+### Activity pagination
+
+`GET /api/v1/activity` uses a bounded keyset cursor over immutable
+`(created_at, id)` ordering:
+
+- `limit` defaults to `50` and must be between `1` and `100`.
+- responses are `{ "events": [...], "next_cursor": string | null }`.
+- `cursor` is opaque and limited to 2,048 characters; invalid cursors fail with
+  `400 invalid_request` rather than restarting at the first page.
+- newest events are returned first, with the event id providing a deterministic
+  tie-breaker when timestamps match.
+
+The SDK's canonical `activityPage` method, CLI `activity --cursor`, MCP
+`get_activity`, and web activity page preserve this envelope and cursor.
+
 ### Auth model (Stage 17 / ADR-0018)
 
 Human authentication is pluggable behind `AuthProvider`:
@@ -448,7 +463,7 @@ const logs = await clotho.actionLogs("weave", run.id);
 
 - `/api/v1` is the stable-path candidate. During `0.x`, release notes must call
   out any behavioral or schema incompatibility; clients should pin a release.
-- Error envelope version `1`, request correlation, repository pagination, and
+- Error envelope version `1`, request correlation, repository/activity pagination, and
   CLI error classes are frozen. The remaining public-alpha gate covers cursor
   pagination for other unbounded collections, idempotency, conditional-write,
   asynchronous-operation, cancellation, rate/size-limit, and

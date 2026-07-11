@@ -115,7 +115,7 @@ human REST/CLI/web surfaces.
 |---|---|
 | `list_providers` | `GET /api/v1/providers` |
 | `list_repos` | `GET /api/v1/repos?limit={1..100}&cursor={opaque}` |
-| `get_activity` | `GET /api/v1/activity` |
+| `get_activity` | `GET /api/v1/activity?limit={1..100}&cursor={opaque}` |
 | `list_secrets` | org/repo secrets **metadata only** |
 | `get_tree` | `GET …/tree` |
 | `get_file` | `GET …/file` |
@@ -125,6 +125,10 @@ canonical REST page envelope with `repos` and `next_cursor`. Agents must treat
 the cursor as opaque, request one bounded page at a time, and stop when
 `next_cursor` is absent. Invalid cursors preserve REST's `invalid_request` code
 and request ID in MCP error data.
+
+`get_activity` follows the same one-page rule and returns `events` plus
+`next_cursor`. Its cursor is independently opaque; callers must not substitute
+a repository cursor or infer ordering fields from either token.
 
 ## Demo loop
 

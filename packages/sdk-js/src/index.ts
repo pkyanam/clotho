@@ -736,6 +736,16 @@ export interface ActivityEvent {
   created_at: string;
 }
 
+export interface ActivityPage {
+  events: ActivityEvent[];
+  next_cursor: string | null;
+}
+
+export interface ActivityPageOptions {
+  limit?: number;
+  cursor?: string;
+}
+
 export interface HealthStatus {
   service: string;
   version: string;
@@ -1669,11 +1679,18 @@ export class ClothoClient {
     );
   }
 
-  async activity(options?: { limit?: number }): Promise<ActivityEvent[]> {
-    const { events } = await this.request<{ events: ActivityEvent[] }>(
-      `/api/v1/activity${qs({ limit: options?.limit })}`,
+  activityPage(options?: ActivityPageOptions): Promise<ActivityPage> {
+    return this.request<ActivityPage>(
+      `/api/v1/activity${qs({
+        limit: options?.limit,
+        cursor: options?.cursor,
+      })}`,
     );
-    return events;
+  }
+
+  /** Compatibility helper returning the events from one explicitly bounded page. */
+  async activity(options?: ActivityPageOptions): Promise<ActivityEvent[]> {
+    return (await this.activityPage(options)).events;
   }
 
   me(): Promise<MeResponse> {

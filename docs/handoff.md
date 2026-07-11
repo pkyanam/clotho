@@ -49,6 +49,10 @@ not_found` and added a live MCP↔REST error-equivalence assertion.
 - Added live MCP↔REST page equivalence and browser pagination evidence. The GUI
   check exposed provider repositories with empty timestamps; cursor decoding
   now accepts that legitimate sort key and has a regression test.
+- Added bounded opaque keyset pagination to the global activity feed across
+  REST/OpenAPI/SDK/CLI/MCP/web. The `1..100` query orders by immutable
+  `(created_at, id)`, uses an additive Postgres index, returns explicit page
+  envelopes, and rejects malformed cursors instead of restarting traversal.
 
 ## Baseline state
 
@@ -105,12 +109,19 @@ one bounded envelope; `just test-agent` compared MCP and REST pages. The web
 repository page and visible next-page link were exercised in the browser at
 desktop and 320 px with no horizontal overflow.
 
+Activity-pagination verification is recorded in
+[`evidence/stage22-activity-pagination.md`](evidence/stage22-activity-pagination.md).
+The full Rust/JavaScript baseline and all three live stack suites passed. The
+rebuilt API, MCP, and web surfaces traversed non-overlapping activity pages; a
+pre-restart cursor remained valid after an API restart; CLI JSON and live
+MCP↔REST envelopes matched; and browser review passed at 1280 px and 320 px.
+
 ## Next bounded acceptance test
 
-Extend the bounded cursor convention to the next smallest high-volume list
-family, or add common persisted idempotency keys to a single retryable create
-operation if that produces the smaller end-to-end slice. Preserve REST-first
-parity and do not start Stage 23 until the Stage 22 gate is materially closed.
+Add common persisted idempotency keys to one retryable create/start operation,
+or extend the bounded cursor convention to the next smallest high-volume list
+family if that is smaller. Preserve REST-first parity and do not start Stage 23
+until the Stage 22 gate is materially closed.
 
 After Stage 22 is materially closed, begin Stage 23—not the previous Capsule
 plan. Stage 23 establishes production identity, authorization, and tenant

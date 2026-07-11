@@ -12,12 +12,18 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default async function ActivityPage() {
-  const events = await (await api())
-    .activity({ limit: 100 })
-    .catch(() => [] as ActivityEvent[]);
+export default async function ActivityPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ cursor?: string }>;
+}) {
+  const { cursor } = await searchParams;
+  const page = await (await api())
+    .activityPage({ limit: 50, cursor })
+    .catch(() => null);
+  const events = page?.events ?? null;
 
-  const byDay = groupByDay(events);
+  const byDay = groupByDay(events ?? []);
 
   return (
     <PageFrame>
@@ -26,7 +32,14 @@ export default async function ActivityPage() {
         description="cross-repository events from the control plane — repositories, organizations, secrets, and providers."
       />
 
-      {events.length === 0 ? (
+      {events === null ? (
+        <div className="mt-10">
+          <EmptyState
+            title="could not load activity"
+            description="the api gateway may be offline. refresh after the control plane is available."
+          />
+        </div>
+      ) : events.length === 0 ? (
         <div className="mt-10">
           <EmptyState
             title="no activity yet"
@@ -76,6 +89,16 @@ export default async function ActivityPage() {
               </ul>
             </section>
           ))}
+          {page?.next_cursor ? (
+            <div className="flex justify-end border-t border-kumo-hairline pt-4">
+              <Link
+                href={`/activity?cursor=${encodeURIComponent(page.next_cursor)}`}
+                className="clotho-focus rounded-sm border border-kumo-line px-3 py-2 text-sm text-kumo-default hover:bg-kumo-elevated"
+              >
+                next page
+              </Link>
+            </div>
+          ) : null}
         </div>
       )}
     </PageFrame>

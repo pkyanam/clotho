@@ -8,7 +8,7 @@
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 
-use clotho_api_gateway::control::{ensure_bootstrap, Bootstrap};
+use clotho_api_gateway::control::{ensure_bootstrap, log_activity, ActivityEventInput, Bootstrap};
 use clotho_api_gateway::forgejo::{ForgejoConfig, TokenSource};
 use clotho_api_gateway::{init_db, router_with_pool, GatewayConfig};
 
@@ -178,7 +178,7 @@ async fn control_plane_users_and_orgs() {
 
 #[tokio::test]
 async fn control_plane_repo_creation_and_metadata() {
-    let Some((port, _pool, config)) = spawn_gateway().await else {
+    let Some((port, pool, config)) = spawn_gateway().await else {
         return;
     };
     let url = format!("http://127.0.0.1:{port}");
@@ -228,7 +228,7 @@ async fn control_plane_repo_creation_and_metadata() {
         "repo should appear in /api/v1/repos"
     );
 
-    let org_name = config.bootstrap_org_name;
+    let org_name = config.bootstrap_org_name.clone();
     let org_list = get(&client, &url, &format!("/api/v1/orgs/{org_name}/repos")).await;
     assert!(
         org_list["repos"]
@@ -248,4 +248,54 @@ async fn control_plane_repo_creation_and_metadata() {
             .any(|e| e["event_type"] == "repo.created"),
         "repo creation should appear in activity feed"
     );
+    assert!(activity["next_cursor"].is_null() || activity["next_cursor"].is_string());
+
+    let pagination_event_prefix = format!("stage22.activity-pagination.{suffix}");
+    let actor_id = Bootstrap::from_config(&config).user_id;
+    for sequence in ["one", "two"] {
+        log_activity(
+            &pool,
+            ActivityEventInput {
+                actor_id: actor_id.clone(),
+                org_id: None,
+                repo_id: None,
+                event_type: format!("{pagination_event_prefix}.{sequence}"),
+                payload: json!({}),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    let first_activity_page = get(&client, &url, "/api/v1/activity?limit=1").await;
+    assert_eq!(first_activity_page["events"].as_array().unwrap().len(), 1);
+    let activity_cursor = first_activity_page["next_cursor"]
+        .as_str()
+        .expect("multiple setup events should produce an activity cursor");
+    let second_activity_page = get(
+        &client,
+        &url,
+        &format!("/api/v1/activity?limit=1&cursor={activity_cursor}"),
+    )
+    .await;
+    assert_eq!(second_activity_page["events"].as_array().unwrap().len(), 1);
+    assert_ne!(
+        first_activity_page["events"][0]["id"], second_activity_page["events"][0]["id"],
+        "activity pages must not overlap"
+    );
+
+    let invalid_limit = client
+        .get(format!("{url}/api/v1/activity?limit=0"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid_limit.status(), reqwest::StatusCode::BAD_REQUEST);
+    let invalid_body: Value = invalid_limit.json().await.unwrap();
+    assert_eq!(invalid_body["code"], "invalid_request");
+
+    sqlx::query("delete from activity_events where event_type like $1")
+        .bind(format!("{pagination_event_prefix}.%"))
+        .execute(&pool)
+        .await
+        .unwrap();
 }

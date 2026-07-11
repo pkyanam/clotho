@@ -103,6 +103,17 @@ Human output prints the next cursor when another page exists. With `--json`,
 stdout is exactly one page envelope, `{ "repos": [...], "next_cursor": ... }`.
 Pass `next_cursor` back unchanged; it is opaque. `--limit` must be `1..100`.
 
+The global activity feed uses the same bounded CLI convention and returns one
+page per invocation:
+
+```bash
+clotho activity --limit 50
+clotho --json activity --limit 50 --cursor '<opaque-next-cursor>'
+```
+
+JSON stdout is exactly `{ "events": [...], "next_cursor": ... }`; human
+output prints the next cursor after the events when another page exists.
+
 ## Command groups
 
 | Group | Subcommands |
@@ -118,7 +129,7 @@ Pass `next_cursor` back unchanged; it is opaque. `--limit` must be `1..100`.
 | `provider` | `list [--layer …\|--all]`, `get`, `connect` |
 | `secret` | `list`, `set`, `get`, `delete` (org\|repo; values write-only) |
 | `org` | `list`, `create`, `get`, `repos [--limit N] [--cursor C]` |
-| `activity` | feed (`--limit N`) |
+| `activity` | feed (`--limit 1..100`, `--cursor`) |
 | `agent` | `list`, `create`, `tokens`, `mint`, `revoke`, `audit` (org admin) |
 
 Stage 8 aliases still work: `init`, `status`, `log`, `commit`, `submit`, and

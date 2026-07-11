@@ -744,7 +744,18 @@ describe("ClothoClient", () => {
       .mockResolvedValueOnce(jsonResponse({ orgs: [{ name: "clotho" }] }))
       .mockResolvedValueOnce(jsonResponse({ org: { name: "clotho" }, members: [] }))
       .mockResolvedValueOnce(jsonResponse({ repos: [{ name: "weave" }] }))
-      .mockResolvedValueOnce(jsonResponse({ events: [{ event_type: "repo.created" }] }));
+      .mockResolvedValueOnce(
+        jsonResponse({
+          events: [{ event_type: "repo.created" }],
+          next_cursor: "activity-next",
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          events: [{ event_type: "repo.created" }],
+          next_cursor: null,
+        }),
+      );
 
     const client = new ClothoClient({
       baseUrl: "http://gateway.test",
@@ -758,10 +769,21 @@ describe("ClothoClient", () => {
       members: [],
     });
     await expect(client.getOrgRepos("clotho")).resolves.toEqual([{ name: "weave" }]);
+    await expect(
+      client.activityPage({ limit: 10, cursor: "activity-cursor" }),
+    ).resolves.toEqual({
+      events: [{ event_type: "repo.created" }],
+      next_cursor: "activity-next",
+    });
     await expect(client.activity({ limit: 10 })).resolves.toEqual([
       { event_type: "repo.created" },
     ]);
 
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "http://gateway.test/api/v1/activity?limit=10&cursor=activity-cursor",
+      expect.objectContaining({ headers: {} }),
+    );
     expect(fetchMock).toHaveBeenLastCalledWith(
       "http://gateway.test/api/v1/activity?limit=10",
       expect.objectContaining({ headers: {} }),

@@ -1,6 +1,6 @@
 # Stage 22 release gap matrix
 
-**Audited:** July 11, 2026 through the Stage 22 repository-pagination slice. This
+**Audited:** July 11, 2026 through the Stage 22 activity-pagination slice. This
 matrix records implementation and evidence separately; “partial” does not
 satisfy the public-alpha gate.
 
@@ -12,7 +12,7 @@ Status: **implemented**, **partial**, **missing**, or **evidence gap**.
 | ------------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Complete operation inventory   | Implemented | `pnpm test:contract` parses OpenAPI, resolves refs, and compares all 108 Axum HTTP method/path registrations. It requires unique IDs, mutation request schemas, success schemas, path parameters, and effective alpha auth/error metadata. Pagination remains separate. |
 | Versioned stable errors        | Implemented | Envelope version `1` has stable `code`, safe `message`, `request_id`, optional `details`, and `retryable`; catch-all middleware normalizes Axum errors and redacts internal provider/gRPC topology. SDK, CLI, MCP, OpenAPI, tests, and docs preserve the fields.        |
-| Cursor pagination and bounds   | Partial     | Global and organization repository lists now share a stable `{ repos, next_cursor }` envelope, opaque keyset cursor, deterministic ordering, and `1..100` limit across REST/OpenAPI/SDK/CLI/MCP/web. Actions has `before`/`next_cursor`; other lists remain limit-only or unbounded. |
+| Cursor pagination and bounds   | Partial     | Global/organization repositories and global activity now use stable page envelopes, opaque keyset cursors, deterministic ordering, and `1..100` limits across REST/OpenAPI/SDK/CLI/MCP/web. Actions has `before`/`next_cursor`; other lists remain limit-only or unbounded. |
 | Idempotency keys               | Missing     | Create/start/import/submit routes do not accept or persist a common idempotency key.                                                                                                                                                                                    |
 | Request and audit correlation  | Partial     | Every response carries `X-Request-Id`; valid caller IDs are accepted, generated IDs replace invalid values, and structured gateway spans include the same ID. Durable activity/agent-audit schema links are still missing.                                              |
 | Conditional reads/writes       | Partial     | Release downloads emit an ETag, but `If-None-Match` and policy `If-Match` behavior are absent.                                                                                                                                                                          |
@@ -62,7 +62,7 @@ Status: **implemented**, **partial**, **missing**, or **evidence gap**.
 | Complete backup/restore                 | Missing | No automated bundle covering Postgres, Git/VCS, Arachne/object data, and the secrets master key; no destructive restore drill.                                                         |
 | Dependency recovery/reconciliation      | Partial | Actions/import leases recover across restarts and Arachne restart is tested; component-outage consistency and observable reconciliation are incomplete.                                |
 | Health/readiness/doctor                 | Partial | Service liveness exists. `just bootstrap`/`just doctor [--json] [--stack]` now provide read-only dependency and surface diagnostics; dependency-aware readiness endpoints are missing. |
-| Resource bounds/backpressure            | Partial | Upload body, preview, import, Action timeout, and some list bounds exist; queues, logs, retries, DB queries, and all uploads lack a reviewed common policy.                            |
+| Resource bounds/backpressure            | Partial | Upload body, preview, import, Action timeout, repository pages, and the indexed activity query are bounded; queues, logs, retries, other DB queries, and all uploads lack a reviewed common policy. |
 | Supported operations envelope           | Missing | Minimum Docker/Compose resources, volume ownership, upgrades, clean uninstall, and support bounds are not published as a release guide.                                                |
 
 ## Web and accessibility

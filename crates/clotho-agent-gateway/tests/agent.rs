@@ -124,7 +124,7 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         .unwrap()
         .into_inner();
 
-    // 1. Provision a scoped agent identity: this repo, these seven tools.
+    // 1. Provision a scoped agent identity: this repo and bounded tools.
     let agent_name = format!("weaver-{nanos}");
     admin_post(
         &env,
@@ -146,7 +146,8 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
                 "commit",
                 "submit_change",
                 "get_file",
-                "list_repos"
+                "list_repos",
+                "get_activity"
             ],
         }),
         "mint token",
@@ -199,6 +200,7 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
             "checkpoint",
             "commit",
             "diff_symbol",
+            "get_activity",
             "get_file",
             "list_repos",
             "orient_repo",
@@ -218,6 +220,17 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         .unwrap();
     assert_eq!(mcp_repos["repos"], rest_repos["repos"]);
     assert_eq!(mcp_repos["next_cursor"], rest_repos["next_cursor"]);
+
+    let (err, mcp_activity) = call_tool(&client, "get_activity", json!({ "limit": 1 })).await;
+    assert!(!err, "get_activity failed: {mcp_activity}");
+    let rest_activity: Value = reqwest::get(format!("{}/api/v1/activity?limit=1", env.api_url))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(mcp_activity["events"], rest_activity["events"]);
+    assert_eq!(mcp_activity["next_cursor"], rest_activity["next_cursor"]);
 
     // 3. Orientation: heads, main target, op log, and file tree.
     let (err, orient) = call_tool(&client, "orient_repo", json!({ "repo": repo })).await;

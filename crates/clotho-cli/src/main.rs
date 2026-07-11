@@ -2073,13 +2073,15 @@ async fn cmd_org(config: &Config, mut args: Vec<String>) -> Result<()> {
 
 async fn cmd_activity(config: &Config, mut args: Vec<String>) -> Result<()> {
     let limit = take_option(&mut args, "--limit").unwrap_or_else(|| "20".into());
+    let cursor = take_option(&mut args, "--cursor");
     if !args.is_empty() {
-        bail!("usage: clotho activity [--limit N]");
+        bail!("usage: clotho activity [--limit 1..100] [--cursor <opaque>]");
     }
+    let query = repo_page_query(&limit, cursor.as_deref())?;
     let body: Value = request_json(
         config,
         reqwest::Method::GET,
-        &format!("/api/v1/activity?limit={limit}"),
+        &format!("/api/v1/activity{query}"),
         None,
     )
     .await?;
@@ -2091,6 +2093,9 @@ async fn cmd_activity(config: &Config, mut args: Vec<String>) -> Result<()> {
                 ev["event_type"].as_str().unwrap_or("?"),
                 ev["actor_id"].as_str().unwrap_or("")
             );
+        }
+        if let Some(cursor) = body["next_cursor"].as_str() {
+            println!("next cursor: {cursor}");
         }
     })
 }
@@ -2223,7 +2228,7 @@ fn usage() {
 
   org / activity
     clotho org list|create|get|repos ...
-    clotho activity [--limit N]
+    clotho activity [--limit 1..100] [--cursor <opaque>]
 
   agent   (requires org admin or bootstrap; CLOTHO_AGENT_ADMIN_TOKEN on gateway)
     clotho agent list
@@ -2251,5 +2256,14 @@ mod pagination_tests {
         assert!(repo_page_query("0", None).is_err());
         assert!(repo_page_query("101", None).is_err());
         assert!(repo_page_query("25", Some("not a cursor")).is_err());
+    }
+
+    #[test]
+    fn activity_page_query_uses_the_shared_collection_bounds() {
+        assert_eq!(repo_page_query("50", None).unwrap(), "?limit=50");
+        assert_eq!(
+            repo_page_query("50", Some("opaque_activity_cursor")).unwrap(),
+            "?limit=50&cursor=opaque_activity_cursor"
+        );
     }
 }

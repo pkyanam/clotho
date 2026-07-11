@@ -190,25 +190,15 @@ paths:
       operationId: listActivity
       summary: Global activity feed
       parameters:
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
+        - $ref: "#/components/parameters/activityPageLimit"
+        - $ref: "#/components/parameters/activityPageCursor"
       responses:
         "200":
-          description: Events
+          description: Bounded activity page
           content:
             application/json:
               schema:
-                type: object
-                required: [events]
-                properties:
-                  events:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/ActivityEvent"
+                $ref: "#/components/schemas/ActivityPage"
 
   /api/v1/repos:
     get:
@@ -2679,6 +2669,22 @@ components:
       schema:
         type: string
         maxLength: 2048
+    activityPageLimit:
+      name: limit
+      in: query
+      description: Activity page size; bounded to protect the control plane
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    activityPageCursor:
+      name: cursor
+      in: query
+      description: Opaque cursor returned as next_cursor by the preceding activity page
+      schema:
+        type: string
+        maxLength: 2048
     org:
       name: org
       in: path
@@ -2947,6 +2953,17 @@ components:
         payload: {}
         created_at:
           type: string
+    ActivityPage:
+      type: object
+      required: [events, next_cursor]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityEvent"
+        next_cursor:
+          type: string
+          nullable: true
     RepoInfo:
       type: object
       required: [id, clotho_id, name, full_name, owner, html_url, clone_url, default_branch, description, visibility, kind, large_file_threshold_bytes, network_mode, network_tags, has_issues, has_pull_requests, open_issues_count, open_pr_counter, updated_at, provider, configured]
