@@ -59,6 +59,27 @@ not_found` and added a live MCP↔REST error-equivalence assertion.
   run, initial log, and exact response commit atomically. Sequential/concurrent
   retries replay one run, while changed intent fails with the stable
   `409 idempotency_conflict` / CLI exit `5` contract.
+- Gated every name-routed repository read family against Clotho visibility and
+  human permission before VCS, storage, compute, agent, or collaboration calls.
+  Missing, ambiguous, and unauthorized non-public names share the same 404;
+  global/org repository and activity lists filter in SQL before pagination.
+- Restricted org/repo secret metadata reads to the owning human administrators,
+  authorizing before secret-name lookup. Agents may list repository metadata
+  only with the exact repo/tool scopes; org secret lists are denied to agents.
+- Forwarded the original opaque agent bearer from REST-backed MCP tools and
+  revalidated it at the REST edge against handler-owned repo/tool intent.
+  Action actor/idempotency attribution now derives from immutable authenticated
+  agent/token identity, not caller fields; agent list/activity pages filter
+  before pagination and provider output is credential-free.
+- Added durable Forgejo webhook replay admission in migration 1018: exact-body
+  HMAC, bounded event/delivery/SHA validation, unique Clotho repo resolution,
+  hashed 24-hour reservations, atomic concurrent collapse, changed-payload
+  conflict, and capped cleanup.
+- Published the public-alpha threat model, known limitations, contribution,
+  security, support, governance, conduct, changelog, third-party notices,
+  issue/PR templates, and a non-placeholder Clotho logo.
+- Fixed the advertised non-interactive `clotho repo delete <name> --yes`
+  grammar after a live cleanup probe exposed its pre-validation ordering bug.
 
 ## Baseline state
 
@@ -126,14 +147,33 @@ The persisted manual Action-idempotency design, migration, focused contract
 tests, and runtime acceptance record are in
 [`evidence/stage22-action-idempotency.md`](evidence/stage22-action-idempotency.md).
 
+Repository authorization, webhook replay, and scoped agent/REST evidence is in
+[`evidence/stage22-private-repo-read-auth.md`](evidence/stage22-private-repo-read-auth.md),
+[`evidence/stage22-secret-metadata-auth.md`](evidence/stage22-secret-metadata-auth.md),
+[`evidence/stage22-webhook-replay.md`](evidence/stage22-webhook-replay.md), and
+[`evidence/stage22-agent-rest-auth.md`](evidence/stage22-agent-rest-auth.md).
+The touched gateway/agent/CLI tests and clippy passed; JavaScript typecheck,
+lint, tests, and the 108 Axum/OpenAPI + 92 SDK call + 74 interface contract gate
+passed. Rebuilt containers passed `just doctor --json --stack`,
+`just test-collab`, and `just test-agent`. A temporary human token enabled a
+second live MCP run under `CLOTHO_AUTH_REQUIRED=true`; unauthenticated human
+access was 401, direct foreign-agent REST was concealed 404, direct revoked
+agent REST was 401, and the temporary human token was revoked. The API was
+recreated back into open-local mode, the served OpenAPI SHA-256 matched source,
+migration 1018 was applied, and all owned repository/webhook/token fixtures
+were absent. A live signed webhook returned first/replay/conflict statuses
+202/200/409 across the restart-safe database path. No Docker volume was
+removed.
+
 ## Next bounded acceptance test
 
-Close the Stage 22 authorization blockers before expanding contract breadth:
-require private-repository read permission across every public REST route,
-propagate the scoped MCP principal through REST-backed tools under
-`CLOTHO_AUTH_REQUIRED=true`, and add a route × identity deny matrix that proves
-foreign ids and listings do not leak. Preserve REST-first parity and do not
-start Stage 23 until the remaining public-alpha gate is materially closed.
+Continue Stage 22; do not start Stage 23. The next smallest authorization slice
+is membership-filtered `/users` and `/orgs`, concealed `/orgs/{org}` member
+views, and authorization/sanitization of human provider configuration metadata,
+with two hostile organizations and filtering before pagination/provider calls.
+Then close complete backup/restore, migration forward-repair, supply-chain,
+clean-clone, machine capability, CLI/MCP contract, and browser-journey gaps in
+the release matrix. Stage 22 remains active and must not be called complete.
 
 After Stage 22 is materially closed, begin Stage 23—not the previous Capsule
 plan. Stage 23 establishes production identity, authorization, and tenant

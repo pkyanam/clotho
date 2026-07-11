@@ -15,8 +15,11 @@ info:
     JWT / org API keys; Clotho `clotho_tok_…` still accepted — §11 #7).
     Mint Clotho tokens with `POST /api/v1/tokens` or `clotho auth token create`.
     Agents never use Clerk — MCP uses scoped `clotho_agt_…` tokens minted via
-    human-only `/api/v1/agents/*` (ADR-0016). Secrets master key is server-side
-    only (`CLOTHO_SECRETS_MASTER_KEY`).
+    human-only `/api/v1/agents/*` (ADR-0016). For REST-backed MCP tools the
+    original agent bearer reaches this edge and is revalidated against the
+    handler-selected repository and tool; agent authority is never replaced
+    by an internal service credential. Secrets master key is server-side only
+    (`CLOTHO_SECRETS_MASTER_KEY`).
 
     **Provider Fabric (Stage 17):** `GET /api/v1/providers?layer=compute|storage|network|hub|auth`
     (omit `layer` for compute-only backward compatibility; `?all=true` for every
@@ -664,12 +667,16 @@ paths:
         "206":
           description: Requested byte range
           headers:
-            Accept-Ranges: {schema: {type: string, example: bytes}}
-            Content-Range: {schema: {type: string, example: bytes 1048576-2097151/8388608}}
-            ETag: {schema: {type: string}}
+            Accept-Ranges: { schema: { type: string, example: bytes } }
+            Content-Range:
+              {
+                schema:
+                  { type: string, example: bytes 1048576-2097151/8388608 },
+              }
+            ETag: { schema: { type: string } }
           content:
             application/octet-stream:
-              schema: {type: string, format: binary}
+              schema: { type: string, format: binary }
         "416":
           description: Unsatisfiable or multiple byte ranges
         "404":
@@ -704,19 +711,28 @@ paths:
       operationId: huggingFaceListModels
       summary: Search permission-checked models with verified Clotho releases
       parameters:
-        - {name: search, in: query, schema: {type: string}}
-        - {name: filter, in: query, schema: {type: string}, description: Match task, library, language, dataset, or card tags}
-        - {name: author, in: query, schema: {type: string}}
-        - {name: pipeline_tag, in: query, schema: {type: string}}
-        - {name: gated, in: query, schema: {type: boolean}}
-        - {name: limit, in: query, schema: {type: integer, minimum: 0}}
-        - {name: full, in: query, schema: {type: boolean, default: false}}
+        - { name: search, in: query, schema: { type: string } }
+        - {
+            name: filter,
+            in: query,
+            schema: { type: string },
+            description: Match task,
+            library,
+            language,
+            dataset,
+            or card tags,
+          }
+        - { name: author, in: query, schema: { type: string } }
+        - { name: pipeline_tag, in: query, schema: { type: string } }
+        - { name: gated, in: query, schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: full, in: query, schema: { type: boolean, default: false } }
       responses:
         "200":
           description: Hugging Face ModelInfo-compatible catalog entries
           content:
             application/json:
-              schema: {type: array, items: {type: object}}
+              schema: { type: array, items: { type: object } }
 
   /api/models/{owner}/{name}:
     get:
@@ -724,17 +740,21 @@ paths:
       operationId: huggingFaceModelInfo
       summary: Hugging Face-compatible model info projected from a Clotho release
       parameters:
-        - {name: owner, in: path, required: true, schema: {type: string}}
-        - {name: name, in: path, required: true, schema: {type: string}}
-        - {name: revision, in: query, schema: {type: string, default: main}}
-        - {name: files_metadata, in: query, schema: {type: boolean, default: false}}
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: revision, in: query, schema: { type: string, default: main } }
+        - {
+            name: files_metadata,
+            in: query,
+            schema: { type: boolean, default: false },
+          }
       responses:
         "200":
           description: Hugging Face ModelInfo-compatible object
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/HuggingFaceObject"}
-        "404": {$ref: "#/components/responses/Error"}
+              schema: { $ref: "#/components/schemas/HuggingFaceObject" }
+        "404": { $ref: "#/components/responses/Error" }
 
   /api/models/{owner}/{name}/tree/{revision}:
     get:
@@ -742,17 +762,21 @@ paths:
       operationId: huggingFaceModelTree
       summary: Hugging Face-compatible model release tree
       parameters:
-        - {name: owner, in: path, required: true, schema: {type: string}}
-        - {name: name, in: path, required: true, schema: {type: string}}
-        - {name: revision, in: path, required: true, schema: {type: string}}
-        - {name: recursive, in: query, schema: {type: boolean, default: false}}
-        - {name: expand, in: query, schema: {type: boolean, default: false}}
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: revision, in: path, required: true, schema: { type: string } }
+        - {
+            name: recursive,
+            in: query,
+            schema: { type: boolean, default: false },
+          }
+        - { name: expand, in: query, schema: { type: boolean, default: false } }
       responses:
         "200":
           description: RepoFile and RepoFolder-compatible entries
           content:
             application/json:
-              schema: {type: array, items: {type: object}}
+              schema: { type: array, items: { type: object } }
 
   /api/models/{owner}/{name}/refs:
     get:
@@ -760,15 +784,19 @@ paths:
       operationId: huggingFaceModelRefs
       summary: List main and verified immutable releases as Hugging Face refs
       parameters:
-        - {name: owner, in: path, required: true, schema: {type: string}}
-        - {name: name, in: path, required: true, schema: {type: string}}
-        - {name: include_prs, in: query, schema: {type: integer, enum: [0, 1]}}
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - {
+            name: include_prs,
+            in: query,
+            schema: { type: integer, enum: [0, 1] },
+          }
       responses:
         "200":
           description: Hugging Face GitRefs-compatible object
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/HuggingFaceObject"}
+              schema: { $ref: "#/components/schemas/HuggingFaceObject" }
 
   /api/models/{owner}/{name}/commits/{revision}:
     get:
@@ -776,15 +804,15 @@ paths:
       operationId: huggingFaceModelCommits
       summary: List Clotho VCS commits from a verified model release revision
       parameters:
-        - {name: owner, in: path, required: true, schema: {type: string}}
-        - {name: name, in: path, required: true, schema: {type: string}}
-        - {name: revision, in: path, required: true, schema: {type: string}}
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: revision, in: path, required: true, schema: { type: string } }
       responses:
         "200":
           description: Hugging Face GitCommitInfo-compatible array
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/HuggingFaceObjectList"}
+              schema: { $ref: "#/components/schemas/HuggingFaceObjectList" }
 
   /api/models/{owner}/{name}/revision/{revision}:
     get:
@@ -792,16 +820,16 @@ paths:
       operationId: huggingFaceModelInfoRevision
       summary: Hugging Face-compatible model info for a path revision
       parameters:
-        - {name: owner, in: path, required: true, schema: {type: string}}
-        - {name: name, in: path, required: true, schema: {type: string}}
-        - {name: revision, in: path, required: true, schema: {type: string}}
-        - {name: blobs, in: query, schema: {type: boolean, default: false}}
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: revision, in: path, required: true, schema: { type: string } }
+        - { name: blobs, in: query, schema: { type: boolean, default: false } }
       responses:
         "200":
           description: Hugging Face ModelInfo-compatible object
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/HuggingFaceObject"}
+              schema: { $ref: "#/components/schemas/HuggingFaceObject" }
 
   /{owner}/{name}/resolve/{revision}/{path}:
     get:
@@ -809,27 +837,27 @@ paths:
       operationId: huggingFaceResolveModelFile
       summary: Hugging Face-compatible model file resolution through Arachne
       parameters:
-        - {name: owner, in: path, required: true, schema: {type: string}}
-        - {name: name, in: path, required: true, schema: {type: string}}
-        - {name: revision, in: path, required: true, schema: {type: string}}
-        - {name: path, in: path, required: true, schema: {type: string}}
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: revision, in: path, required: true, schema: { type: string } }
+        - { name: path, in: path, required: true, schema: { type: string } }
       responses:
         "200":
           description: Immutable model release bytes
           content:
             application/octet-stream:
-              schema: {type: string, format: binary}
+              schema: { type: string, format: binary }
     head:
       tags: [repos, providers]
       operationId: huggingFaceHeadModelFile
       summary: Inspect model release file metadata
       parameters:
-        - {name: owner, in: path, required: true, schema: {type: string}}
-        - {name: name, in: path, required: true, schema: {type: string}}
-        - {name: revision, in: path, required: true, schema: {type: string}}
-        - {name: path, in: path, required: true, schema: {type: string}}
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: revision, in: path, required: true, schema: { type: string } }
+        - { name: path, in: path, required: true, schema: { type: string } }
       responses:
-        "200": {description: Immutable file headers}
+        "200": { description: Immutable file headers }
 
   /api/datasets:
     get:
@@ -837,17 +865,25 @@ paths:
       operationId: huggingFaceListDatasets
       summary: Search permission-checked datasets with verified Clotho releases
       parameters:
-        - {name: search, in: query, schema: {type: string}}
-        - {name: filter, in: query, schema: {type: string}, description: Match task, format, language, or card tags}
-        - {name: author, in: query, schema: {type: string}}
-        - {name: limit, in: query, schema: {type: integer, minimum: 0}}
-        - {name: full, in: query, schema: {type: boolean, default: false}}
+        - { name: search, in: query, schema: { type: string } }
+        - {
+            name: filter,
+            in: query,
+            schema: { type: string },
+            description: Match task,
+            format,
+            language,
+            or card tags,
+          }
+        - { name: author, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: full, in: query, schema: { type: boolean, default: false } }
       responses:
         "200":
           description: Hugging Face DatasetInfo-compatible catalog entries
           content:
             application/json:
-              schema: {type: array, items: {type: object}}
+              schema: { type: array, items: { type: object } }
 
   /api/datasets/{owner}/{name}:
     get:
@@ -855,16 +891,20 @@ paths:
       operationId: huggingFaceDatasetInfo
       summary: Hugging Face-compatible dataset info projected from a Clotho release
       parameters:
-        - {name: owner, in: path, required: true, schema: {type: string}}
-        - {name: name, in: path, required: true, schema: {type: string}}
-        - {name: revision, in: query, schema: {type: string, default: main}}
-        - {name: files_metadata, in: query, schema: {type: boolean, default: false}}
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: revision, in: query, schema: { type: string, default: main } }
+        - {
+            name: files_metadata,
+            in: query,
+            schema: { type: boolean, default: false },
+          }
       responses:
         "200":
           description: Hugging Face DatasetInfo-compatible object
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/HuggingFaceObject"}
+              schema: { $ref: "#/components/schemas/HuggingFaceObject" }
 
   /api/datasets/{owner}/{name}/tree/{revision}:
     get:
@@ -872,17 +912,21 @@ paths:
       operationId: huggingFaceDatasetTree
       summary: Hugging Face-compatible dataset release tree
       parameters:
-        - {name: owner, in: path, required: true, schema: {type: string}}
-        - {name: name, in: path, required: true, schema: {type: string}}
-        - {name: revision, in: path, required: true, schema: {type: string}}
-        - {name: recursive, in: query, schema: {type: boolean, default: false}}
-        - {name: expand, in: query, schema: {type: boolean, default: false}}
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: revision, in: path, required: true, schema: { type: string } }
+        - {
+            name: recursive,
+            in: query,
+            schema: { type: boolean, default: false },
+          }
+        - { name: expand, in: query, schema: { type: boolean, default: false } }
       responses:
         "200":
           description: RepoFile and RepoFolder-compatible entries
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/HuggingFaceObjectList"}
+              schema: { $ref: "#/components/schemas/HuggingFaceObjectList" }
 
   /api/datasets/{owner}/{name}/refs:
     get:
@@ -890,15 +934,19 @@ paths:
       operationId: huggingFaceDatasetRefs
       summary: List main and verified immutable releases as Hugging Face refs
       parameters:
-        - {name: owner, in: path, required: true, schema: {type: string}}
-        - {name: name, in: path, required: true, schema: {type: string}}
-        - {name: include_prs, in: query, schema: {type: integer, enum: [0, 1]}}
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - {
+            name: include_prs,
+            in: query,
+            schema: { type: integer, enum: [0, 1] },
+          }
       responses:
         "200":
           description: Hugging Face GitRefs-compatible object
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/HuggingFaceObject"}
+              schema: { $ref: "#/components/schemas/HuggingFaceObject" }
 
   /api/datasets/{owner}/{name}/commits/{revision}:
     get:
@@ -906,15 +954,15 @@ paths:
       operationId: huggingFaceDatasetCommits
       summary: List Clotho VCS commits from a verified dataset release revision
       parameters:
-        - {name: owner, in: path, required: true, schema: {type: string}}
-        - {name: name, in: path, required: true, schema: {type: string}}
-        - {name: revision, in: path, required: true, schema: {type: string}}
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: revision, in: path, required: true, schema: { type: string } }
       responses:
         "200":
           description: Hugging Face GitCommitInfo-compatible array
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/HuggingFaceObjectList"}
+              schema: { $ref: "#/components/schemas/HuggingFaceObjectList" }
 
   /api/datasets/{owner}/{name}/revision/{revision}:
     get:
@@ -922,16 +970,16 @@ paths:
       operationId: huggingFaceDatasetInfoRevision
       summary: Hugging Face-compatible dataset info for a path revision
       parameters:
-        - {name: owner, in: path, required: true, schema: {type: string}}
-        - {name: name, in: path, required: true, schema: {type: string}}
-        - {name: revision, in: path, required: true, schema: {type: string}}
-        - {name: blobs, in: query, schema: {type: boolean, default: false}}
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: revision, in: path, required: true, schema: { type: string } }
+        - { name: blobs, in: query, schema: { type: boolean, default: false } }
       responses:
         "200":
           description: Hugging Face DatasetInfo-compatible object
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/HuggingFaceObject"}
+              schema: { $ref: "#/components/schemas/HuggingFaceObject" }
 
   /datasets/{owner}/{name}/resolve/{revision}/{path}:
     get:
@@ -939,27 +987,27 @@ paths:
       operationId: huggingFaceResolveDatasetFile
       summary: Hugging Face-compatible dataset file resolution through Arachne
       parameters:
-        - {name: owner, in: path, required: true, schema: {type: string}}
-        - {name: name, in: path, required: true, schema: {type: string}}
-        - {name: revision, in: path, required: true, schema: {type: string}}
-        - {name: path, in: path, required: true, schema: {type: string}}
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: revision, in: path, required: true, schema: { type: string } }
+        - { name: path, in: path, required: true, schema: { type: string } }
       responses:
         "200":
           description: Immutable dataset release bytes
           content:
             application/octet-stream:
-              schema: {type: string, format: binary}
+              schema: { type: string, format: binary }
     head:
       tags: [repos, providers]
       operationId: huggingFaceHeadDatasetFile
       summary: Inspect dataset release file metadata
       parameters:
-        - {name: owner, in: path, required: true, schema: {type: string}}
-        - {name: name, in: path, required: true, schema: {type: string}}
-        - {name: revision, in: path, required: true, schema: {type: string}}
-        - {name: path, in: path, required: true, schema: {type: string}}
+        - { name: owner, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: revision, in: path, required: true, schema: { type: string } }
+        - { name: path, in: path, required: true, schema: { type: string } }
       responses:
-        "200": {description: Immutable file headers}
+        "200": { description: Immutable file headers }
 
   /api/v1/repos/{name}/hub-imports:
     get:
@@ -2123,6 +2171,10 @@ paths:
       tags: [secrets]
       operationId: listOrgSecrets
       summary: List org secrets (metadata only)
+      description: Requires an administrator of the named organization. Secret values and ciphertext are never returned.
+      x-clotho-auth: human-bearer
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/org"
       responses:
@@ -2138,6 +2190,12 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/SecretMeta"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
     post:
       tags: [secrets]
       operationId: createOrgSecret
@@ -2171,6 +2229,10 @@ paths:
       tags: [secrets]
       operationId: getOrgSecret
       summary: Org secret metadata
+      description: Requires an administrator of the named organization. Authorization precedes the secret-name lookup.
+      x-clotho-auth: human-bearer
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/org"
         - $ref: "#/components/parameters/secretName"
@@ -2181,6 +2243,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SecretMeta"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
     patch:
       tags: [secrets]
       operationId: patchOrgSecret
@@ -2221,6 +2289,10 @@ paths:
       tags: [secrets]
       operationId: listRepoSecrets
       summary: List repo secrets (metadata only)
+      description: Requires a repository administrator or an administrator of the owning organization. Secret values and ciphertext are never returned.
+      x-clotho-auth: human-bearer
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/repoPath"
       responses:
@@ -2236,6 +2308,12 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/SecretMeta"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
     post:
       tags: [secrets]
       operationId: createRepoSecret
@@ -2269,6 +2347,10 @@ paths:
       tags: [secrets]
       operationId: getRepoSecret
       summary: Repo secret metadata
+      description: Requires a repository administrator or an administrator of the owning organization. Authorization precedes the secret-name lookup.
+      x-clotho-auth: human-bearer
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/repoPath"
         - $ref: "#/components/parameters/secretName"
@@ -2279,6 +2361,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SecretMeta"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
     patch:
       tags: [secrets]
       operationId: patchRepoSecret
@@ -2637,24 +2725,77 @@ paths:
       x-clotho-auth: webhook-hmac
       tags: [webhooks]
       operationId: forgejoWebhook
-      summary: Internal Forgejo push webhook (HMAC-verified)
+      summary: Internal Forgejo push webhook (HMAC-verified and replay-safe)
+      description: |
+        Requires an exact-body HMAC, a provider event header, and either
+        `X-Forgejo-Delivery` or `X-Gitea-Delivery` (1–128 visible ASCII
+        characters). Clotho stores only
+        SHA-256 hashes of the delivery id and body for 24 hours. The first
+        valid delivery schedules CI and returns 202; an exact replay returns a
+        harmless 200 `replayed`; reusing the id with different bytes returns
+        409. Missing signing configuration or durable storage fails closed.
+      parameters:
+        - name: X-Forgejo-Event
+          in: header
+          description: Provider event name; required unless X-Gitea-Event is present
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+        - name: X-Gitea-Event
+          in: header
+          description: Compatibility alias for X-Forgejo-Event
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+        - name: X-Forgejo-Delivery
+          in: header
+          description: Preferred opaque provider delivery id; required unless X-Gitea-Delivery is present
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[!-~]+$"
+        - name: X-Gitea-Delivery
+          in: header
+          description: Compatibility alias for X-Forgejo-Delivery
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[!-~]+$"
+        - name: X-Forgejo-Signature
+          in: header
+          description: Hexadecimal HMAC-SHA256 of the exact request body; X-Gitea-Signature is also accepted
+          schema:
+            type: string
+            pattern: "^[0-9A-Fa-f]{64}$"
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/WebhookPushRequest"}
+            schema: { $ref: "#/components/schemas/WebhookPushRequest" }
       responses:
         "200":
-          description: Ignored delivery
+          description: Ignored event/deletion or harmless exact replay
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/WebhookResponse"}
+              schema: { $ref: "#/components/schemas/WebhookResponse" }
         "202":
           description: Accepted delivery
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/WebhookResponse"}
+              schema: { $ref: "#/components/schemas/WebhookResponse" }
+        "400":
+          $ref: "#/components/responses/Error"
         "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "500":
           $ref: "#/components/responses/Error"
 
 components:
@@ -2676,7 +2817,7 @@ components:
         type: string
         minLength: 1
         maxLength: 128
-        pattern: '^[A-Za-z0-9._:-]+$'
+        pattern: "^[A-Za-z0-9._:-]+$"
     repoPageCursor:
       name: cursor
       in: query
@@ -2756,6 +2897,10 @@ components:
       type: http
       scheme: bearer
       description: Human API token (`clotho_tok_…`)
+    agentBearerAuth:
+      type: http
+      scheme: bearer
+      description: Scoped agent token (`clotho_agt_…`), accepted only by the operations backing its declared MCP tools
 
   responses:
     Error:
@@ -2801,20 +2946,20 @@ components:
       type: object
       required: [after, repository]
       properties:
-        after: {type: string}
+        after: { type: string }
         repository:
           type: object
           required: [name]
           properties:
-            name: {type: string}
+            name: { type: string }
     WebhookResponse:
       type: object
       required: [status]
       properties:
-        status: {type: string, enum: [accepted, ignored]}
-        repo: {type: string}
-        sha: {type: string}
-        reason: {type: string}
+        status: { type: string, enum: [accepted, ignored, replayed] }
+        repo: { type: string }
+        sha: { type: string }
+        reason: { type: string }
     Error:
       type: object
       required: [version, code, message, request_id, retryable]
@@ -2902,7 +3047,8 @@ components:
           nullable: true
     ApiTokenMeta:
       type: object
-      required: [id, name, token_prefix, scopes, created_at, last_used_at, expires_at]
+      required:
+        [id, name, token_prefix, scopes, created_at, last_used_at, expires_at]
       properties:
         id:
           type: string
@@ -2987,7 +3133,30 @@ components:
           nullable: true
     RepoInfo:
       type: object
-      required: [id, clotho_id, name, full_name, owner, html_url, clone_url, default_branch, description, visibility, kind, large_file_threshold_bytes, network_mode, network_tags, has_issues, has_pull_requests, open_issues_count, open_pr_counter, updated_at, provider, configured]
+      required:
+        [
+          id,
+          clotho_id,
+          name,
+          full_name,
+          owner,
+          html_url,
+          clone_url,
+          default_branch,
+          description,
+          visibility,
+          kind,
+          large_file_threshold_bytes,
+          network_mode,
+          network_tags,
+          has_issues,
+          has_pull_requests,
+          open_issues_count,
+          open_pr_counter,
+          updated_at,
+          provider,
+          configured,
+        ]
       properties:
         id:
           type: integer
@@ -3051,7 +3220,25 @@ components:
           description: Opaque cursor for the next page; null on the last page
     CreatedRepo:
       type: object
-      required: [name, owner, owner_org, description, visibility, kind, large_file_threshold_bytes, network_mode, network_tags, default_branch, clone_url, provider, configured, operation_id, initial_commit_id, info]
+      required:
+        [
+          name,
+          owner,
+          owner_org,
+          description,
+          visibility,
+          kind,
+          large_file_threshold_bytes,
+          network_mode,
+          network_tags,
+          default_branch,
+          clone_url,
+          provider,
+          configured,
+          operation_id,
+          initial_commit_id,
+          info,
+        ]
       properties:
         name:
           type: string
@@ -3092,7 +3279,16 @@ components:
           $ref: "#/components/schemas/RepoInfo"
     Commit:
       type: object
-      required: [commit_id, change_id, description, author_name, author_email, timestamp_millis, parent_commit_ids]
+      required:
+        [
+          commit_id,
+          change_id,
+          description,
+          author_name,
+          author_email,
+          timestamp_millis,
+          parent_commit_ids,
+        ]
       properties:
         commit_id:
           type: string
@@ -3113,7 +3309,25 @@ components:
             type: string
     RepoDetail:
       type: object
-      required: [name, owner, owner_org, description, visibility, kind, large_file_threshold_bytes, network_mode, network_tags, default_branch, clone_url, provider, configured, info, main_commit_id, heads]
+      required:
+        [
+          name,
+          owner,
+          owner_org,
+          description,
+          visibility,
+          kind,
+          large_file_threshold_bytes,
+          network_mode,
+          network_tags,
+          default_branch,
+          clone_url,
+          provider,
+          configured,
+          info,
+          main_commit_id,
+          heads,
+        ]
       properties:
         name:
           type: string
@@ -3205,7 +3419,18 @@ components:
             $ref: "#/components/schemas/TreeEntry"
     ArtifactEntry:
       type: object
-      required: [path, role, format, family, size_bytes, storage, oid_sha256, arachne_hash, conflicted]
+      required:
+        [
+          path,
+          role,
+          format,
+          family,
+          size_bytes,
+          storage,
+          oid_sha256,
+          arachne_hash,
+          conflicted,
+        ]
       properties:
         path:
           type: string
@@ -3249,7 +3474,20 @@ components:
             type: string
     ArtifactManifest:
       type: object
-      required: [commit_id, kind, total_files, total_bytes, arachne_files, role_counts, format_counts, metadata, metadata_sources, readiness, artifacts]
+      required:
+        [
+          commit_id,
+          kind,
+          total_files,
+          total_bytes,
+          arachne_files,
+          role_counts,
+          format_counts,
+          metadata,
+          metadata_sources,
+          readiness,
+          artifacts,
+        ]
       properties:
         commit_id:
           type: string
@@ -3327,7 +3565,20 @@ components:
           default: true
     RepoReleaseSummary:
       type: object
-      required: [id, version, commit_id, manifest_sha256, kind, total_files, total_bytes, ready, verified, created_by, created_at]
+      required:
+        [
+          id,
+          version,
+          commit_id,
+          manifest_sha256,
+          kind,
+          total_files,
+          total_bytes,
+          ready,
+          verified,
+          created_by,
+          created_at,
+        ]
       properties:
         id:
           type: string
@@ -3397,7 +3648,21 @@ components:
           description: Explicitly allow caution/suspicious/unsafe Hub scanner results
     HubImportResult:
       type: object
-      required: [provider, source_repo_id, source_revision, commit_id, operation_id, files_imported, logical_bytes, arachne_files, security_counts, fast_forwarded, conflicted, conflicted_paths]
+      required:
+        [
+          provider,
+          source_repo_id,
+          source_revision,
+          commit_id,
+          operation_id,
+          files_imported,
+          logical_bytes,
+          arachne_files,
+          security_counts,
+          fast_forwarded,
+          conflicted,
+          conflicted_paths,
+        ]
       properties:
         provider:
           type: string
@@ -3432,7 +3697,28 @@ components:
             type: string
     HubImportJob:
       type: object
-      required: [id, repo_id, provider, source_repo_id, source_revision, status, files_total, files_imported, logical_bytes, bytes_imported, arachne_files, security_counts, commit_id, operation_id, error, created_by, created_at, started_at, completed_at]
+      required:
+        [
+          id,
+          repo_id,
+          provider,
+          source_repo_id,
+          source_revision,
+          status,
+          files_total,
+          files_imported,
+          logical_bytes,
+          bytes_imported,
+          arachne_files,
+          security_counts,
+          commit_id,
+          operation_id,
+          error,
+          created_by,
+          created_at,
+          started_at,
+          completed_at,
+        ]
       properties:
         id:
           type: string
@@ -3488,7 +3774,8 @@ components:
           nullable: true
     FileContent:
       type: object
-      required: [commit_id, path, executable, conflicted, size_bytes, content, binary]
+      required:
+        [commit_id, path, executable, conflicted, size_bytes, content, binary]
       properties:
         commit_id:
           type: string
@@ -3527,7 +3814,21 @@ components:
           type: string
     RepoStorageStats:
       type: object
-      required: [commit_id, git_tree_bytes, logical_bytes, arachne_file_count, arachne_logical_bytes, large_files, store_scope, xorb_count, xorb_bytes, shard_count, shard_bytes, store_total_bytes]
+      required:
+        [
+          commit_id,
+          git_tree_bytes,
+          logical_bytes,
+          arachne_file_count,
+          arachne_logical_bytes,
+          large_files,
+          store_scope,
+          xorb_count,
+          xorb_bytes,
+          shard_count,
+          shard_bytes,
+          store_total_bytes,
+        ]
       properties:
         commit_id:
           type: string
@@ -3566,7 +3867,14 @@ components:
           format: int64
     OpLogEntry:
       type: object
-      required: [operation_id, description, start_time_millis, end_time_millis, parent_operation_ids]
+      required:
+        [
+          operation_id,
+          description,
+          start_time_millis,
+          end_time_millis,
+          parent_operation_ids,
+        ]
       properties:
         operation_id:
           type: string
@@ -3683,7 +3991,8 @@ components:
           nullable: true
     Notification:
       type: object
-      required: [id, user_id, repo_name, kind, title, body, href, read_at, created_at]
+      required:
+        [id, user_id, repo_name, kind, title, body, href, read_at, created_at]
       properties:
         id:
           type: integer
@@ -3731,7 +4040,21 @@ components:
           type: boolean
     Issue:
       type: object
-      required: [number, title, body, state, user, labels, assignees, milestone, comments, html_url, created_at, updated_at]
+      required:
+        [
+          number,
+          title,
+          body,
+          state,
+          user,
+          labels,
+          assignees,
+          milestone,
+          comments,
+          html_url,
+          created_at,
+          updated_at,
+        ]
       properties:
         number:
           type: integer
@@ -3817,7 +4140,14 @@ components:
           type: string
     MergePolicy:
       type: object
-      required: [require_passing_actions, block_merge_when_conflicted, require_review_approvals, protect_default_branch, updated_at]
+      required:
+        [
+          require_passing_actions,
+          block_merge_when_conflicted,
+          require_review_approvals,
+          protect_default_branch,
+          updated_at,
+        ]
       properties:
         require_passing_actions:
           type: boolean
@@ -3862,7 +4192,23 @@ components:
           type: string
     Pull:
       type: object
-      required: [number, title, body, state, user, head, base, merge_base, merged, mergeable, html_url, created_at, updated_at, comments]
+      required:
+        [
+          number,
+          title,
+          body,
+          state,
+          user,
+          head,
+          base,
+          merge_base,
+          merged,
+          mergeable,
+          html_url,
+          created_at,
+          updated_at,
+          comments,
+        ]
       properties:
         number:
           type: integer
@@ -3929,7 +4275,8 @@ components:
           type: boolean
     CommitStatus:
       type: object
-      required: [id, state, context, description, target_url, created_at, updated_at]
+      required:
+        [id, state, context, description, target_url, created_at, updated_at]
       properties:
         id:
           type: integer
@@ -3962,7 +4309,28 @@ components:
           nullable: true
     ActionRun:
       type: object
-      required: [id, repo, commit_id, branch, status, conclusion, trigger, actor, workflow, release_version, release_manifest_sha256, provider, sandbox_id, created_at_millis, started_at_millis, finished_at_millis, duration_ms, attempt, jobs]
+      required:
+        [
+          id,
+          repo,
+          commit_id,
+          branch,
+          status,
+          conclusion,
+          trigger,
+          actor,
+          workflow,
+          release_version,
+          release_manifest_sha256,
+          provider,
+          sandbox_id,
+          created_at_millis,
+          started_at_millis,
+          finished_at_millis,
+          duration_ms,
+          attempt,
+          jobs,
+        ]
       properties:
         id:
           type: string
@@ -4032,7 +4400,15 @@ components:
           type: string
     ActionsConfig:
       type: object
-      required: [enabled, provider, default_image, timeout_seconds, accelerator, gpu_types]
+      required:
+        [
+          enabled,
+          provider,
+          default_image,
+          timeout_seconds,
+          accelerator,
+          gpu_types,
+        ]
       properties:
         enabled:
           type: boolean
@@ -4052,7 +4428,22 @@ components:
             type: string
     ProviderCapabilities:
       type: object
-      required: [one_shot_jobs, persistent_workspaces, snapshots, templates, regions, ssh, desktop, public_url, file_api, terminal_streaming, gpu, gpu_types, cost_hints]
+      required:
+        [
+          one_shot_jobs,
+          persistent_workspaces,
+          snapshots,
+          templates,
+          regions,
+          ssh,
+          desktop,
+          public_url,
+          file_api,
+          terminal_streaming,
+          gpu,
+          gpu_types,
+          cost_hints,
+        ]
       properties:
         one_shot_jobs:
           type: boolean
@@ -4159,7 +4550,19 @@ components:
           nullable: true
     SecretMeta:
       type: object
-      required: [id, scope, org_id, repo_id, name, description, value_last4, created_by, created_at, updated_at]
+      required:
+        [
+          id,
+          scope,
+          org_id,
+          repo_id,
+          name,
+          description,
+          value_last4,
+          created_by,
+          created_at,
+          updated_at,
+        ]
       description: Metadata only — never includes plaintext secret values
       properties:
         id:
@@ -4186,7 +4589,17 @@ components:
           type: string
     AgentSession:
       type: object
-      required: [agent, agent_id, token_id, last_tool, last_status, last_seen, first_seen, tool_calls]
+      required:
+        [
+          agent,
+          agent_id,
+          token_id,
+          last_tool,
+          last_status,
+          last_seen,
+          first_seen,
+          tool_calls,
+        ]
       properties:
         agent:
           type: string
@@ -4234,7 +4647,16 @@ components:
             $ref: "#/components/schemas/AgentTokenMeta"
     AgentTokenMeta:
       type: object
-      required: [id, token_prefix, allowed_repos, allowed_tools, created_at, expires_at, revoked_at]
+      required:
+        [
+          id,
+          token_prefix,
+          allowed_repos,
+          allowed_tools,
+          created_at,
+          expires_at,
+          revoked_at,
+        ]
       description: Metadata only — never includes plaintext bearer tokens
       properties:
         id:
@@ -4277,7 +4699,18 @@ components:
               type: string
     AgentAuditEntry:
       type: object
-      required: [id, agent_id, token_id, tool, repo, args_digest, status, error, occurred_at]
+      required:
+        [
+          id,
+          agent_id,
+          token_id,
+          tool,
+          repo,
+          args_digest,
+          status,
+          error,
+          occurred_at,
+        ]
       properties:
         id:
           type: integer

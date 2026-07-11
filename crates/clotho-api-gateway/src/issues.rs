@@ -80,9 +80,11 @@ pub struct CreateCommentRequest {
 
 pub async fn list_issues(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Query(query): Query<IssuesQuery>,
 ) -> Result<Json<IssueListResponse>, ApiError> {
+    auth::require_repo_read_for_tool(&headers, &state, &name, "list_issues").await?;
     validate_state(&query.state)?;
     let issues = state
         .forgejo
@@ -103,10 +105,8 @@ pub async fn create_issue(
     Path(name): Path<String>,
     Json(req): Json<CreateIssueRequest>,
 ) -> Result<(StatusCode, Json<IssueInfo>), ApiError> {
-    let auth = auth::resolve_auth(&headers, &state).await?;
-    if let Some(pool) = &state.pool {
-        control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
-    }
+    let (_repo, actor) =
+        auth::require_repo_write_for_tool(&headers, &state, &name, "create_issue").await?;
     if req.title.trim().is_empty() {
         return Err(ApiError::InvalidRequest("title is required".into()));
     }
@@ -130,7 +130,7 @@ pub async fn create_issue(
                 issue.number,
                 &issue.title,
                 &req.assignees,
-                Some(&auth.user_name),
+                Some(actor.actor_name()),
             )
             .await;
         }
@@ -187,8 +187,10 @@ pub async fn update_issue(
 
 pub async fn get_issue(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((name, number)): Path<(String, i64)>,
 ) -> Result<Json<IssueDetailResponse>, ApiError> {
+    auth::require_repo_read(&headers, &state, &name).await?;
     let (issue, comments) = tokio::try_join!(
         state.forgejo.get_issue(&name, number),
         state.forgejo.list_issue_comments(&name, number)
@@ -202,10 +204,7 @@ pub async fn create_comment(
     Path((name, number)): Path<(String, i64)>,
     Json(req): Json<CreateCommentRequest>,
 ) -> Result<(StatusCode, Json<CommentInfo>), ApiError> {
-    let auth = auth::resolve_auth(&headers, &state).await?;
-    if let Some(pool) = &state.pool {
-        control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
-    }
+    auth::require_repo_write_for_tool(&headers, &state, &name, "comment_issue").await?;
     if req.body.trim().is_empty() {
         return Err(ApiError::InvalidRequest("body is required".into()));
     }

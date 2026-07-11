@@ -880,9 +880,11 @@ pub struct ComputeProviderListResponse {
 
 pub async fn list_runs(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Query(query): Query<ListRunsQuery>,
 ) -> Result<Json<ActionRunListResponse>, ApiError> {
+    auth::require_repo_read_for_tool(&headers, &state, &name, "list_action_runs").await?;
     let limit = query.limit.unwrap_or(50).clamp(1, 100) as i64;
     let runs = state.actions.list_runs(&name, limit, query.before).await;
     let next_cursor = if runs.len() == limit as usize {
@@ -895,15 +897,19 @@ pub async fn list_runs(
 
 pub async fn get_run(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((name, run_id)): Path<(String, String)>,
 ) -> Result<Json<ActionRun>, ApiError> {
+    auth::require_repo_read(&headers, &state, &name).await?;
     Ok(Json(state.actions.get_run(&name, &run_id).await?))
 }
 
 pub async fn get_logs(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((name, run_id)): Path<(String, String)>,
 ) -> Result<Json<ActionLog>, ApiError> {
+    auth::require_repo_read_for_tool(&headers, &state, &name, "get_action_logs").await?;
     Ok(Json(state.actions.logs_for(&name, &run_id).await?))
 }
 
@@ -913,12 +919,15 @@ pub async fn create_run(
     Path(name): Path<String>,
     Json(req): Json<CreateActionRunRequest>,
 ) -> Result<(StatusCode, HeaderMap, Json<ActionRun>), ApiError> {
-    let auth = auth::resolve_auth(&headers, &state).await?;
     let idempotency_key = crate::idempotency::extract_key(&headers)?;
-    let repo = if let Some(pool) = &state.pool {
-        Some(control::require_repo_permission(pool, &name, &auth.user_id, "write").await?)
+    let (authorized_repo, actor) =
+        auth::require_repo_write_for_tool(&headers, &state, &name, "start_action_run").await?;
+    let repo = Some(authorized_repo);
+    let principal_id = actor.principal_id();
+    let run_actor = if actor.is_agent() {
+        format!("agent:{}", actor.actor_name())
     } else {
-        None
+        req.actor.clone()
     };
 
     let workflow = req.workflow.trim().to_ascii_lowercase();
@@ -943,7 +952,7 @@ pub async fn create_run(
                 repo_id: &repo.repo.id,
                 commit_id: req.commit_id.trim(),
                 branch: &req.branch,
-                actor: &req.actor,
+                actor: &run_actor,
                 workflow: &workflow,
                 release_version: &release_version,
             })
@@ -961,7 +970,7 @@ pub async fn create_run(
         request_fingerprint.as_deref(),
     ) {
         if let Some(stored) =
-            crate::idempotency::lookup(pool, &repo.repo.org_id, &auth.user_id, key).await?
+            crate::idempotency::lookup(pool, &repo.repo.org_id, &principal_id, key).await?
         {
             crate::idempotency::require_match(&stored, CREATE_ACTION_RUN_OPERATION, fingerprint)?;
             if stored.response_status != StatusCode::ACCEPTED.as_u16() as i32 {
@@ -1051,7 +1060,7 @@ pub async fn create_run(
         } else {
             "manual".into()
         },
-        actor: req.actor,
+        actor: run_actor,
         workflow,
         release_version,
         release_manifest_sha256: release_binding
@@ -1068,7 +1077,7 @@ pub async fn create_run(
             .create_run_idempotent(
                 new,
                 &repo.repo.org_id,
-                &auth.user_id,
+                &principal_id,
                 CREATE_ACTION_RUN_OPERATION,
                 key,
                 fingerprint,
@@ -1133,8 +1142,10 @@ pub fn recover_action_runs(state: Arc<AppState>) {
 
 pub async fn get_config(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<ActionsConfig>, ApiError> {
+    auth::require_repo_read(&headers, &state, &name).await?;
     Ok(Json(state.actions.config_for(&name).await))
 }
 

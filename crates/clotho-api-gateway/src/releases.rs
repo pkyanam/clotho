@@ -229,6 +229,7 @@ pub async fn create_release(
     let repo = control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
     let manifest = repos::artifact_manifest(
         State(state.clone()),
+        headers.clone(),
         Path(name.clone()),
         Query(TreeQuery {
             commit_id: request.commit_id,
@@ -303,12 +304,11 @@ pub async fn list_releases(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<ReleaseList>, ApiError> {
-    let auth = auth::resolve_auth(&headers, &state).await?;
+    let repo = auth::require_repo_read(&headers, &state, &name).await?;
     let pool = state
         .pool
         .as_ref()
         .ok_or_else(|| ApiError::Internal("releases require the control plane".into()))?;
-    let repo = control::require_repo_permission(pool, &name, &auth.user_id, "read").await?;
     let rows = sqlx::query_as::<_, DbRelease>(
         r#"select id, version, commit_id, manifest, manifest_sha256,
                   created_by, created_at from repo_releases
@@ -327,12 +327,11 @@ pub async fn get_release(
     headers: HeaderMap,
     Path((name, version)): Path<(String, String)>,
 ) -> Result<Json<ReleaseRecord>, ApiError> {
-    let auth = auth::resolve_auth(&headers, &state).await?;
+    let repo = auth::require_repo_read(&headers, &state, &name).await?;
     let pool = state
         .pool
         .as_ref()
         .ok_or_else(|| ApiError::Internal("releases require the control plane".into()))?;
-    let repo = control::require_repo_permission(pool, &name, &auth.user_id, "read").await?;
     let row = load_release(pool, &repo.repo.id, &version).await?;
     Ok(Json(ReleaseRecord {
         summary: summary(&row)?,
@@ -364,13 +363,12 @@ pub(crate) async fn serve_release_file(
     path: String,
     head_only: bool,
 ) -> Result<Response<Body>, ApiError> {
+    let repo = auth::require_repo_read(&headers, &state, &name).await?;
     crate::validate_commit_path(&path)?;
-    let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = state
         .pool
         .as_ref()
         .ok_or_else(|| ApiError::Internal("release downloads require the control plane".into()))?;
-    let repo = control::require_repo_permission(pool, &name, &auth.user_id, "read").await?;
     let release = load_release(pool, &repo.repo.id, &version).await?;
     let release_summary = summary(&release)?;
     if !release_summary.verified {

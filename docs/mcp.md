@@ -72,8 +72,19 @@ Agents must obtain new authority from an authenticated operator through the
 human REST/CLI/web surfaces.
 
 - **Repo-scoped tools** require `allowed_repos` to include the repo (or `*`).
-- **Platform tools** (`list_providers`, `list_repos`, `get_activity`, and
-  org-scoped `list_secrets`) only check `allowed_tools`.
+- `list_repos` and `get_activity` filter by `allowed_repos` before pagination;
+  ambiguous repository names fail closed.
+- `list_providers` requires its tool scope and returns a credential-free,
+  unconfigured capability view to agents.
+- `list_secrets` is metadata-only and repository-scoped for agents. The org
+  form is human-admin only.
+
+For every REST-backed tool, the agent gateway forwards the original opaque
+`clotho_agt_…` bearer for that request only. The REST edge asks the agent
+gateway to revalidate that bearer against the handler-selected tool and
+repository; it never substitutes its broad internal service credential as the
+agent's authority. Action attribution uses the authenticated agent name, and
+idempotency scope uses immutable agent and token ids rather than caller input.
 
 ## Tool catalog
 
@@ -125,7 +136,7 @@ must never contain a credential.
 | `list_providers` | `GET /api/v1/providers`                               |
 | `list_repos`     | `GET /api/v1/repos?limit={1..100}&cursor={opaque}`    |
 | `get_activity`   | `GET /api/v1/activity?limit={1..100}&cursor={opaque}` |
-| `list_secrets`   | org/repo secrets **metadata only**                    |
+| `list_secrets`   | repo secrets **metadata only**; org form is denied    |
 | `get_tree`       | `GET …/tree`                                          |
 | `get_file`       | `GET …/file`                                          |
 

@@ -22,8 +22,8 @@ use rmcp::{tool, tool_router, RoleServer, ServerHandler};
 use serde_json::{json, Value};
 use tonic::transport::Channel;
 
-use crate::identity::{sha256, AuthedAgent, IdentityStore};
-use crate::rest::RestClient;
+use crate::identity::{sha256, AuthedAgent, ForwardedAgentBearer, IdentityStore};
+use crate::rest::{with_forwarded_agent_bearer, RestClient};
 
 /// Errors a tool body can produce: upstream gRPC failures (mapped to plain
 /// MCP internal/invalid-params errors) or already-shaped MCP errors. Local
@@ -1013,6 +1013,7 @@ impl AgentGateway {
         work: impl std::future::Future<Output = Result<Value, ToolError>>,
     ) -> Result<CallToolResult, McpError> {
         let agent = authed_agent(ctx)?;
+        let bearer = forwarded_agent_bearer(ctx)?;
         let digest = sha256(args.to_string().as_bytes());
 
         // Empty repo = platform tool (list_providers, get_activity, …): only
@@ -1028,7 +1029,7 @@ impl AgentGateway {
             return Ok(CallToolResult::error(vec![ContentBlock::text(denied)]));
         }
 
-        match work.await {
+        match with_forwarded_agent_bearer(bearer, work).await {
             Ok(value) => {
                 self.audit(&agent, tool, repo, &digest, "ok", None).await?;
                 Ok(CallToolResult::success(vec![ContentBlock::text(
@@ -1078,6 +1079,21 @@ fn authed_agent(ctx: &RequestContext<RoleServer>) -> Result<AuthedAgent, McpErro
         .ok_or_else(|| {
             McpError::internal_error(
                 "request reached a tool without an authenticated agent",
+                None,
+            )
+        })
+}
+
+fn forwarded_agent_bearer(
+    ctx: &RequestContext<RoleServer>,
+) -> Result<ForwardedAgentBearer, McpError> {
+    ctx.extensions
+        .get::<http::request::Parts>()
+        .and_then(|parts| parts.extensions.get::<ForwardedAgentBearer>())
+        .cloned()
+        .ok_or_else(|| {
+            McpError::internal_error(
+                "request reached a tool without an authenticated agent credential",
                 None,
             )
         })

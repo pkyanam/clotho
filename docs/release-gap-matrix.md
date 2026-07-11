@@ -1,8 +1,8 @@
 # Stage 22 release gap matrix
 
-**Audited:** July 11, 2026 through the Stage 22 persisted Action-idempotency
-slice. This matrix records implementation and evidence separately; “partial”
-does not satisfy the public-alpha gate.
+**Audited:** July 11, 2026 through the Stage 22 repository/agent authorization
+and webhook-replay slice. This matrix records implementation and evidence
+separately; “partial” does not satisfy the public-alpha gate.
 
 Status: **implemented**, **partial**, **missing**, or **evidence gap**.
 
@@ -18,52 +18,52 @@ Status: **implemented**, **partial**, **missing**, or **evidence gap**.
 | Conditional reads/writes       | Partial     | Release downloads emit an ETag, but `If-None-Match` and policy `If-Match` behavior are absent.                                                                                                                                                                                                                                       |
 | Transfer/async conventions     | Partial     | Release byte ranges and bounded previews exist; durable imports/Actions exist. Common operation handles, cancellation, log paging, timeouts, and limit documentation do not.                                                                                                                                                         |
 | Compatibility/deprecation rule | Partial     | Prose exists in `docs/api.md`; no deprecation headers, API-diff report, or enforced compatibility check.                                                                                                                                                                                                                             |
-| Structural SDK parity          | Implemented | The verifier inspects 92 SDK REST calls and 72 interfaces, requires canonical endpoint coverage, and compares shared-schema property names, requiredness, and base types. Binary release GET/HEAD maps explicitly to `downloadReleaseFile`.                                                                                          |
+| Structural SDK parity          | Implemented | The verifier inspects 92 SDK REST calls and 74 interfaces, requires canonical endpoint coverage, and compares shared-schema property names, requiredness, and base types. Binary release GET/HEAD maps explicitly to `downloadReleaseFile`.                                                                                          |
 
 ## CLI
 
-| Gate                                 | Status      | Current evidence / precise gap                                                                                                                                                                                      |
-| ------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Frozen/generated command reference   | Missing     | Hand-written `docs/cli.md`; no help-tree snapshot/generator or grammar compatibility test.                                                                                                                          |
-| stdout/stderr and one-value JSON     | Partial     | Repository page probes verify exactly one JSON envelope on stdout; systematic coverage across command groups and malformed responses is absent.                                                                     |
-| Stable exit classes                  | Implemented | CLI maps usage/auth/permission/conflict/not-found/retryable/internal to exits `2`–`7`/`1`; live probes verified auth `3`, conflict `5`, not-found `6`, and unavailable `7` with request IDs on stderr.              |
-| Non-interactive semantics            | Partial     | Destructive repo delete has `--yes`; `actions run --idempotency-key` provides the first persisted retry control. Common timeout, cancellation, idempotency on other mutations, and stdin-secret flow remain absent. |
-| Named contexts + OS credential store | Missing     | Only flags and environment variables exist.                                                                                                                                                                         |
-| Completions/version/release binaries | Missing     | No completion generation, version command, signed binaries, checksums, or update policy.                                                                                                                            |
-| Disposable gateway command coverage  | Missing     | Argument unit tests exist only indirectly; no command-group fixture covering auth expiry, policy, malformed JSON, unavailability, and Ctrl-C.                                                                       |
+| Gate                                 | Status      | Current evidence / precise gap                                                                                                                                                                                                                                 |
+| ------------------------------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frozen/generated command reference   | Missing     | Hand-written `docs/cli.md`; no help-tree snapshot/generator or grammar compatibility test.                                                                                                                                                                     |
+| stdout/stderr and one-value JSON     | Partial     | Repository page probes verify exactly one JSON envelope on stdout; systematic coverage across command groups and malformed responses is absent.                                                                                                                |
+| Stable exit classes                  | Implemented | CLI maps usage/auth/permission/conflict/not-found/retryable/internal to exits `2`–`7`/`1`; live probes verified auth `3`, conflict `5`, not-found `6`, and unavailable `7` with request IDs on stderr.                                                         |
+| Non-interactive semantics            | Partial     | Destructive repo delete's advertised `--yes` grammar is executable/live-proven; `actions run --idempotency-key` provides the first persisted retry control. Common timeout, cancellation, idempotency on other mutations, and stdin-secret flow remain absent. |
+| Named contexts + OS credential store | Missing     | Only flags and environment variables exist.                                                                                                                                                                                                                    |
+| Completions/version/release binaries | Missing     | No completion generation, version command, signed binaries, checksums, or update policy.                                                                                                                                                                       |
+| Disposable gateway command coverage  | Missing     | Argument unit tests exist only indirectly; no command-group fixture covering auth expiry, policy, malformed JSON, unavailability, and Ctrl-C.                                                                                                                  |
 
 ## MCP and agent handoff
 
-| Gate                                | Status             | Current evidence / precise gap                                                                                                                                                                                         |
-| ----------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Versioned tool contracts            | Missing            | JSON schemas are generated by rmcp but have no Clotho schema version, stability, side-effect, idempotency, or error metadata.                                                                                          |
-| Operations/progress/cancellation    | Missing            | Imports and Actions return REST records, but MCP has no typed common operation handle, cancellation, or bounded log cursor.                                                                                            |
-| Capability classes                  | Partial            | Per-tool scopes are enforced and `tools/list` is now filtered to the token; read/propose/mutate/execute/destructive capability classes do not exist.                                                                   |
-| MCP↔REST equivalence tests          | Partial            | Live tests compare REST/MCP missing-file errors, exact repository/activity page envelopes, and manual Action idempotent replay/conflict. Broad result/error structural comparisons for every tool family are absent.   |
-| Prompt-injection authority boundary | Implemented (docs) | `docs/mcp.md` and root `AGENTS.md` state imported/repository text and logs are untrusted; dedicated enforcement tests remain an evidence gap.                                                                          |
-| Request/audit correlation           | Partial            | REST-backed MCP failures preserve request IDs and every call is audited by agent/token/tool/repo/outcome. The audit row still lacks request ID, originating session, durable operation, and final async outcome links. |
-| Public agent bootstrap              | Partial            | Root `AGENTS.md`, `docs/handoff.md`, and `just bootstrap` now exist; a least-privileged public-surface demo without admin/internal setup is not yet automated.                                                         |
+| Gate                                | Status             | Current evidence / precise gap                                                                                                                                                                                                                                   |
+| ----------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Versioned tool contracts            | Missing            | JSON schemas are generated by rmcp but have no Clotho schema version, stability, side-effect, idempotency, or error metadata.                                                                                                                                    |
+| Operations/progress/cancellation    | Missing            | Imports and Actions return REST records, but MCP has no typed common operation handle, cancellation, or bounded log cursor.                                                                                                                                      |
+| Capability classes                  | Partial            | Per-tool scopes are enforced and `tools/list` is now filtered to the token; read/propose/mutate/execute/destructive capability classes do not exist.                                                                                                             |
+| MCP↔REST equivalence tests          | Partial            | Live tests under required auth compare REST/MCP missing-file errors, repository/activity pages and Action replay/conflict using the same agent bearer; direct foreign/revoked probes prove 404/401. Broad structural comparison for every tool family is absent. |
+| Prompt-injection authority boundary | Implemented (docs) | `docs/mcp.md` and root `AGENTS.md` state imported/repository text and logs are untrusted; dedicated enforcement tests remain an evidence gap.                                                                                                                    |
+| Request/audit correlation           | Partial            | REST-backed MCP failures preserve request IDs and every call is audited by agent/token/tool/repo/outcome. The audit row still lacks request ID, originating session, durable operation, and final async outcome links.                                           |
+| Public agent bootstrap              | Partial            | Root `AGENTS.md`, `docs/handoff.md`, and `just bootstrap` now exist; a least-privileged public-surface demo without admin/internal setup is not yet automated.                                                                                                   |
 
 ## Authentication and authorization
 
-| Gate                                   | Status       | Current evidence / precise gap                                                                                                                                          |
-| -------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Route/tool permission matrix           | Partial      | Human role checks and scoped-agent tests exist; no complete route×identity matrix or deny-by-default test inventory.                                                    |
-| Tenant isolation                       | Evidence gap | Repo permission tests cover selected routes; artifacts, releases, imports, logs, secrets, providers, audits, indirect IDs, and timing behavior lack a systematic suite. |
-| Threat model                           | Missing      | No published threat model covering token theft, confused deputy, SSRF, traversal, model metadata, webhook replay, or sandbox escape.                                    |
-| Rotation/replay/redaction/audit export | Partial      | Human/agent expiry and revoke exist; webhook HMAC exists. Secret-master rotation, replay defense, systematic redaction, and incident-safe audit export do not.          |
-| Security/supply-chain CI               | Missing      | No complete dependency, container, license, secret, SAST, SBOM, provenance, or reporting-channel gate.                                                                  |
+| Gate                                   | Status       | Current evidence / precise gap                                                                                                                                                                                                                                                              |
+| -------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Route/tool permission matrix           | Partial      | A two-human/two-org suite covers 32 repository read shapes, lists/activity before pagination, secret metadata, and scoped REST-backed MCP tools under required auth. User/org directories, human provider metadata, indirect ids, and a complete deny-by-default inventory remain.          |
+| Tenant isolation                       | Evidence gap | Repository reads now gate before VCS/storage/provider calls and scoped agents are revalidated at REST. Exhaustive artifacts/jobs/caches/storage prefixes/webhooks/provider calls/indirect IDs/timing and typed tenant-context evidence belongs to the still-blocked Stage 23 gate.          |
+| Threat model                           | Implemented  | `docs/threat-model.md` covers assets, trust boundaries, token theft, confused deputy, SSRF, traversal, untrusted content, webhook replay, sandbox escape, recovery, supply chain, and explicit remaining work.                                                                              |
+| Rotation/replay/redaction/audit export | Partial      | Human/agent expiry and revoke exist. Forgejo webhooks now require exact-body HMAC plus hashed, atomic, 24-hour delivery reservations; exact/concurrent retries collapse and changed payloads conflict. Secret-master rotation, systematic redaction, and incident-safe audit export remain. |
+| Security/supply-chain CI               | Missing      | No complete dependency, container, license, secret, SAST, SBOM, provenance, or reporting-channel gate.                                                                                                                                                                                      |
 
 ## Data durability and operations
 
-| Gate                                    | Status  | Current evidence / precise gap                                                                                                                                                                                                      |
-| --------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Versioned migrations and upgrade/repair | Partial | SQLx migrations `1001`–`1017` and agent migration `0001` exist; `1017` adds common idempotency records. Previous-release upgrade, rollback/forward-repair, and realistic-volume tests do not.                                       |
-| Complete backup/restore                 | Missing | No automated bundle covering Postgres, Git/VCS, Arachne/object data, and the secrets master key; no destructive restore drill.                                                                                                      |
-| Dependency recovery/reconciliation      | Partial | Actions/import leases recover across restarts and Arachne restart is tested; component-outage consistency and observable reconciliation are incomplete.                                                                             |
-| Health/readiness/doctor                 | Partial | Service liveness exists. `just bootstrap`/`just doctor [--json] [--stack]` now provide read-only dependency and surface diagnostics; dependency-aware readiness endpoints are missing.                                              |
-| Resource bounds/backpressure            | Partial | Upload body, preview, import, Action timeout, repository/activity pages, and Action idempotency keys/responses/cleanup batches are bounded; queues, logs, retries, other DB queries, and all uploads lack a reviewed common policy. |
-| Supported operations envelope           | Missing | Minimum Docker/Compose resources, volume ownership, upgrades, clean uninstall, and support bounds are not published as a release guide.                                                                                             |
+| Gate                                    | Status  | Current evidence / precise gap                                                                                                                                                                                                                        |
+| --------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Versioned migrations and upgrade/repair | Partial | SQLx migrations `1001`–`1018` and agent migration `0001` exist; `1017` adds common idempotency records and `1018` hashed webhook-delivery reservations. Previous-release upgrade, rollback/forward-repair, and realistic-volume tests do not.         |
+| Complete backup/restore                 | Missing | No automated bundle covering Postgres, Git/VCS, Arachne/object data, and the secrets master key; no destructive restore drill.                                                                                                                        |
+| Dependency recovery/reconciliation      | Partial | Actions/import leases recover across restarts and Arachne restart is tested; component-outage consistency and observable reconciliation are incomplete.                                                                                               |
+| Health/readiness/doctor                 | Partial | Service liveness exists. `just bootstrap`/`just doctor [--json] [--stack]` now provide read-only dependency and surface diagnostics; dependency-aware readiness endpoints are missing.                                                                |
+| Resource bounds/backpressure            | Partial | Upload body, preview, import, Action timeout, repository/activity pages, and Action idempotency keys/responses/cleanup batches are bounded; queues, logs, retries, other DB queries, and all uploads lack a reviewed common policy.                   |
+| Supported operations envelope           | Partial | `SUPPORT.md` publishes the public-alpha Compose resource/test envelope, support window, volume-destructive uninstall warning, and forward-only migration posture. Complete backup/upgrade instructions and verified ownership variants remain absent. |
 
 ## Web and accessibility
 
@@ -76,24 +76,24 @@ Status: **implemented**, **partial**, **missing**, or **evidence gap**.
 
 ## Packaging and project hygiene
 
-| Gate                                   | Status  | Current evidence / precise gap                                                                                                                            |
-| -------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Public brand/screenshots               | Missing | `logo-placeholder.svg` and README screenshot placeholder remain.                                                                                          |
-| Community/security/support files       | Missing | `CONTRIBUTING.md`, `SECURITY.md`, code of conduct, support/governance, templates, changelog, and release notes are absent.                                |
-| License/boundary/reproducibility audit | Partial | Apache-2.0 license and unmodified pinned Forgejo boundary are documented; notices, headers, generated ownership, and clean-clone audit remain incomplete. |
-| Signed release artifacts               | Missing | No signed multi-platform CLI, pinned container bundle, checksums, SBOM, or provenance attestation.                                                        |
+| Gate                                   | Status      | Current evidence / precise gap                                                                                                                                                    |
+| -------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public brand/screenshots               | Partial     | A non-placeholder Clotho logo now anchors the README. A current real-product screenshot and tagged-release visual review remain absent.                                           |
+| Community/security/support files       | Implemented | Contributing, private security reporting, code of conduct, support, governance, changelog, issue/PR templates, known limitations, and release checklist are present and linked.   |
+| License/boundary/reproducibility audit | Partial     | Apache-2.0, `THIRD_PARTY_NOTICES.md`, and the unmodified pinned Forgejo boundary are documented; generated license/SBOM output, headers, and clean-clone audit remain incomplete. |
+| Signed release artifacts               | Missing     | No signed multi-platform CLI, pinned container bundle, checksums, SBOM, or provenance attestation.                                                                                |
 
 ## Agent-ready repository contract
 
-| Gate                              | Status             | Current evidence / precise gap                                                                                                        |
-| --------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Root `AGENTS.md`                  | Implemented        | Architecture invariants, forbidden shortcuts, commands, verification matrix, and safe Git/Docker rules are present.                   |
-| Current handoff                   | Implemented        | `docs/handoff.md` records Stage 22 state and next bounded acceptance.                                                                 |
-| Machine capability document       | Missing            | No versioned capability document served by both REST and MCP.                                                                         |
-| One diagnostic/bootstrap command  | Implemented        | `just bootstrap`; `just doctor --json --stack` emits one JSON value and actionable fixes without mutation or network-provider access. |
-| Deterministic disposable fixtures | Partial            | Tests use unique names and real services; no unified disposable org/repo fixture or cleanup policy.                                   |
-| Generated artifact ownership      | Implemented (docs) | Root `AGENTS.md` records OpenAPI/SDK/protobuf/token ownership; CI enforcement remains part of structural parity.                      |
-| PR completion checklist           | Missing            | No pull-request template linked to a “do not claim complete unless” checklist.                                                        |
+| Gate                              | Status             | Current evidence / precise gap                                                                                                                               |
+| --------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Root `AGENTS.md`                  | Implemented        | Architecture invariants, forbidden shortcuts, commands, verification matrix, and safe Git/Docker rules are present.                                          |
+| Current handoff                   | Implemented        | `docs/handoff.md` records Stage 22 state and next bounded acceptance.                                                                                        |
+| Machine capability document       | Missing            | No versioned capability document served by both REST and MCP.                                                                                                |
+| One diagnostic/bootstrap command  | Implemented        | `just bootstrap`; `just doctor --json --stack` emits one JSON value and actionable fixes without mutation or network-provider access.                        |
+| Deterministic disposable fixtures | Partial            | Tests use unique names and real services; no unified disposable org/repo fixture or cleanup policy.                                                          |
+| Generated artifact ownership      | Implemented (docs) | Root `AGENTS.md` records OpenAPI/SDK/protobuf/token ownership; CI enforcement remains part of structural parity.                                             |
+| PR completion checklist           | Implemented        | `.github/pull_request_template.md` requires surface parity, exact evidence/skips, bounds, durability, browser coverage, docs, risks, and release-gate truth. |
 
 ## Baseline evidence
 
@@ -108,3 +108,13 @@ survived the restart.
 Credential-gated Daytona, Box, ComputeSDK upstream, managed Clerk, private/
 gated Hugging Face, and live Tailscale operations were not exercised and must
 not be counted as passing release evidence.
+
+The latest slice rebuilt/recreated the Rust service containers without removing
+volumes, passed `just test-collab` and `just test-agent`, then repeated the MCP
+suite with `CLOTHO_AUTH_REQUIRED=true` and a temporary human setup token that
+was revoked afterward. The same agent bearer drove direct REST equivalence;
+foreign scope returned concealed `404` and a revoked token returned `401`.
+A disposable live webhook delivery returned `202`, exact replay `200`, and a
+changed payload under the same id `409`; repository deletion cascaded the
+reservation. The served OpenAPI hash matched the checked-in document, migration
+1018 was applied, owned fixtures were absent, and local open auth was restored.

@@ -51,14 +51,45 @@ struct RepoCursor {
 
 pub async fn list_repos(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Query(query): Query<RepoListQuery>,
 ) -> Result<Json<RepoListResponse>, ApiError> {
+    let agent = crate::agent_rest::authorize_if_agent(&headers, &state, "", "list_repos").await?;
+    let principal = if agent.is_none() {
+        auth::resolve_optional_human_auth(&headers, &state).await?
+    } else {
+        None
+    };
     let provider = state.actions.default_provider();
-    let configured = state.actions.provider_configured(&provider);
+    let configured = agent
+        .as_ref()
+        .map(|_| false)
+        .unwrap_or_else(|| state.actions.provider_configured(&provider));
     let base_url = state.public_git_url.clone();
 
-    let mut repos = if let Some(pool) = &state.pool {
-        let clotho = control::list_repos_with_orgs(pool).await?;
+    let repos = if let Some(pool) = &state.pool {
+        let clotho = if let Some(agent) = &agent {
+            let candidates = control::list_repos_with_orgs(pool).await?;
+            let mut counts = HashMap::<String, usize>::new();
+            for candidate in &candidates {
+                *counts.entry(candidate.repo.name.clone()).or_default() += 1;
+            }
+            candidates
+                .into_iter()
+                .filter(|candidate| {
+                    counts.get(&candidate.repo.name) == Some(&1)
+                        && agent.may_touch_repo(&candidate.repo.name)
+                })
+                .collect()
+        } else {
+            control::list_accessible_repos_with_orgs(
+                pool,
+                principal.as_ref().map(|auth| auth.user_id.as_str()),
+            )
+            .await?
+        };
+        // Filter authorization and ambiguous names before any provider call
+        // and before pagination.
         let forgejo_by_name: HashMap<String, RepoInfo> = state
             .forgejo
             .list_repos()
@@ -80,22 +111,10 @@ pub async fn list_repos(
             })
             .collect()
     } else {
-        vec![]
+        return Err(ApiError::Internal(
+            "repository lists require the control plane".into(),
+        ));
     };
-
-    if repos.is_empty() {
-        repos = state
-            .forgejo
-            .list_repos()
-            .await?
-            .into_iter()
-            .map(|mut r| {
-                r.provider = provider.clone();
-                r.configured = configured;
-                r
-            })
-            .collect();
-    }
 
     Ok(Json(paginate_repos(repos, query)?))
 }
@@ -321,78 +340,37 @@ fn public_clone_url(state: &AppState, git_owner: &str, name: &str) -> String {
 
 async fn load_repo_detail(
     state: &AppState,
-    name: &str,
+    clotho: &control::RepoWithOrg,
 ) -> Result<(RepoInfo, String, String, String, String, String, String), ApiError> {
     let provider = state.actions.default_provider();
     let configured = state.actions.provider_configured(&provider);
     let base_url = state.public_git_url.clone();
 
-    if let Some(pool) = &state.pool {
-        match control::get_repo_with_org(pool, name).await? {
-            Some(clotho) => {
-                let forgejo = state.forgejo.get_repo(name).await.ok();
-                let mut info = control::build_repo_info(
-                    &clotho,
-                    forgejo.as_ref(),
-                    &base_url,
-                    &provider,
-                    configured,
-                );
-                info.owner = clotho.repo.forgejo_owner.clone();
-                let clone = public_clone_url(state, &clotho.repo.forgejo_owner, name);
-                Ok((
-                    info,
-                    clotho.repo.forgejo_owner.clone(),
-                    clotho.org_name,
-                    clotho.repo.description.clone(),
-                    clotho.repo.visibility.clone(),
-                    clotho.repo.default_branch.clone(),
-                    clone,
-                ))
-            }
-            None => {
-                let forgejo_repo = state.forgejo.get_repo(name).await?;
-                let mut info = forgejo_repo;
-                info.provider = provider.clone();
-                info.configured = configured;
-                let owner = state.forgejo.owner().to_string();
-                let clone = public_clone_url(state, &owner, name);
-                Ok((
-                    info.clone(),
-                    owner.clone(),
-                    owner,
-                    info.description.clone(),
-                    info.visibility.clone(),
-                    info.default_branch.clone(),
-                    clone,
-                ))
-            }
-        }
-    } else {
-        let forgejo_repo = state.forgejo.get_repo(name).await?;
-        let mut info = forgejo_repo;
-        info.provider = provider.clone();
-        info.configured = configured;
-        let owner = state.forgejo.owner().to_string();
-        let clone = public_clone_url(state, &owner, name);
-        Ok((
-            info.clone(),
-            owner.clone(),
-            owner,
-            info.description.clone(),
-            info.visibility.clone(),
-            info.default_branch.clone(),
-            clone,
-        ))
-    }
+    let name = &clotho.repo.name;
+    let forgejo = state.forgejo.get_repo(name).await.ok();
+    let mut info =
+        control::build_repo_info(clotho, forgejo.as_ref(), &base_url, &provider, configured);
+    info.owner = clotho.repo.forgejo_owner.clone();
+    let clone = public_clone_url(state, &clotho.repo.forgejo_owner, name);
+    Ok((
+        info,
+        clotho.repo.forgejo_owner.clone(),
+        clotho.org_name.clone(),
+        clotho.repo.description.clone(),
+        clotho.repo.visibility.clone(),
+        clotho.repo.default_branch.clone(),
+        clone,
+    ))
 }
 
 pub async fn get_repo(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<RepoDetailResponse>, ApiError> {
+    let authorized = auth::require_repo_read(&headers, &state, &name).await?;
     let (repo_info, owner, owner_org, description, visibility, default_branch, clone_url) =
-        load_repo_detail(&state, &name).await?;
+        load_repo_detail(&state, &authorized).await?;
 
     let mut vcs = state.vcs.clone();
     let heads = vcs
@@ -568,9 +546,11 @@ pub struct TreeResponse {
 
 pub async fn tree(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Query(query): Query<TreeQuery>,
 ) -> Result<Json<TreeResponse>, ApiError> {
+    auth::require_repo_read_for_tool(&headers, &state, &name, "get_tree").await?;
     let mut vcs = state.vcs.clone();
     let list = vcs
         .list_files(ListFilesRequest {
@@ -920,10 +900,12 @@ fn evaluation_document(content: &[u8]) -> Option<serde_json::Value> {
 /// backing Forgejo repository to understand what a repository contains.
 pub async fn artifact_manifest(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Query(query): Query<TreeQuery>,
 ) -> Result<Json<ArtifactManifestResponse>, ApiError> {
-    let (repo, ..) = load_repo_detail(&state, &name).await?;
+    let authorized = auth::require_repo_read(&headers, &state, &name).await?;
+    let (repo, ..) = load_repo_detail(&state, &authorized).await?;
     let kind = repo.kind;
     let mut vcs = state.vcs.clone();
     let tree = vcs
@@ -1232,9 +1214,11 @@ fn parse_tabular_preview(
 /// At most 256 KiB is streamed from Arachne and at most 100 rows are returned.
 pub async fn artifact_preview(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Query(query): Query<ArtifactPreviewQuery>,
 ) -> Result<Json<ArtifactPreviewResponse>, ApiError> {
+    auth::require_repo_read(&headers, &state, &name).await?;
     if !(1..=100).contains(&query.limit) {
         return Err(ApiError::InvalidRequest(
             "preview limit must be between 1 and 100".into(),
@@ -1246,9 +1230,6 @@ pub async fn artifact_preview(
             "preview supports CSV, TSV, and JSONL dataset artifacts".into(),
         ));
     }
-    // Resolve through the Clotho control plane first; this prevents Forgejo
-    // from becoming the source of repository existence or metadata.
-    let _ = load_repo_detail(&state, &name).await?;
     let mut vcs = state.vcs.clone();
     let file = vcs
         .get_file(GetFileRequest {
@@ -1299,9 +1280,11 @@ pub struct FileResponse {
 
 pub async fn file(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Query(query): Query<FileQuery>,
 ) -> Result<Json<FileResponse>, ApiError> {
+    auth::require_repo_read_for_tool(&headers, &state, &name, "get_file").await?;
     let mut vcs = state.vcs.clone();
     let file = vcs
         .get_file(GetFileRequest {
@@ -1361,8 +1344,10 @@ pub struct RepoStorageStatsResponse {
 /// pointers plus honest physical metrics for the active managed store.
 pub async fn storage_stats(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<RepoStorageStatsResponse>, ApiError> {
+    auth::require_repo_read(&headers, &state, &name).await?;
     let mut vcs = state.vcs.clone();
     let tree = vcs
         .list_files(ListFilesRequest {
@@ -1555,9 +1540,11 @@ pub struct CommitsResponse {
 
 pub async fn commits(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Query(query): Query<CommitsQuery>,
 ) -> Result<Json<CommitsResponse>, ApiError> {
+    auth::require_repo_read(&headers, &state, &name).await?;
     let mut vcs = state.vcs.clone();
     let log = vcs
         .log_commits(LogCommitsRequest {
@@ -1598,9 +1585,11 @@ pub struct OpLogResponse {
 
 pub async fn op_log(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Query(query): Query<OpLogQuery>,
 ) -> Result<Json<OpLogResponse>, ApiError> {
+    auth::require_repo_read(&headers, &state, &name).await?;
     let mut vcs = state.vcs.clone();
     let log = vcs
         .query_op_log(QueryOpLogRequest {

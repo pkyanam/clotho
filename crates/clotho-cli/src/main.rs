@@ -644,8 +644,8 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
             })
         }
         "delete" => {
-            let repo = require_one(&args, "clotho repo delete <name>")?;
             let yes = take_flag(&mut args, "--yes");
+            let repo = require_one(&args, "clotho repo delete <name> [--yes]")?;
             if !yes {
                 bail!("refusing to delete {repo} without --yes");
             }

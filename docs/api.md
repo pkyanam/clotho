@@ -416,6 +416,26 @@ curl -s http://localhost:8080/api/v1/providers | jq
 | Agents (presence)   | `…/agent-sessions`                                                                                |
 | Agents (admin)      | `/api/v1/agents`, `…/tokens`, `…/audit`                                                           |
 
+### Secret metadata authorization
+
+Secret values are write-only. List and detail responses contain metadata such
+as name, scope, description, and optional last-four mask; they never contain a
+value or ciphertext. `GET /api/v1/orgs/{org}/secrets[/…]` requires an
+administrator of that organization. `GET /api/v1/repos/{repo}/secrets[/…]`
+requires a repository administrator or an administrator of its owning
+organization.
+
+Clotho authenticates and authorizes these reads before looking up a secret
+name. Supplying an invalid credential always returns `401`, including in local
+open-auth mode; it never falls back to the bootstrap human. A caller without
+the required admin role receives the same `403 permission_denied` response for
+an existing or absent secret name, preventing metadata enumeration.
+
+Scoped agents may list repository secret metadata only when their bearer has
+the exact repository and `list_secrets` tool scopes. Organization secret lists
+remain human-org-admin only. The REST edge revalidates the original agent
+bearer; neither surface returns plaintext or ciphertext.
+
 ### Human tokens
 
 | Method   | Path                  | Notes                        |
@@ -477,7 +497,23 @@ where applicable.
 specific `policy_conflict` as individual gates adopt it) when policy blocks
 merge, plus the request id for support correlation.
 
-| Webhooks | `/api/v1/webhooks/forgejo` (internal; not part of the public product API) |
+### Internal Forgejo webhook
+
+`POST /api/v1/webhooks/forgejo` is an internal provider boundary, not a public
+product API. It always requires `CLOTHO_WEBHOOK_SECRET`, an HMAC-SHA256 over
+the exact body, a Forgejo/Gitea event header, and a 1–128 byte visible-ASCII
+`X-Forgejo-Delivery` or `X-Gitea-Delivery` id. An empty signing secret,
+invalid/missing signature or event,
+missing Postgres control plane, missing/ambiguous repository, or malformed
+delivery fails closed before CI is scheduled.
+
+Clotho hashes the delivery id and exact body before atomically reserving the
+delivery for 24 hours. The first request returns `202 accepted` and schedules
+one CI run. An exact concurrent or later retry returns `200 replayed` without
+scheduling again. Reusing an id with different request bytes returns
+`409 conflict`. Expired rows are removed in bounded batches; plaintext ids,
+payloads, signatures, and signing secrets are neither persisted nor logged by
+the replay layer.
 
 Full schemas and request bodies: **[`openapi.yaml`](openapi.yaml)**.
 

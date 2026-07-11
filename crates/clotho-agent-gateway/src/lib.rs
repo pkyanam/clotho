@@ -27,7 +27,7 @@ use sqlx::postgres::PgPoolOptions;
 use tonic::transport::Channel;
 
 use crate::admin::AdminState;
-use crate::identity::{sha256, IdentityStore};
+use crate::identity::{sha256, ForwardedAgentBearer, IdentityStore};
 use crate::mcp::AgentGateway;
 use crate::rest::RestClient;
 
@@ -132,6 +132,9 @@ async fn authenticate_agent(
     match identity.authenticate(&token).await {
         Ok(Some(agent)) => {
             request.extensions_mut().insert(agent);
+            request
+                .extensions_mut()
+                .insert(ForwardedAgentBearer::new(token));
             next.run(request).await
         }
         Ok(None) => unauthorized("unknown, revoked, or expired agent token"),

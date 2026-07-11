@@ -323,10 +323,24 @@ async fn list_computesdk_upstreams() -> Json<ComputesdkUpstreamsResponse> {
 
 async fn list_org_secrets(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(org): Path<String>,
 ) -> Result<Json<SecretListResponse>, ApiError> {
+    if crate::agent_rest::authorize_if_agent(&headers, &state, "", "list_secrets")
+        .await?
+        .is_some()
+    {
+        return Err(ApiError::Forbidden(
+            "agent tokens do not carry organization secret scope".into(),
+        ));
+    }
+    // Resolve the caller before looking up either the organization or any
+    // secret metadata. In local open-auth mode this is the bootstrap human;
+    // a supplied invalid credential must never fall back to that identity.
+    let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = require_pool(&state)?;
     let org_row = control::get_org(pool, &org).await?;
+    control::require_org_role(pool, &org_row.id, &auth.user_id, "admin").await?;
     let secrets = list_by_org(pool, &org_row.id).await?;
     Ok(Json(SecretListResponse { secrets }))
 }
@@ -374,10 +388,15 @@ async fn create_org_secret(
 
 async fn get_org_secret(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((org, name)): Path<(String, String)>,
 ) -> Result<Json<SecretMeta>, ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = require_pool(&state)?;
     let org_row = control::get_org(pool, &org).await?;
+    // Authorize before the name lookup so a non-admin receives the same
+    // response whether or not the requested secret metadata exists.
+    control::require_org_role(pool, &org_row.id, &auth.user_id, "admin").await?;
     let meta = get_by_org_name(pool, &org_row.id, &name).await?;
     Ok(Json(meta))
 }
@@ -471,11 +490,24 @@ async fn delete_org_secret(
 
 async fn list_repo_secrets(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(repo): Path<String>,
 ) -> Result<Json<SecretListResponse>, ApiError> {
+    if crate::agent_rest::authorize_if_agent(&headers, &state, &repo, "list_secrets")
+        .await?
+        .is_some()
+    {
+        let pool = require_pool(&state)?;
+        let clotho = control::get_repo_with_org(pool, &repo)
+            .await?
+            .ok_or_else(|| ApiError::NotFound("repository not found".into()))?;
+        let secrets = list_by_repo(pool, &clotho.repo.id).await?;
+        return Ok(Json(SecretListResponse { secrets }));
+    }
+    let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = require_pool(&state)?;
-    let repo_row = control::get_repo_by_name(pool, &repo).await?;
-    let secrets = list_by_repo(pool, &repo_row.id).await?;
+    let clotho = control::require_repo_admin(pool, &repo, &auth.user_id).await?;
+    let secrets = list_by_repo(pool, &clotho.repo.id).await?;
     Ok(Json(SecretListResponse { secrets }))
 }
 
@@ -522,11 +554,16 @@ async fn create_repo_secret(
 
 async fn get_repo_secret(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((repo, name)): Path<(String, String)>,
 ) -> Result<Json<SecretMeta>, ApiError> {
+    let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = require_pool(&state)?;
-    let repo_row = control::get_repo_by_name(pool, &repo).await?;
-    let meta = get_by_repo_name(pool, &repo_row.id, &name).await?;
+    // `require_repo_admin` grants either an explicit repo administrator or
+    // an administrator of the owning organization. It runs before the
+    // metadata query, preventing secret-name enumeration by other callers.
+    let clotho = control::require_repo_admin(pool, &repo, &auth.user_id).await?;
+    let meta = get_by_repo_name(pool, &clotho.repo.id, &name).await?;
     Ok(Json(meta))
 }
 

@@ -207,13 +207,15 @@ pub async fn upsert_merge_policy(
 
 pub async fn get_merge_policy_handler(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<MergePolicy>, ApiError> {
-    let Some(pool) = &state.pool else {
-        return Ok(Json(MergePolicy::default()));
-    };
-    let repo = control::get_repo_by_name(pool, &name).await?;
-    let policy = load_merge_policy(pool, &repo.id).await?;
+    let repo = auth::require_repo_read(&headers, &state, &name).await?;
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("merge policy requires postgres".into()))?;
+    let policy = load_merge_policy(pool, &repo.repo.id).await?;
     Ok(Json(policy))
 }
 

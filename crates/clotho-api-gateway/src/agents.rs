@@ -317,7 +317,7 @@ pub async fn repo_sessions(
     Path(name): Path<String>,
     Query(query): Query<SessionsQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let _auth = auth::resolve_auth(&headers, &state).await?;
+    auth::require_repo_read(&headers, &state, &name).await?;
     ensure_agent_admin_configured(&state)?;
     let url = format!(
         "{}/admin/v1/repos/{name}/sessions?limit={}&within_secs={}",

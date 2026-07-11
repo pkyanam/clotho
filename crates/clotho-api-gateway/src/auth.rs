@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use crate::control::Bootstrap;
+use crate::control::{self, Bootstrap, RepoWithOrg};
 use crate::error::ApiError;
 use crate::AppState;
 
@@ -161,6 +161,153 @@ pub(crate) async fn resolve_auth(
     state: &AppState,
 ) -> Result<AuthContext, ApiError> {
     state.auth_provider.resolve(headers, state).await
+}
+
+/// Resolve a human when the caller supplied credentials or the open-local
+/// bootstrap fallback is enabled. A malformed Authorization header is never
+/// treated as anonymous: callers cannot hide a bad credential behind a public
+/// resource.
+pub(crate) async fn resolve_optional_human_auth(
+    headers: &HeaderMap,
+    state: &AppState,
+) -> Result<Option<AuthContext>, ApiError> {
+    if headers.contains_key(axum::http::header::AUTHORIZATION) {
+        if extract_bearer(headers).is_none() {
+            return Err(ApiError::Unauthorized(
+                "invalid Authorization header; expected Bearer <token>".into(),
+            ));
+        }
+        return resolve_auth(headers, state).await.map(Some);
+    }
+    if state.auth_required {
+        Ok(None)
+    } else {
+        // Preserve the documented local-development model: no credential is
+        // the bootstrap human only when required auth is explicitly disabled.
+        resolve_auth(headers, state).await.map(Some)
+    }
+}
+
+fn hidden_repo() -> ApiError {
+    ApiError::NotFound("repository not found".into())
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum AuthorizedRepoActor {
+    Human(AuthContext),
+    Agent(crate::agent_rest::AuthorizedAgent),
+}
+
+impl AuthorizedRepoActor {
+    pub fn principal_id(&self) -> String {
+        match self {
+            Self::Human(human) => human.user_id.clone(),
+            Self::Agent(agent) => agent.principal_id(),
+        }
+    }
+
+    pub fn actor_name(&self) -> &str {
+        match self {
+            Self::Human(human) => &human.user_name,
+            Self::Agent(agent) => &agent.agent,
+        }
+    }
+
+    pub fn is_agent(&self) -> bool {
+        matches!(self, Self::Agent(_))
+    }
+}
+
+/// Authorize one name-routed repository read before any provider, VCS,
+/// storage, compute, or agent-gateway call.
+///
+/// Public repositories are anonymous-readable. Non-public repositories need
+/// a valid human with explicit read permission (or org-admin authority).
+/// Missing, ambiguous, and unauthorized non-public names deliberately share
+/// the same stable 404 response.
+pub(crate) async fn require_repo_read(
+    headers: &HeaderMap,
+    state: &AppState,
+    repo_name: &str,
+) -> Result<RepoWithOrg, ApiError> {
+    // Validate an explicitly supplied credential first, even when the target
+    // is public or absent.
+    let principal = resolve_optional_human_auth(headers, state).await?;
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("repository reads require the control plane".into()))?;
+    let repo = control::get_repo_with_org(pool, repo_name)
+        .await?
+        .ok_or_else(hidden_repo)?;
+    if repo.repo.visibility == "public" {
+        return Ok(repo);
+    }
+    let Some(principal) = principal else {
+        return Err(hidden_repo());
+    };
+    if control::has_repo_permission(pool, &repo, &principal.user_id, "read").await? {
+        Ok(repo)
+    } else {
+        Err(hidden_repo())
+    }
+}
+
+/// Repository read authorization for a route that backs one exact MCP tool.
+/// Agent scope is independently revalidated by the REST edge; human and
+/// anonymous behavior remains the common repository-read contract above.
+pub(crate) async fn require_repo_read_for_tool(
+    headers: &HeaderMap,
+    state: &AppState,
+    repo_name: &str,
+    tool: &'static str,
+) -> Result<RepoWithOrg, ApiError> {
+    match crate::agent_rest::authorize_if_agent(headers, state, repo_name, tool).await {
+        Ok(Some(_agent)) => {
+            let pool = state.pool.as_ref().ok_or_else(|| {
+                ApiError::Internal("repository reads require the control plane".into())
+            })?;
+            control::get_repo_with_org(pool, repo_name)
+                .await?
+                .ok_or_else(hidden_repo)
+        }
+        Ok(None) => require_repo_read(headers, state, repo_name).await,
+        // Conceal repository existence from an agent credential that does not
+        // authorize the handler-selected repo/tool pair.
+        Err(ApiError::Forbidden(_)) => Err(hidden_repo()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Mutation authorization for REST routes that are also exposed as one exact
+/// MCP tool. Human callers keep Clotho repository permissions; agents use the
+/// independently validated repo+tool scopes owned by the agent gateway.
+pub(crate) async fn require_repo_write_for_tool(
+    headers: &HeaderMap,
+    state: &AppState,
+    repo_name: &str,
+    tool: &'static str,
+) -> Result<(RepoWithOrg, AuthorizedRepoActor), ApiError> {
+    if let Some(agent) =
+        crate::agent_rest::authorize_if_agent(headers, state, repo_name, tool).await?
+    {
+        let pool = state.pool.as_ref().ok_or_else(|| {
+            ApiError::Internal("repository mutations require the control plane".into())
+        })?;
+        let repo = control::get_repo_with_org(pool, repo_name)
+            .await?
+            .ok_or_else(hidden_repo)?;
+        return Ok((repo, AuthorizedRepoActor::Agent(agent)));
+    }
+
+    let human = resolve_optional_human_auth(headers, state)
+        .await?
+        .ok_or_else(|| ApiError::Unauthorized("authentication required".into()))?;
+    let pool = state.pool.as_ref().ok_or_else(|| {
+        ApiError::Internal("repository mutations require the control plane".into())
+    })?;
+    let repo = control::require_repo_permission(pool, repo_name, &human.user_id, "write").await?;
+    Ok((repo, AuthorizedRepoActor::Human(human)))
 }
 
 /// Provision the explicitly configured bootstrap token, if any.

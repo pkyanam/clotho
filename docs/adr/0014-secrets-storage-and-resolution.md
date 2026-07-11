@@ -95,10 +95,16 @@ Clotho secrets are set.
 `activity_events` records `secret.created` / `secret.updated` / `secret.deleted`
 with **name and scope only** (no ciphertext, no last4 of a delete of the value).
 
-### 6. Permissions (Stage 11 placeholder)
+### 6. Permissions
 
-Reuse bootstrap membership: org admin for org secrets; repo admin for repo
-secrets. Deny by default when pool/auth is missing (routes require DB).
+Org-secret writes and metadata reads require an administrator of that
+organization. Repo-secret writes and metadata reads require a repository
+administrator or an administrator of the owning organization. Authentication
+and authorization run before a metadata name lookup, so a caller without the
+required role cannot distinguish an existing secret name from an absent one.
+An explicitly supplied invalid credential fails even when local bootstrap
+fallback is enabled. Deny by default when pool/auth is missing (routes require
+DB).
 
 ## Consequences
 

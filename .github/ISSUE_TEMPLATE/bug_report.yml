@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a reproducible Clotho product defect without secrets or private data.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report vulnerabilities here. Use SECURITY.md. Redact credentials, private repository content, provider output, and internal token files.
+  - type: input
+    id: commit
+    attributes:
+      label: Source commit
+      description: Exact commit or tagged release.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, architecture, Docker/Compose versions, and redacted `just doctor --json --stack` output.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal public-surface commands or clicks using synthetic data.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include stable error code and request ID when available; redact sensitive data.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, private content, provider secrets, and user data.
+          required: true

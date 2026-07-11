@@ -14,6 +14,7 @@
 //! the internal collaboration provider, but the control plane owns the records.
 
 mod actions;
+mod agent_rest;
 mod agents;
 mod arachne;
 pub mod auth;
@@ -82,8 +83,8 @@ pub struct GatewayConfig {
     pub large_file_threshold_bytes: usize,
     /// Optional internal StorageSDK bridge HTTP base.
     pub storage_sdk_bridge_url: String,
-    /// Shared secret Forgejo signs push webhooks with (HMAC-SHA256). Empty
-    /// disables signature verification (dev only).
+    /// Shared secret Forgejo signs push webhooks with (HMAC-SHA256). An empty
+    /// value makes the receiver fail closed; Compose supplies a dev default.
     pub webhook_secret: String,
     /// URL Forgejo should call for push events; registered per repo at
     /// creation. Empty skips webhook registration.
@@ -668,6 +669,7 @@ async fn create_repo(
         Some(pool) => {
             let resolved = control::resolve_org(pool, &state.bootstrap, &owner_org).await?;
             control::require_org_role(pool, &resolved.0, &auth.user_id, "admin").await?;
+            control::require_global_repo_name_available(pool, &req.name).await?;
             resolved
         }
         None => (

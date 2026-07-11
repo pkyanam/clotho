@@ -29,8 +29,10 @@ pub struct CreateMilestoneRequest {
 
 pub async fn list_milestones(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<MilestoneListResponse>, ApiError> {
+    auth::require_repo_read(&headers, &state, &name).await?;
     let milestones = state.forgejo.list_milestones(&name).await?;
     Ok(Json(MilestoneListResponse { milestones }))
 }

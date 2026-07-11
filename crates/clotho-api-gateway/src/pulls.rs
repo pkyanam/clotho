@@ -89,9 +89,11 @@ fn default_merge_method() -> String {
 
 pub async fn list_pulls(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Query(query): Query<PullsQuery>,
 ) -> Result<Json<PullListResponse>, ApiError> {
+    auth::require_repo_read_for_tool(&headers, &state, &name, "list_pulls").await?;
     if !matches!(query.state.as_str(), "open" | "closed" | "all") {
         return Err(ApiError::InvalidRequest(format!(
             "state {:?} must be open, closed, or all",
@@ -108,10 +110,7 @@ pub async fn create_pull(
     Path(name): Path<String>,
     Json(req): Json<CreatePullRequest>,
 ) -> Result<(StatusCode, Json<PullInfo>), ApiError> {
-    let auth = auth::resolve_auth(&headers, &state).await?;
-    if let Some(pool) = &state.pool {
-        control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
-    }
+    auth::require_repo_write_for_tool(&headers, &state, &name, "create_pull").await?;
     if req.title.trim().is_empty() {
         return Err(ApiError::InvalidRequest("title is required".into()));
     }
@@ -133,8 +132,10 @@ pub async fn create_pull(
 
 pub async fn get_pull(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((name, number)): Path<(String, i64)>,
 ) -> Result<Json<PullInfo>, ApiError> {
+    auth::require_repo_read(&headers, &state, &name).await?;
     Ok(Json(state.forgejo.get_pull(&name, number).await?))
 }
 
@@ -147,8 +148,10 @@ pub struct PullCommentListResponse {
 /// and includes flat issue-style discussion comments when present.
 pub async fn list_pull_comments(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((name, number)): Path<(String, i64)>,
 ) -> Result<Json<PullCommentListResponse>, ApiError> {
+    auth::require_repo_read(&headers, &state, &name).await?;
     let mut comments = state
         .forgejo
         .list_pull_review_comments(&name, number)
@@ -170,8 +173,10 @@ pub struct PullReviewListResponse {
 
 pub async fn list_pull_reviews(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((name, number)): Path<(String, i64)>,
 ) -> Result<Json<PullReviewListResponse>, ApiError> {
+    auth::require_repo_read(&headers, &state, &name).await?;
     let reviews = state.forgejo.list_pull_reviews(&name, number).await?;
     Ok(Json(PullReviewListResponse { reviews }))
 }
@@ -182,10 +187,7 @@ pub async fn comment_on_pull(
     Path((name, number)): Path<(String, i64)>,
     Json(req): Json<PullCommentRequest>,
 ) -> Result<(StatusCode, Json<CommentInfo>), ApiError> {
-    let auth = auth::resolve_auth(&headers, &state).await?;
-    if let Some(pool) = &state.pool {
-        control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
-    }
+    auth::require_repo_write_for_tool(&headers, &state, &name, "comment_pull").await?;
     if req.body.trim().is_empty() {
         return Err(ApiError::InvalidRequest("body is required".into()));
     }
@@ -209,10 +211,7 @@ pub async fn review_pull(
     Path((name, number)): Path<(String, i64)>,
     Json(req): Json<PullReviewRequest>,
 ) -> Result<(StatusCode, Json<CommentInfo>), ApiError> {
-    let auth = auth::resolve_auth(&headers, &state).await?;
-    if let Some(pool) = &state.pool {
-        control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
-    }
+    auth::require_repo_write_for_tool(&headers, &state, &name, "review_pull").await?;
     let event = req.event.trim().to_ascii_uppercase();
     if !matches!(event.as_str(), "COMMENT" | "APPROVE" | "REQUEST_CHANGES") {
         return Err(ApiError::InvalidRequest(
@@ -232,10 +231,7 @@ pub async fn merge_pull(
     Path((name, number)): Path<(String, i64)>,
     Json(req): Json<PullMergeRequest>,
 ) -> Result<Json<PullInfo>, ApiError> {
-    let auth = auth::resolve_auth(&headers, &state).await?;
-    if let Some(pool) = &state.pool {
-        control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
-    }
+    auth::require_repo_write_for_tool(&headers, &state, &name, "merge_pull").await?;
     let method = req.method.trim();
     if !matches!(method, "merge" | "rebase" | "rebase-merge" | "squash") {
         return Err(ApiError::InvalidRequest(
@@ -341,8 +337,10 @@ pub struct PullDiffResponse {
 
 pub async fn pull_diff(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((name, number)): Path<(String, i64)>,
 ) -> Result<Json<PullDiffResponse>, ApiError> {
+    auth::require_repo_read(&headers, &state, &name).await?;
     let pull = state.forgejo.get_pull(&name, number).await?;
     // Diff what the PR introduces: merge base → head (three-dot semantics);
     // fall back to the base branch head if Forgejo omitted the merge base.

@@ -2,6 +2,8 @@
 //! from human identities (docs/prd.md §2/§6 — never a flag on a user row),
 //! plus the per-call audit log.
 
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
 use rand::RngExt as _;
 use sha2::{Digest as _, Sha256};
@@ -71,6 +73,23 @@ pub struct AuthedAgent {
     pub allowed_tools: Vec<String>,
 }
 
+/// Opaque copy of the presented agent bearer used only while forwarding an
+/// already-authorized MCP call to the canonical REST edge. Deliberately does
+/// not implement `Debug`, `Display`, or `Serialize` so request diagnostics
+/// cannot print credential plaintext by accident.
+#[derive(Clone)]
+pub struct ForwardedAgentBearer(Arc<str>);
+
+impl ForwardedAgentBearer {
+    pub(crate) fn new(token: String) -> Self {
+        Self(token.into())
+    }
+
+    pub(crate) fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
 impl AuthedAgent {
     pub fn may_use_tool(&self, tool: &str) -> bool {
         scope_allows(&self.allowed_tools, tool)
@@ -83,6 +102,15 @@ impl AuthedAgent {
 
 fn scope_allows(scope: &[String], value: &str) -> bool {
     scope.iter().any(|s| s == "*" || s == value)
+}
+
+/// Result of revalidating one presented agent credential against the exact
+/// repository and MCP tool chosen by the API handler.
+#[derive(Debug)]
+pub enum AuthorizationDecision {
+    Authorized(AuthedAgent),
+    InvalidCredential,
+    ScopeDenied,
 }
 
 #[derive(Debug, serde::Serialize, sqlx::FromRow)]
@@ -231,6 +259,24 @@ impl IdentityStore {
             allowed_repos: r.allowed_repos,
             allowed_tools: r.allowed_tools,
         }))
+    }
+
+    /// Revalidate a presented bearer and both of its independent scope axes.
+    /// An empty repository denotes a platform tool and therefore checks only
+    /// the tool scope, matching the MCP gateway's existing authorization rule.
+    pub async fn authorize(
+        &self,
+        token: &str,
+        repo: &str,
+        tool: &str,
+    ) -> Result<AuthorizationDecision, IdentityError> {
+        let Some(agent) = self.authenticate(token).await? else {
+            return Ok(AuthorizationDecision::InvalidCredential);
+        };
+        if !agent.may_use_tool(tool) || (!repo.is_empty() && !agent.may_touch_repo(repo)) {
+            return Ok(AuthorizationDecision::ScopeDenied);
+        }
+        Ok(AuthorizationDecision::Authorized(agent))
     }
 
     /// Record one MCP tool invocation. Failure to audit is a hard error —

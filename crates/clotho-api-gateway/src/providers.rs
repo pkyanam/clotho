@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
@@ -346,8 +347,30 @@ async fn hub_providers(state: &AppState, org: Option<&str>) -> Vec<FabricProvide
 /// `?all=true` returns every layer.
 pub async fn list_fabric_providers(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Query(query): Query<ListProvidersQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    if crate::agent_rest::authorize_if_agent(&headers, &state, "", "list_providers")
+        .await?
+        .is_some()
+    {
+        if query.layer.is_some() || query.all || query.org.is_some() {
+            return Err(ApiError::Forbidden(
+                "agent provider discovery exposes global compute capabilities only".into(),
+            ));
+        }
+        let mut list = actions::list_providers_for(&state).await;
+        for provider in &mut list.providers {
+            provider.configured = false;
+            provider.configured_reason =
+                "connection state is not exposed to agent principals".into();
+            provider.notes = "provider capability metadata only".into();
+        }
+        return Ok(Json(serde_json::to_value(list).unwrap()));
+    }
+    // Invalid human credentials must not be ignored merely because provider
+    // capability discovery is otherwise readable in the local alpha profile.
+    crate::auth::resolve_optional_human_auth(&headers, &state).await?;
     if let Some(raw) = query.layer.as_deref() {
         let layer = ProviderLayer::parse(raw).ok_or_else(|| {
             ApiError::InvalidRequest(format!(

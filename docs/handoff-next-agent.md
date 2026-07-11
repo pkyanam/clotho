@@ -35,6 +35,12 @@
 - Manual Action starts have a persisted REST-led idempotency contract across
   OpenAPI, SDK, CLI, MCP, and web; other retryable mutations remain outside
   that guarantee until explicitly declared.
+- Repository reads now authorize against Clotho metadata before downstream
+  calls; scoped REST-backed MCP tools forward and revalidate their original
+  agent bearer, including under required auth. Org/user directories and human
+  provider metadata remain the next authorization slice.
+- Forgejo push admission has durable hashed replay reservations in migration 1018. Exact retries collapse, changed payloads conflict, and live Docker HTTP
+  evidence is recorded; a transactional Action outbox remains broader work.
 - The public-alpha contract is not frozen. The docs intentionally distinguish
   working behavior from release gates.
 - A system-wide light/dark contrast issue is documented as a release blocker;
@@ -58,8 +64,9 @@ Recommended order:
    semantics.
 5. Repair semantic contrast tokens and critical web journeys in both themes;
    add automated accessibility and visual evidence.
-6. Complete authz/threat-model tests, data bounds, migrations, backup/restore,
-   packaging, release metadata, and public project files.
+6. Finish directory/provider authz and the route × identity matrix; then close
+   data bounds, migration/backup/restore, supply chain, clean-clone, machine
+   capability, packaging, release metadata, and browser-journey evidence.
 
 The product owner approved the revised Stages 23–29 and the Signals direction on
 July 11, 2026. That approval settles roadmap priority; it does **not** waive the

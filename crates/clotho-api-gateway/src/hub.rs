@@ -612,12 +612,11 @@ pub async fn list_hub_import_jobs(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<HubImportJobList>, ApiError> {
-    let auth = auth::resolve_auth(&headers, &state).await?;
+    let repo = auth::require_repo_read(&headers, &state, &name).await?;
     let pool = state
         .pool
         .as_ref()
         .ok_or_else(|| ApiError::Internal("Hub imports require the control plane".into()))?;
-    let repo = control::require_repo_permission(pool, &name, &auth.user_id, "read").await?;
     let jobs = sqlx::query_as::<_, HubImportJob>(
         r#"select id, repo_id, provider, source_repo_id, source_revision, status,
                   files_total, files_imported, logical_bytes, bytes_imported,
@@ -637,12 +636,11 @@ pub async fn get_hub_import_job(
     headers: HeaderMap,
     Path((name, id)): Path<(String, String)>,
 ) -> Result<Json<HubImportJob>, ApiError> {
-    let auth = auth::resolve_auth(&headers, &state).await?;
+    let repo = auth::require_repo_read(&headers, &state, &name).await?;
     let pool = state
         .pool
         .as_ref()
         .ok_or_else(|| ApiError::Internal("Hub imports require the control plane".into()))?;
-    let repo = control::require_repo_permission(pool, &name, &auth.user_id, "read").await?;
     let job = load_job(pool, &id).await?;
     if job.repo_id != repo.repo.id {
         return Err(ApiError::NotFound(format!(

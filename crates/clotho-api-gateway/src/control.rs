@@ -501,6 +501,23 @@ pub async fn get_repo_by_name(pool: &PgPool, name: &str) -> Result<Repo, ApiErro
         .ok_or_else(|| ApiError::NotFound(format!("repo {name:?} not found")))
 }
 
+/// Name-routed repositories must be globally unambiguous until Stage 23 adds
+/// tenant-qualified public paths. Reject an existing name before any VCS or
+/// collaboration-provider side effect.
+pub async fn require_global_repo_name_available(pool: &PgPool, name: &str) -> Result<(), ApiError> {
+    let count: i64 = sqlx::query_scalar("select count(*)::bigint from repos where name = $1")
+        .bind(name)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| ApiError::Internal(format!("check repository name: {e}")))?;
+    if count > 0 {
+        return Err(ApiError::Conflict(format!(
+            "repository name {name:?} is already in use"
+        )));
+    }
+    Ok(())
+}
+
 pub async fn get_org_with_members(
     pool: &PgPool,
     org: &str,
@@ -531,7 +548,7 @@ pub async fn get_org_with_members(
 }
 
 pub async fn get_repo_with_org(pool: &PgPool, name: &str) -> Result<Option<RepoWithOrg>, ApiError> {
-    sqlx::query_as::<_, RepoWithOrg>(
+    let rows = sqlx::query_as::<_, RepoWithOrg>(
         r#"
         select
             r.id, r.org_id, r.name, r.description, r.visibility, r.kind,
@@ -544,13 +561,118 @@ pub async fn get_repo_with_org(pool: &PgPool, name: &str) -> Result<Option<RepoW
         join orgs o on o.id = r.org_id
         where r.name = $1
         order by r.updated_at desc
-        limit 1
+        limit 2
         "#,
     )
     .bind(name)
-    .fetch_optional(pool)
+    .fetch_all(pool)
     .await
-    .map_err(|e| ApiError::Internal(format!("get repo: {e}")))
+    .map_err(|e| ApiError::Internal(format!("get repo: {e}")))?;
+    if rows.len() > 1 {
+        tracing::warn!(repo = %name, "ambiguous name-routed repository lookup denied");
+        return Ok(None);
+    }
+    Ok(rows.into_iter().next())
+}
+
+const ACCESSIBLE_REPOS_SQL: &str = r#"
+        select
+            r.id, r.org_id, r.name, r.description, r.visibility, r.kind,
+            r.large_file_threshold_bytes,
+            r.network_mode, r.network_tags,
+            r.default_branch, r.forgejo_owner, r.forgejo_repo_id,
+            r.forgejo_full_name, r.created_by, r.created_at, r.updated_at,
+            o.name as org_name, o.display_name as org_display_name
+        from repos r
+        join orgs o on o.id = r.org_id
+        where true
+          and not exists (
+            select 1 from repos duplicate
+            where duplicate.name = r.name and duplicate.id <> r.id
+          )
+          and (
+            r.visibility = 'public'
+            or (
+              $1::text is not null and (
+                exists (
+                  select 1 from org_memberships membership
+                  where membership.org_id = r.org_id
+                    and membership.user_id = $1
+                    and membership.role = 'admin'
+                )
+                or exists (
+                  select 1 from repo_permissions permission
+                  where permission.repo_id = r.id
+                    and permission.user_id = $1
+                    and permission.permission in ('read', 'write', 'admin')
+                )
+              )
+            )
+          )
+        order by r.updated_at desc
+        "#;
+
+const ACCESSIBLE_ORG_REPOS_SQL: &str = r#"
+        select
+            r.id, r.org_id, r.name, r.description, r.visibility, r.kind,
+            r.large_file_threshold_bytes,
+            r.network_mode, r.network_tags,
+            r.default_branch, r.forgejo_owner, r.forgejo_repo_id,
+            r.forgejo_full_name, r.created_by, r.created_at, r.updated_at,
+            o.name as org_name, o.display_name as org_display_name
+        from repos r
+        join orgs o on o.id = r.org_id
+        where (o.name = $2 or o.id = $2)
+          and not exists (
+            select 1 from repos duplicate
+            where duplicate.name = r.name and duplicate.id <> r.id
+          )
+          and (
+            r.visibility = 'public'
+            or (
+              $1::text is not null and (
+                exists (
+                  select 1 from org_memberships membership
+                  where membership.org_id = r.org_id
+                    and membership.user_id = $1
+                    and membership.role = 'admin'
+                )
+                or exists (
+                  select 1 from repo_permissions permission
+                  where permission.repo_id = r.id
+                    and permission.user_id = $1
+                    and permission.permission in ('read', 'write', 'admin')
+                )
+              )
+            )
+          )
+        order by r.updated_at desc
+        "#;
+
+/// Filter repository visibility and permission in Postgres before pagination
+/// or provider overlay. Ambiguous global names are excluded fail-closed.
+pub async fn list_accessible_repos_with_orgs(
+    pool: &PgPool,
+    user_id: Option<&str>,
+) -> Result<Vec<RepoWithOrg>, ApiError> {
+    sqlx::query_as::<_, RepoWithOrg>(ACCESSIBLE_REPOS_SQL)
+        .bind(user_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| ApiError::Internal(format!("list accessible repos: {e}")))
+}
+
+pub async fn list_accessible_repos_for_org(
+    pool: &PgPool,
+    org: &str,
+    user_id: Option<&str>,
+) -> Result<Vec<RepoWithOrg>, ApiError> {
+    sqlx::query_as::<_, RepoWithOrg>(ACCESSIBLE_ORG_REPOS_SQL)
+        .bind(user_id)
+        .bind(org)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| ApiError::Internal(format!("list accessible org repos: {e}")))
 }
 
 pub async fn list_repos_with_orgs(pool: &PgPool) -> Result<Vec<RepoWithOrg>, ApiError> {
@@ -759,33 +881,161 @@ async fn list_activity(
     pool: &PgPool,
     limit: i64,
     cursor: Option<&ActivityCursor>,
+    user_id: Option<&str>,
 ) -> Result<Vec<ActivityEvent>, ApiError> {
     let query = if let Some(cursor) = cursor {
         sqlx::query_as::<_, ActivityEvent>(
             r#"
-            select * from activity_events
-            where created_at < $2 or (created_at = $2 and id < $3)
-            order by created_at desc, id desc
+            select e.* from activity_events e
+            where (e.created_at < $2 or (e.created_at = $2 and e.id < $3))
+              and (
+                (e.repo_id is null and e.org_id is null)
+                or (
+                  e.repo_id is null and $4::text is not null and exists (
+                    select 1 from org_memberships m
+                    where m.org_id = e.org_id and m.user_id = $4
+                  )
+                )
+                or exists (
+                  select 1 from repos r
+                  where r.id = e.repo_id
+                    and not exists (
+                      select 1 from repos duplicate
+                      where duplicate.name = r.name and duplicate.id <> r.id
+                    )
+                    and (
+                      r.visibility = 'public'
+                      or ($4::text is not null and (
+                        exists (
+                          select 1 from org_memberships m
+                          where m.org_id = r.org_id and m.user_id = $4 and m.role = 'admin'
+                        )
+                        or exists (
+                          select 1 from repo_permissions p
+                          where p.repo_id = r.id and p.user_id = $4
+                            and p.permission in ('read', 'write', 'admin')
+                        )
+                      ))
+                    )
+                )
+              )
+            order by e.created_at desc, e.id desc
             limit $1
             "#,
         )
         .bind(limit)
         .bind(cursor.created_at)
         .bind(cursor.id)
+        .bind(user_id)
     } else {
         sqlx::query_as::<_, ActivityEvent>(
             r#"
-            select * from activity_events
-            order by created_at desc, id desc
+            select e.* from activity_events e
+            where (
+              (e.repo_id is null and e.org_id is null)
+              or (
+                e.repo_id is null and $2::text is not null and exists (
+                  select 1 from org_memberships m
+                  where m.org_id = e.org_id and m.user_id = $2
+                )
+              )
+              or exists (
+                select 1 from repos r
+                where r.id = e.repo_id
+                  and not exists (
+                    select 1 from repos duplicate
+                    where duplicate.name = r.name and duplicate.id <> r.id
+                  )
+                  and (
+                    r.visibility = 'public'
+                    or ($2::text is not null and (
+                      exists (
+                        select 1 from org_memberships m
+                        where m.org_id = r.org_id and m.user_id = $2 and m.role = 'admin'
+                      )
+                      or exists (
+                        select 1 from repo_permissions p
+                        where p.repo_id = r.id and p.user_id = $2
+                          and p.permission in ('read', 'write', 'admin')
+                      )
+                    ))
+                  )
+              )
+            )
+            order by e.created_at desc, e.id desc
             limit $1
             "#,
         )
         .bind(limit)
+        .bind(user_id)
     };
     query
         .fetch_all(pool)
         .await
         .map_err(|e| ApiError::Internal(format!("list activity: {e}")))
+}
+
+/// Agent activity is restricted to repository-scoped events authorized by the
+/// token's repository scope. Filtering happens in SQL before the limit/cursor;
+/// org-only and global human events are intentionally absent because current
+/// agent tokens have no organization scope.
+async fn list_activity_for_agent(
+    pool: &PgPool,
+    limit: i64,
+    cursor: Option<&ActivityCursor>,
+    allowed_repos: &[String],
+) -> Result<Vec<ActivityEvent>, ApiError> {
+    let wildcard = allowed_repos.iter().any(|repo| repo == "*");
+    let query = if let Some(cursor) = cursor {
+        sqlx::query_as::<_, ActivityEvent>(
+            r#"
+            select e.* from activity_events e
+            where (e.created_at < $2 or (e.created_at = $2 and e.id < $3))
+              and e.repo_id is not null
+              and exists (
+                select 1 from repos r
+                where r.id = e.repo_id
+                  and not exists (
+                    select 1 from repos duplicate
+                    where duplicate.name = r.name and duplicate.id <> r.id
+                  )
+                  and ($4 or r.name = any($5))
+              )
+            order by e.created_at desc, e.id desc
+            limit $1
+            "#,
+        )
+        .bind(limit)
+        .bind(cursor.created_at)
+        .bind(cursor.id)
+        .bind(wildcard)
+        .bind(allowed_repos)
+    } else {
+        sqlx::query_as::<_, ActivityEvent>(
+            r#"
+            select e.* from activity_events e
+            where e.repo_id is not null
+              and exists (
+                select 1 from repos r
+                where r.id = e.repo_id
+                  and not exists (
+                    select 1 from repos duplicate
+                    where duplicate.name = r.name and duplicate.id <> r.id
+                  )
+                  and ($2 or r.name = any($3))
+              )
+            order by e.created_at desc, e.id desc
+            limit $1
+            "#,
+        )
+        .bind(limit)
+        .bind(wildcard)
+        .bind(allowed_repos)
+    };
+    query
+        .fetch_all(pool)
+        .await
+        .map_err(|error| ApiError::Internal(format!("list agent activity: {error}")))
 }
 
 fn encode_activity_cursor(event: &ActivityEvent) -> Result<String, ApiError> {
@@ -830,6 +1080,39 @@ fn repo_perm_rank(perm: &str) -> i32 {
     }
 }
 
+pub async fn has_repo_permission(
+    pool: &PgPool,
+    repo: &RepoWithOrg,
+    user_id: &str,
+    min_perm: &str,
+) -> Result<bool, ApiError> {
+    let min = repo_perm_rank(min_perm);
+    let org_role =
+        sqlx::query("select role from org_memberships where org_id = $1 and user_id = $2")
+            .bind(&repo.repo.org_id)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| ApiError::Internal(format!("org role lookup: {e}")))?;
+    if let Some(row) = org_role {
+        let role: String = row.get("role");
+        if org_role_rank(&role) >= org_role_rank("admin") {
+            return Ok(true);
+        }
+    }
+    let permission =
+        sqlx::query("select permission from repo_permissions where repo_id = $1 and user_id = $2")
+            .bind(&repo.repo.id)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| ApiError::Internal(format!("repo permission lookup: {e}")))?;
+    Ok(permission.is_some_and(|row| {
+        let permission: String = row.get("permission");
+        repo_perm_rank(&permission) >= min
+    }))
+}
+
 /// Require at least `min_role` (`admin` > `member`) in the org.
 pub async fn require_org_role(
     pool: &PgPool,
@@ -866,38 +1149,9 @@ pub async fn require_repo_permission(
     let clotho = get_repo_with_org(pool, repo_name)
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("repo {repo_name:?} not found")))?;
-    let min = repo_perm_rank(min_perm);
-
-    let org_role =
-        sqlx::query("select role from org_memberships where org_id = $1 and user_id = $2")
-            .bind(&clotho.repo.org_id)
-            .bind(user_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| ApiError::Internal(format!("org role lookup: {e}")))?;
-    if let Some(row) = org_role {
-        let role: String = row.get("role");
-        if org_role_rank(&role) >= org_role_rank("admin") {
-            return Ok(clotho);
-        }
-    }
-
-    let perm_row =
-        sqlx::query("select permission from repo_permissions where repo_id = $1 and user_id = $2")
-            .bind(&clotho.repo.id)
-            .bind(user_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| ApiError::Internal(format!("repo permission lookup: {e}")))?;
-    let Some(row) = perm_row else {
+    if !has_repo_permission(pool, &clotho, user_id, min_perm).await? {
         return Err(ApiError::Forbidden(format!(
             "requires repo {min_perm} permission"
-        )));
-    };
-    let perm: String = row.get("permission");
-    if repo_perm_rank(&perm) < min {
-        return Err(ApiError::Forbidden(format!(
-            "requires repo {min_perm} permission (have {perm})"
         )));
     }
     Ok(clotho)
@@ -1097,6 +1351,7 @@ pub fn build_repo_info(
     info.large_file_threshold_bytes = clotho.repo.large_file_threshold_bytes;
     info.network_mode = clotho.repo.network_mode.clone();
     info.network_tags = clotho.repo.network_tags.clone();
+    info.updated_at = clotho.repo.updated_at.to_rfc3339();
     info.provider = provider.into();
     info.configured = configured;
     info
@@ -1226,15 +1481,23 @@ pub(crate) async fn get_org_handler(
 
 pub(crate) async fn list_org_repos_handler(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(org): Path<String>,
     Query(query): Query<crate::repos::RepoListQuery>,
 ) -> Result<Json<crate::repos::RepoListResponse>, ApiError> {
+    let principal = crate::auth::resolve_optional_human_auth(&headers, &state).await?;
     let provider = state.actions.default_provider();
     let configured = state.actions.provider_configured(&provider);
     let base_url = state.public_git_url.clone();
 
-    let mut repos = if let Some(pool) = &state.pool {
-        let clotho = list_repos_for_org(pool, &org).await?;
+    let repos = if let Some(pool) = &state.pool {
+        let clotho = list_accessible_repos_for_org(
+            pool,
+            &org,
+            principal.as_ref().map(|auth| auth.user_id.as_str()),
+        )
+        .await?;
+        // Authorization/filtering is complete before the provider overlay.
         let forgejo_by_name: HashMap<String, RepoInfo> = state
             .forgejo
             .list_repos()
@@ -1256,33 +1519,25 @@ pub(crate) async fn list_org_repos_handler(
             })
             .collect()
     } else {
-        vec![]
+        return Err(ApiError::Internal(
+            "repository lists require the control plane".into(),
+        ));
     };
-
-    if repos.is_empty() {
-        // Fallback to Forgejo if the control-plane table is empty or the DB is
-        // not configured, so existing stack behavior still works.
-        repos = state
-            .forgejo
-            .list_repos()
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|mut r| {
-                r.provider = provider.clone();
-                r.configured = configured;
-                r
-            })
-            .collect();
-    }
 
     Ok(Json(crate::repos::paginate_repos(repos, query)?))
 }
 
 pub(crate) async fn list_activity_handler(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Query(query): Query<ActivityQuery>,
 ) -> Result<Json<ActivityListResponse>, ApiError> {
+    let agent = crate::agent_rest::authorize_if_agent(&headers, &state, "", "get_activity").await?;
+    let principal = if agent.is_none() {
+        crate::auth::resolve_optional_human_auth(&headers, &state).await?
+    } else {
+        None
+    };
     let limit = query.limit.unwrap_or(DEFAULT_ACTIVITY_PAGE_SIZE);
     if !(1..=MAX_ACTIVITY_PAGE_SIZE).contains(&limit) {
         return Err(ApiError::InvalidRequest(format!(
@@ -1295,7 +1550,23 @@ pub(crate) async fn list_activity_handler(
         .map(decode_activity_cursor)
         .transpose()?;
     let mut events = if let Some(pool) = &state.pool {
-        list_activity(pool, (limit + 1) as i64, cursor.as_ref()).await?
+        if let Some(agent) = &agent {
+            list_activity_for_agent(
+                pool,
+                (limit + 1) as i64,
+                cursor.as_ref(),
+                &agent.allowed_repos,
+            )
+            .await?
+        } else {
+            list_activity(
+                pool,
+                (limit + 1) as i64,
+                cursor.as_ref(),
+                principal.as_ref().map(|auth| auth.user_id.as_str()),
+            )
+            .await?
+        }
     } else {
         vec![]
     };
@@ -1465,7 +1736,9 @@ mod tests {
         assert_eq!(one.repo.kind, "model");
         assert_eq!(one.repo.large_file_threshold_bytes, 1024 * 1024);
 
-        let events = list_activity(&pool, 10, None).await.unwrap();
+        let events = list_activity(&pool, 10, None, Some(&b.user_id))
+            .await
+            .unwrap();
         assert!(events.iter().any(|e| e.event_type == "repo.created"));
 
         cleanup(&pool, &resolved.0, &req.name, &b.user_id).await;

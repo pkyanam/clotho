@@ -316,6 +316,11 @@ services:
       RUST_LOG: info
       CLOTHO_GATEWAY_HTTP_ADDR: 0.0.0.0:8080
       CLOTHO_GATEWAY_DATABASE_URL: postgres://clotho:clotho-dev@postgres:5432/clotho
+      # Local remains zero-config/open by default. Deployment automation can
+      # require an existing human token without patching this Compose file.
+      CLOTHO_AUTH_REQUIRED: ${CLOTHO_AUTH_REQUIRED:-false}
+      CLOTHO_AUTH_PROVIDER: ${CLOTHO_AUTH_PROVIDER:-bootstrap}
+      CLOTHO_BOOTSTRAP_TOKEN: ${CLOTHO_BOOTSTRAP_TOKEN:-}
       # Optional externally managed override. When empty, Clotho generates a
       # 0600 key at CLOTHO_SECRETS_KEY_FILE in the persistent secrets-data
       # volume; contributors do not need to edit .env.

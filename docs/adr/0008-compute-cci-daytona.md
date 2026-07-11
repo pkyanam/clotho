@@ -18,7 +18,7 @@ interface, not be hardcoded.
 Three sub-decisions needed a call:
 
 1. **Provider** — PRD §8 open decision #3: Daytona (persistent workspaces,
-   fast cold start) vs E2B (microVM isolation). *Human decision:* Daytona,
+   fast cold start) vs E2B (microVM isolation). _Human decision:_ Daytona,
    kept modular behind the CCI.
 2. **How the CCI talks to the provider.** ComputeSDK and Daytona's own SDKs
    are TypeScript/Python/Ruby/Go — there is **no Rust SDK**. Options: call a
@@ -29,7 +29,7 @@ Three sub-decisions needed a call:
    Forgejo/gateway by service name**. So the naive "sandbox fetches over
    git-http from the stack" is not reachable without exposing the local stack
    publicly (a tunnel token — not reproducible from a clean `docker compose
-   up`, which the exit condition requires).
+up`, which the exit condition requires).
 
 ## Decision
 
@@ -67,7 +67,7 @@ writes (never a `jj`/`git` shell-out; a filesystem tar via the `tar` crate).
 The api-gateway hands that archive to `clotho-compute` as a job file; the CI
 script inside the sandbox untars it, `git clone`s the bare repo, checks out
 the pushed commit, and runs the check. This is genuinely "fetch the repo's
-git objects and build/test them" — the objects are just *delivered* as an
+git objects and build/test them" — the objects are just _delivered_ as an
 archive instead of pulled over git-http, because the cloud sandbox has no
 route back to the local stack. It keeps the exit condition's "reproducible
 from a clean `docker compose up`" honest (only a `DAYTONA_API_KEY` in `.env`
@@ -93,14 +93,19 @@ green without a paid credential (matching the storage/collab/agent tests).
 - The api-gateway registers a per-repo push webhook at repo-creation time
   (Forgejo → `http://clotho-api-gateway:8080/api/v1/webhooks/forgejo`),
   guarded by a shared `CLOTHO_WEBHOOK_SECRET` (HMAC-SHA256 over the body,
-  Forgejo's `X-Gitea-Signature`). CI runs asynchronously: the webhook returns
-  `202` immediately, then a background task posts `pending` → runs the job →
-  posts `success`/`failure`.
+  Forgejo's `X-Gitea-Signature`). The receiver fails closed when that secret
+  or Postgres is absent, requires a bounded Forgejo/Gitea delivery id, resolves
+  one unambiguous Clotho repository, and atomically persists only SHA-256
+  hashes of the id and exact payload before scheduling. The first delivery
+  returns `202`; an exact replay returns a harmless `200` without a second CI
+  task; changed bytes under one id return `409`. Reservations expire after 24
+  hours and cleanup is batch-bounded. The background task posts `pending` →
+  runs the job → posts `success`/`failure`.
 - `ExportRepoArchive` returns the whole bare-repo object DB (all refs), not a
   single-commit bundle — fine at prototype scale; a bundle of just the pushed
   revision is the obvious optimization before large repos.
 - Because the sandbox runs in Daytona's cloud, a self-hosted Daytona runner
-  ("Bring Your Own Compute") on the dev network — which *would* let the
+  ("Bring Your Own Compute") on the dev network — which _would_ let the
   sandbox fetch over git-http — is a documented later option, not wired here.
 - Live end-to-end verification requires a real `DAYTONA_API_KEY`; the demo
   script (`scripts/demo`) drives the whole path and self-skips the compute

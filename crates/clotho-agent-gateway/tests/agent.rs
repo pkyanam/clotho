@@ -9,6 +9,9 @@
 //! when unset so plain `cargo test` stays green. Optional overrides:
 //! `CLOTHO_AGENT_TEST_ADMIN_TOKEN` (default the dev stack's admin token) and
 //! `CLOTHO_AGENT_TEST_VCS_GRPC_URL` (default `http://localhost:50051`).
+//! `CLOTHO_AGENT_TEST_API_TOKEN` supplies the human setup/cleanup credential
+//! when the API gateway is running with required auth; agent-backed REST
+//! equivalence calls always use the scoped agent token itself.
 //! CI and `just test-agent` set `CLOTHO_TEST_FAIL_ON_SKIP=1`. The test always
 //! revokes minted credentials and removes its REST repository; failed repos
 //! can be retained explicitly with `CLOTHO_TEST_KEEP_FIXTURES_ON_FAILURE=1`.
@@ -28,6 +31,7 @@ struct TestEnv {
     admin_token: String,
     vcs_grpc_url: String,
     api_url: String,
+    api_token: Option<String>,
 }
 
 fn test_env() -> Option<TestEnv> {
@@ -51,7 +55,18 @@ fn test_env() -> Option<TestEnv> {
         admin_token: env_or("CLOTHO_AGENT_TEST_ADMIN_TOKEN", "clotho-agent-admin-dev"),
         vcs_grpc_url: env_or("CLOTHO_AGENT_TEST_VCS_GRPC_URL", "http://localhost:50051"),
         api_url: env_or("CLOTHO_AGENT_TEST_API_URL", "http://localhost:8080"),
+        api_token: std::env::var("CLOTHO_AGENT_TEST_API_TOKEN")
+            .ok()
+            .filter(|token| !token.trim().is_empty()),
     })
+}
+
+fn api_request(env: &TestEnv, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+    let request = reqwest::Client::new().request(method, format!("{}{path}", env.api_url));
+    match &env.api_token {
+        Some(token) => request.bearer_auth(token),
+        None => request,
+    }
 }
 
 fn env_truthy(name: &str) -> bool {
@@ -136,11 +151,14 @@ async fn cleanup_repo_fixture(env: &TestEnv, repo: &str, failed: bool) -> Result
         eprintln!("preserving failed agent-test repository {repo}");
         return Ok(());
     }
-    let response = reqwest::Client::new()
-        .delete(format!("{}/api/v1/repos/{repo}", env.api_url))
-        .send()
-        .await
-        .map_err(|error| format!("delete agent-test repository {repo}: {error}"))?;
+    let response = api_request(
+        env,
+        reqwest::Method::DELETE,
+        &format!("/api/v1/repos/{repo}"),
+    )
+    .send()
+    .await
+    .map_err(|error| format!("delete agent-test repository {repo}: {error}"))?;
     if response.status() == reqwest::StatusCode::NO_CONTENT
         || response.status() == reqwest::StatusCode::NOT_FOUND
     {
@@ -227,8 +245,7 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
     let outsider_name = format!("outsider-{nanos}");
 
     let outcome = std::panic::AssertUnwindSafe(async {
-        let created_response = reqwest::Client::new()
-            .post(format!("{}/api/v1/repos", env.api_url))
+        let created_response = api_request(&env, reqwest::Method::POST, "/api/v1/repos")
             .json(&json!({ "name": repo }))
             .send()
             .await
@@ -344,7 +361,10 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         // Bounded platform listings preserve the canonical REST page envelope.
         let (err, mcp_repos) = call_tool(&client, "list_repos", json!({ "limit": 1 })).await;
         assert!(!err, "list_repos failed: {mcp_repos}");
-        let rest_repos: Value = reqwest::get(format!("{}/api/v1/repos?limit=1", env.api_url))
+        let rest_repos: Value = reqwest::Client::new()
+            .get(format!("{}/api/v1/repos?limit=1", env.api_url))
+            .bearer_auth(&token)
+            .send()
             .await
             .unwrap()
             .json()
@@ -355,7 +375,10 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
 
         let (err, mcp_activity) = call_tool(&client, "get_activity", json!({ "limit": 1 })).await;
         assert!(!err, "get_activity failed: {mcp_activity}");
-        let rest_activity: Value = reqwest::get(format!("{}/api/v1/activity?limit=1", env.api_url))
+        let rest_activity: Value = reqwest::Client::new()
+            .get(format!("{}/api/v1/activity?limit=1", env.api_url))
+            .bearer_auth(&token)
+            .send()
             .await
             .unwrap()
             .json()
@@ -374,6 +397,7 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         });
         let (err, first_action) = call_tool(&client, "start_action_run", action_args.clone()).await;
         assert!(!err, "start_action_run failed: {first_action}");
+        assert_eq!(first_action["actor"], format!("agent:{agent_name}"));
         let (err, replayed_action) = call_tool(&client, "start_action_run", action_args).await;
         assert!(!err, "idempotent Action replay failed: {replayed_action}");
         assert_eq!(first_action["id"], replayed_action["id"]);
@@ -382,7 +406,7 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
             "start_action_run",
             json!({
                 "repo": repo,
-                "actor": "different-actor",
+                "branch": "different-branch",
                 "idempotency_key": action_key,
             }),
         )
@@ -409,15 +433,18 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         )
         .await;
         assert!(err, "missing file unexpectedly succeeded: {missing}");
-        let rest_missing: Value = reqwest::get(format!(
-            "{}/api/v1/repos/{repo}/file?path=does-not-exist.txt",
-            env.api_url
-        ))
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+        let rest_missing: Value = reqwest::Client::new()
+            .get(format!(
+                "{}/api/v1/repos/{repo}/file?path=does-not-exist.txt",
+                env.api_url
+            ))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
         assert_eq!(missing["data"]["code"], rest_missing["code"]);
         assert_eq!(missing["data"]["code"], "not_found");
         assert!(
@@ -524,6 +551,20 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         assert!(err, "out-of-scope call must be an error result");
         assert_eq!(denied, Value::Null); // denial message is plain text, not JSON
         outsider.cancel().await.unwrap();
+        let outsider_rest = reqwest::Client::new()
+            .get(format!(
+                "{}/api/v1/repos/{repo}/file?path=src/lib.rs",
+                env.api_url
+            ))
+            .bearer_auth(&outsider_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            outsider_rest.status(),
+            reqwest::StatusCode::NOT_FOUND,
+            "direct REST must conceal an out-of-scope repository"
+        );
 
         // 10. Garbage credentials never reach the tools.
         let transport = StreamableHttpClientTransport::from_config(
@@ -639,6 +680,20 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         .serve(transport)
         .await;
         assert!(revoked.is_err(), "revoked token must fail to initialize");
+        let revoked_rest = reqwest::Client::new()
+            .get(format!(
+                "{}/api/v1/repos/{repo}/file?path=src/lib.rs",
+                env.api_url
+            ))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            revoked_rest.status(),
+            reqwest::StatusCode::UNAUTHORIZED,
+            "revoked token must fail direct REST revalidation"
+        );
     })
     .catch_unwind()
     .await;

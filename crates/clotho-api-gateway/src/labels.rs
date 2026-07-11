@@ -28,8 +28,10 @@ pub struct CreateLabelRequest {
 
 pub async fn list_labels(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<LabelListResponse>, ApiError> {
+    auth::require_repo_read(&headers, &state, &name).await?;
     let labels = state.forgejo.list_labels(&name).await?;
     Ok(Json(LabelListResponse { labels }))
 }

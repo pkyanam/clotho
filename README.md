@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./logo-placeholder.svg" alt="Clotho" width="112" height="112" />
+  <img src="./logo.svg" alt="Clotho" width="112" height="112" />
 
   <h1>Clotho</h1>
 
@@ -16,6 +16,7 @@
     · <a href="./docs/frontier-roadmap.md">What comes next</a>
     · <a href="./docs/api.md">API</a>
     · <a href="./docs/mcp.md">MCP</a>
+    · <a href="./CONTRIBUTING.md">Contributing</a>
   </p>
 </div>
 
@@ -130,19 +131,24 @@ falling back to a mutable hosted revision.
  Internal implementation providers: Forgejo · Postgres · MinIO
 ```
 
-| Component | Responsibility |
-|---|---|
-| `apps/web` | Clotho's human control plane |
-| `clotho-api-gateway` | Canonical REST contract, auth, policy, and composition |
-| `clotho-agent-gateway` | MCP transport, scoped agent identity, and audit |
-| `clotho-vcs` | jj-lib operation graph and Git-compatible objects |
-| `clotho-diff` | Tree-sitter structured diffs |
-| `clotho-storage` | Arachne chunk storage and reconstruction |
-| `clotho-merge-queue` | Serialized conflict-aware integration |
-| `clotho-compute` | Capability-based compute interface (CCI) |
-| Forgejo | Internal Git/collaboration compatibility provider |
+| Component              | Responsibility                                         |
+| ---------------------- | ------------------------------------------------------ |
+| `apps/web`             | Clotho's human control plane                           |
+| `clotho-api-gateway`   | Canonical REST contract, auth, policy, and composition |
+| `clotho-agent-gateway` | MCP transport, scoped agent identity, and audit        |
+| `clotho-vcs`           | jj-lib operation graph and Git-compatible objects      |
+| `clotho-diff`          | Tree-sitter structured diffs                           |
+| `clotho-storage`       | Arachne chunk storage and reconstruction               |
+| `clotho-merge-queue`   | Serialized conflict-aware integration                  |
+| `clotho-compute`       | Capability-based compute interface (CCI)               |
+| Forgejo                | Internal Git/collaboration compatibility provider      |
 
 Architectural decisions are recorded in [`docs/adr`](./docs/adr).
+
+Community and release policies: [contributing](./CONTRIBUTING.md),
+[security](./SECURITY.md), [support](./SUPPORT.md),
+[governance](./GOVERNANCE.md), [code of conduct](./CODE_OF_CONDUCT.md), and
+[changelog](./CHANGELOG.md).
 
 ## Quick start
 
@@ -155,7 +161,7 @@ Architectural decisions are recorded in [`docs/adr`](./docs/adr).
 ### Run Clotho locally
 
 ```sh
-git clone https://github.com/pkyanam/clotho.git
+git clone --recurse-submodules https://github.com/pkyanam/clotho.git
 cd clotho
 just bootstrap
 just setup
@@ -168,13 +174,13 @@ The standard local stack does **not** require a `.env` file. Provider
 credentials can be connected inside Clotho; environment variables remain an
 automation and deployment escape hatch.
 
-| Surface | Local address |
-|---|---|
-| Web | `http://localhost:3100` |
-| REST / OpenAPI | `http://localhost:8080` · `/openapi.yaml` |
-| MCP | `http://localhost:8090/mcp` |
-| Forgejo debug provider | `http://localhost:13000` |
-| MinIO | `http://localhost:9000` |
+| Surface                | Local address                             |
+| ---------------------- | ----------------------------------------- |
+| Web                    | `http://localhost:3100`                   |
+| REST / OpenAPI         | `http://localhost:8080` · `/openapi.yaml` |
+| MCP                    | `http://localhost:8090/mcp`               |
+| Forgejo debug provider | `http://localhost:13000`                  |
+| MinIO                  | `http://localhost:9000`                   |
 
 ### Verify the workspace
 
@@ -227,18 +233,18 @@ Developer guides:
 
 ## Repository layout
 
-| Path | Purpose |
-|---|---|
-| [`apps/web`](./apps/web) | Main product console |
-| [`apps/site`](./apps/site) | Public marketing site |
-| [`crates`](./crates) | Rust services and CLI |
-| [`packages/sdk-js`](./packages/sdk-js) | Typed JavaScript client |
-| [`packages/ui`](./packages/ui) | Shared design tokens and components |
-| [`services`](./services) | Optional provider bridges |
-| [`proto`](./proto) | Internal protobuf contracts |
-| [`collab`](./collab) | Isolated Forgejo boundary |
-| [`infra`](./infra) | Deployment assets |
-| [`docs`](./docs) | Vision, PRD, plans, and ADRs |
+| Path                                   | Purpose                             |
+| -------------------------------------- | ----------------------------------- |
+| [`apps/web`](./apps/web)               | Main product console                |
+| [`apps/site`](./apps/site)             | Public marketing site               |
+| [`crates`](./crates)                   | Rust services and CLI               |
+| [`packages/sdk-js`](./packages/sdk-js) | Typed JavaScript client             |
+| [`packages/ui`](./packages/ui)         | Shared design tokens and components |
+| [`services`](./services)               | Optional provider bridges           |
+| [`proto`](./proto)                     | Internal protobuf contracts         |
+| [`collab`](./collab)                   | Isolated Forgejo boundary           |
+| [`infra`](./infra)                     | Deployment assets                   |
+| [`docs`](./docs)                       | Vision, PRD, plans, and ADRs        |
 
 ## Roadmap
 
