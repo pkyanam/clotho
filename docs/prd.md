@@ -1,6 +1,6 @@
 # Clotho — Product Requirements
 ### Prototype record, modular-platform roadmap, and public-release plan
-**v0.4 — July 2026**
+**v0.5 — July 2026**
 
 ---
 
@@ -22,9 +22,19 @@ PRD v2 shifts the product from "prove the stack works" to "make Clotho a mature 
 release gate even where earlier capability stages have remaining work: API,
 CLI, SDK, MCP, security, durability, packaging, accessibility, and an
 unfamiliar-agent handoff must be hardened before Clotho makes a stable platform
-claim. Stages 23–27 sequence the most defensible frontier ideas. See
+claim. Stage 23 establishes production identity and tenant isolation; Stage 24
+establishes the hosted/self-hosted production control plane and elastic workload
+fleet. Stages 25–29 then sequence the most defensible frontier ideas. See
 [`release-readiness.md`](release-readiness.md) and
 [`frontier-roadmap.md`](frontier-roadmap.md).
+
+**PRD v5 makes the hosted and self-hosted ambitions one production
+architecture.** Stages 23–24 establish tenant-safe multi-user identity,
+authorization, supported deployment profiles, durable scheduling, quotas,
+metering, HA operations, and elastic workload cells before frontier surface
+growth. The former Stages 23–27 move to Stages 25–29. Signals are the approved
+lightweight public-interest primitive and remain distinct from Following,
+authority, and Lachesis-derived adoption (ADRs 0023–0024).
 
 ---
 
@@ -607,7 +617,59 @@ repo kinds/policies, materialized CI export, and streaming download/LFS Batch.
   reviewed; and a fresh agent completes create → orient → change → test →
   submit using only public docs and scoped surfaces.
 
-### Stage 23 — Handoff Capsules and repository task plane
+### Stage 23 — Production identity, authorization, and tenant isolation
+
+- Make an organization the explicit security, policy, storage, quota, billing,
+  audit, and workload boundary. Every durable resource and indirect lookup must
+  carry an immutable Clotho tenant/org identity.
+- Complete multi-user organization membership: invitations, lifecycle, org
+  switching, owner/admin/member/guest/service roles, repository grants, and
+  human-only delegation/impersonation controls.
+- Keep authentication pluggable: generated bootstrap identity for local/CI,
+  Clerk for hosted Clotho, and generic OIDC for production self-hosting. After
+  authentication, Clotho remains the authorization source. Agents remain
+  Clotho-native identities and never become human IdP users.
+- Require a typed tenant context in repositories, artifacts, releases, imports,
+  Actions, tasks, logs, secrets, audits, providers, queues, caches, storage keys,
+  webhooks, background jobs, and timing-safe indirect-ID resolution. Add
+  PostgreSQL row-level security as defense in depth, not as a substitute for
+  application checks.
+- Publish and test the route/tool permission matrix. Default deny, tenant-safe
+  not-found behavior, token expiry/rotation, session revocation, audit export,
+  and cross-tenant cache/queue/storage isolation are release requirements.
+- **Acceptance:** two adversarial organizations exercise every public resource
+  family and cannot infer, read, mutate, schedule, or exhaust one another's
+  state through direct IDs, pagination, timing, logs, storage, agents, provider
+  credentials, webhooks, caches, or background work.
+
+### Stage 24 — Hosted control plane, self-host profiles, and elastic workloads
+
+- Separate the durable tenant-aware control plane from elastic workload cells.
+  API, MCP, and web replicas are stateless; Postgres, queues, Git/VCS state,
+  Arachne/object storage, and reconciliation have explicit ownership and
+  recovery contracts.
+- Add durable idempotent scheduling and leases for Actions, imports, merge work,
+  agent tasks, and provider operations. Autoscale disposable workload workers by
+  queue depth, latency, capability, region, and provider capacity—never pretend
+  a stateful service becomes safe merely by adding replicas.
+- Enforce per-tenant concurrency, API, storage, network, GPU, cost, and retry
+  quotas with fair scheduling, admission control, backpressure, metering, and
+  noisy-neighbor isolation. Use cells to bound tenant and regional blast radius.
+- Deliver supported deployment profiles from the same source and contracts:
+  Compose for evaluation/small installations; documented Helm/Kubernetes for
+  production; external Postgres and object storage without product forks.
+- Add HA and operational evidence: online migrations, connection pooling,
+  rolling/mixed-version upgrades, point-in-time recovery, destructive restore
+  drills, key rotation, reconciliation after dependency loss, SLOs, traces,
+  metrics, alerts, capacity guidance, incident runbooks, SBOMs, provenance, and
+  signed artifacts.
+- **Acceptance:** a multi-replica hosted installation survives API and worker
+  termination plus a rolling upgrade without losing accepted work; load scales
+  workload cells up and down; tenant fairness and quotas hold under contention;
+  and a second operator installs, upgrades, backs up, and restores both the
+  production self-host profile and a representative hosted cell.
+
+### Stage 25 — Handoff Capsules and repository task plane
 
 - Make a handoff an immutable repository object: goal, authority, acceptance,
   checkpoint, operation/diff state, context manifest, evidence, budget, leases,
@@ -619,9 +681,9 @@ repo kinds/policies, materialized CI export, and streaming download/LFS Batch.
   web renders the same object for humans.
 - **Acceptance:** an agent without transcript access resumes another agent's
   partial task from a capsule and reaches the same deterministic test result;
-  stale-base and insufficient-scope resumes fail explainably.
+  stale-base, cross-tenant, and insufficient-scope resumes fail explainably.
 
-### Stage 24 — Lachesis evidence graph and executable release contracts
+### Stage 26 — Lachesis evidence graph, release contracts, and Signals
 
 - Compose source, artifacts, datasets, model ancestry, evaluations, Actions,
   compute/runtime facts, approvals, security/license results, SBOMs, signatures,
@@ -629,13 +691,22 @@ repo kinds/policies, materialized CI export, and streaming download/LFS Batch.
 - Add impact queries by digest and explainable release policies for required
   artifacts, evaluation thresholds, regression budgets, review, licensing,
   scanner state, reproducibility, and approved trust/network boundaries.
+- Add **Signals**, Clotho's lightweight public repository-interest primitive.
+  One authenticated human or organization may Signal a visible repository with
+  optional intent `interested`, `using`, or `building_on`. Following for private
+  notifications is separate. Signals grant no authority, never satisfy trust or
+  release policy, respect visibility/deletion/moderation boundaries, and remain
+  distinct from evidence-derived dependents, builds, and deployments.
 - Generate common policies from web defaults; raw configuration remains an
-  advanced escape hatch, not the onboarding path.
+  advanced escape hatch, not the onboarding path. Do not add global ranking or
+  discovery until abuse resistance and permission-safe aggregation are proven.
 - **Acceptance:** a user or agent can prove what produced a release, compare
   evaluation evidence fairly, and enumerate releases affected by a revoked
-  dataset, vulnerable component, or failed policy edge.
+  dataset, vulnerable component, or failed policy edge. Public Signal totals
+  reveal no private repository or tenant metadata, and evidence-derived adoption
+  cannot be forged by clicking Signal.
 
-### Stage 25 — Compute Bindings and GPU/data locality
+### Stage 27 — Compute Bindings and GPU/data locality
 
 - Add a repository/branch/release compute binding expressed as capabilities
   (accelerator, persistence, region, isolation, private reach, residency,
@@ -644,13 +715,13 @@ repo kinds/policies, materialized CI export, and streaming download/LFS Batch.
   evaluation/inference workspaces; cache by release/runtime/driver/GPU contract.
 - Schedule near Arachne/BYO storage or inside the tailnet and show predicted
   transfer, warmup, runtime cost, and trust boundary before execution.
-- Return outputs to isolated Arachne namespaces; repository mutation still
-  passes policy and merge queue.
+- Return outputs to tenant-isolated Arachne namespaces; repository mutation
+  still passes policy and merge queue.
 - **Acceptance:** a release-bound H100 workspace starts from a verified warm
   snapshot, performs no unnecessary full artifact transfer, and returns an
   attested result linked into Lachesis.
 
-### Stage 26 — Lazy repositories and protocol mesh
+### Stage 28 — Lazy repositories and protocol mesh
 
 - Materialize repository metadata immediately and fetch Arachne ranges on
   demand in managed sandboxes; later expose a cross-platform virtual mount.
@@ -662,7 +733,7 @@ repo kinds/policies, materialized CI export, and streaming download/LFS Batch.
   full checkout, and every protocol resolves to the same Clotho release digest
   and evidence graph.
 
-### Stage 27 — Connector/provider kit, Atropos lifecycle, and federation
+### Stage 29 — Connector/provider kit, Atropos lifecycle, and federation
 
 - Publish out-of-process provider and policy SDKs with signed manifests,
   capability/egress declarations, UI schemas, and automated conformance suites.
@@ -671,11 +742,12 @@ repo kinds/policies, materialized CI export, and streaming download/LFS Batch.
 - Introduce Atropos retention, legal hold, garbage collection, cache eviction,
   revocation, and verifiable deletion across Git, Arachne, backups, and external
   providers.
-- Add federation/discovery only after permission, evidence, and lifecycle
-  semantics remain correct across instances.
+- Add federation/discovery only after permission, evidence, moderation, Signals,
+  and lifecycle semantics remain correct across instances.
 - **Acceptance:** a third party ships a conformant integration without core
   patches; lifecycle policy traces or deletes every relevant copy; federation
-  never leaks private metadata or bypasses release verification.
+  never leaks private metadata, inflates Signals, or bypasses release
+  verification.
 
 ---
 
@@ -732,6 +804,23 @@ repo kinds/policies, materialized CI export, and streaming download/LFS Batch.
   [`frontier-roadmap.md`](frontier-roadmap.md); integrations remain integrations
   when they do not strengthen Clotho's source-of-truth role.
 
+### PRD v5 (Production platform + community trust)
+
+- An organization is an enforced tenant boundary across database, storage,
+  cache, queue, log, audit, provider, webhook, agent, and background-work paths.
+- Hosted Clerk and production-self-host OIDC resolve into the same Clotho-owned
+  memberships, roles, grants, policies, tokens, and audit model.
+- Compose and Helm/Kubernetes profiles share source, schemas, migrations, REST
+  contracts, and conformance tests; hosted convenience creates no proprietary
+  control plane.
+- Accepted work is durable before acknowledgement. Stateless edges and elastic
+  workload cells scale independently from stateful VCS/database/storage owners.
+- Tenant quotas, fair scheduling, metering, recovery, rolling upgrades, SLOs,
+  and incident evidence precede production and autoscaling claims.
+- Signals express permission-safe, self-declared repository interest. Following
+  remains private; Signals grant no authority; Lachesis-derived adoption remains
+  separately inspectable evidence.
+
 ---
 
 ## 7. Public interfaces
@@ -759,8 +848,12 @@ repo kinds/policies, materialized CI export, and streaming download/LFS Batch.
 - **Public-alpha contract:** Stage 22 freezes stable error, pagination,
   idempotency, async-operation, audit-correlation, CLI exit, and MCP capability
   semantics before the surface grows further.
-- **Frontier:** Stages 23–27 add handoff/task, evidence/policy, compute-binding,
-  lazy/projection, connector/lifecycle, and federation APIs through REST first.
+- **Production foundation:** Stages 23–24 add tenant-safe identity/authorization,
+  hosted and production self-host profiles, HA operations, quotas, metering,
+  durable scheduling, and elastic workload cells.
+- **Frontier:** Stages 25–29 add handoff/task, evidence/policy/Signals,
+  compute-binding, lazy/projection, connector/lifecycle, and federation APIs
+  through REST first.
 
 ---
 

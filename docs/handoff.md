@@ -4,8 +4,9 @@
 
 ## Release target
 
-Clotho is hardening for a credible public alpha. Stage 22 is active; Stages
-23–27 are out of scope until the public-alpha gate is materially closed.
+Clotho is hardening for a credible public alpha. Stage 22 is active. The product
+owner approved revised Stages 23–29, but they remain implementation-blocked until
+the public-alpha gate is materially closed.
 
 The current evidence-backed gap inventory is
 [`release-gap-matrix.md`](release-gap-matrix.md). The governing checklist is
@@ -109,4 +110,11 @@ desktop and 320 px with no horizontal overflow.
 Extend the bounded cursor convention to the next smallest high-volume list
 family, or add common persisted idempotency keys to a single retryable create
 operation if that produces the smaller end-to-end slice. Preserve REST-first
-parity and do not broaden into speculative Stage 23 work.
+parity and do not start Stage 23 until the Stage 22 gate is materially closed.
+
+After Stage 22 is materially closed, begin Stage 23—not the previous Capsule
+plan. Stage 23 establishes production identity, authorization, and tenant
+isolation; Stage 24 establishes hosted/self-host production profiles and elastic
+workload cells. Capsules move to Stage 25, Lachesis plus Signals to Stage 26,
+Compute Bindings to Stage 27, lazy/protocol work to Stage 28, and the provider/
+lifecycle/federation kit to Stage 29. See ADR-0023 and ADR-0024.

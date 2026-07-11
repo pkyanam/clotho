@@ -21,13 +21,61 @@ control plane.
 | Horizon | Outcome | Why now |
 |---|---|---|
 | Now | Public-alpha hardening and agent-ready handoff | Trust must precede surface growth |
+| Next | Production identity, authorization, and tenant isolation | Hosted scale and safe multi-user self-hosting need the same hard boundary |
+| Next | Hosted control plane and elastic workload cells | Durable state, fair scheduling, and autoscaling must be designed separately |
 | Next | Handoff Capsules and repository task plane | Makes multi-agent continuity a native primitive |
-| Next | Evidence Graph and executable release policy | Turns model/data provenance into a durable moat |
+| Next | Evidence Graph, release policy, and Signals | Turns provenance into a moat while adding permission-safe community interest |
 | Next | Compute Bindings and GPU locality | Makes “GPU attached to a repo” useful and economical |
 | Later | Lazy virtual repositories and protocol mesh | Removes migration and large-checkout friction |
 | Later | Open provider/plugin kit and federation | Converts modular architecture into an ecosystem |
 
-## 1. Handoff Capsules — resumable work as a versioned object
+## 1. Production identity and tenant isolation
+
+Clotho's hosted and self-hosted forms must share one identity and authorization
+model. An organization is the immutable security, policy, quota, storage,
+provider, audit, and workload boundary. Clerk, OIDC, and local bootstrap are
+authentication adapters; Clotho memberships, roles, grants, agent scopes, and
+policy remain authoritative.
+
+Tenant context must survive every transition: REST to internal services,
+database query, durable job, webhook, cache, object key, log, audit row, provider
+call, and asynchronous completion. PostgreSQL row-level security adds defense in
+depth. It does not excuse global application queries or inferred tenants.
+
+**Viable first slice:** inventory every durable table and stable route, add a
+typed `TenantContext` plus deny-by-default route/resource matrix, then migrate
+one complete high-risk family such as secrets or artifacts with adversarial
+cross-org tests.
+
+**Success:** two hostile organizations cannot infer or affect one another by
+direct ID, timing, pagination, cache, storage, queue, webhook, provider, agent,
+or background-work paths.
+
+## 2. Hosted control plane and elastic workload cells
+
+Clotho should scale accepted work without confusing stateless replication with
+stateful correctness. API, MCP, and web replicas can scale horizontally. Jobs
+are persisted before acknowledgement and scheduled through durable leases,
+idempotent reconciliation, tenant quotas, fair admission, and bounded retries.
+Disposable workload cells scale by queue pressure, capability, region, and
+provider capacity. Postgres, Git/VCS, merge coordination, Arachne, and lifecycle
+ownership require explicit HA, sharding, backup, restore, and failover designs.
+
+One source tree supports Compose for evaluation/small self-hosting and a tested
+Helm/Kubernetes production profile with external Postgres and object storage.
+Metering, quotas, SLOs, traces, alerts, rolling upgrades, restore drills, signed
+artifacts, and incident procedures are product requirements—not hosted-only
+tribal knowledge.
+
+**Viable first slice:** persist one common operation/lease contract, run multiple
+stateless gateways against it, and autoscale a fake workload-cell fleet while
+proving tenant fairness, retry idempotency, and accepted-work survival.
+
+**Success:** killing a gateway or worker and performing a rolling upgrade loses
+no accepted work; workload capacity scales with demand; a noisy tenant cannot
+starve another; and a second operator restores a representative deployment.
+
+## 3. Handoff Capsules — resumable work as a versioned object
 
 An agent handoff is currently prose plus implicit workspace state. Clotho should
 make it a first-class, immutable object bound to a repository operation.
@@ -52,7 +100,7 @@ operation that validates the base operation and token scope.
 **Success:** a fresh agent resumes a partially completed change and reaches the
 same test outcome without transcript access or repository archaeology.
 
-## 2. Repository Task Plane — issues that can safely execute
+## 4. Repository Task Plane — issues that can safely execute
 
 Add a Clotho-native task resource above issues: desired outcome, authority,
 budget, required capabilities, dependencies, policy, and terminal conditions.
@@ -71,7 +119,7 @@ Useful differentiators:
 This is intentionally not a generic project-management clone. It is the
 transaction layer between intent and repository mutation.
 
-## 3. Lachesis Evidence Graph — trust you can query
+## 5. Lachesis Evidence Graph — trust you can query
 
 Promote the reserved **Lachesis** name into a measurement and evidence layer.
 Every release becomes a graph linking:
@@ -95,7 +143,24 @@ operations and are content-addressed. REST, CLI, MCP, and web can answer:
 semantic manifests, Actions provenance, commit audit, and approvals, plus an
 impact query by digest.
 
-## 4. Executable release policy and evaluation contracts
+### Signals — interest without counterfeit trust
+
+Signals are Clotho's lightweight public repository-interest primitive. One
+authenticated human or organization may Signal a visible repository, optionally
+declaring `interested`, `using`, or `building_on`. Signals are self-declared,
+grant no authority, never satisfy release policy, and never count as verified
+adoption. Private Following remains a separate notification preference.
+
+Lachesis independently derives stronger relationships such as dependents,
+builds, releases, and deployments. UI and APIs must never merge these evidence
+facts into the Signal count. Global ranking and federation wait for permission,
+moderation, abuse, deletion, and lifecycle semantics.
+
+**Viable first slice:** idempotent Signal/un-Signal for public repositories,
+permission-safe aggregate counts, typed intent, audit, deletion behavior, and a
+web control. Private repositories receive explicit non-disclosure tests.
+
+## 6. Executable release policy and evaluation contracts
 
 Model cards and CI YAML describe intent loosely. Add typed repository contracts
 for release eligibility:
@@ -111,7 +176,7 @@ The web UI should generate common policies; users should not need to hand-write
 configuration for ordinary workflows. Policies are evaluated against Lachesis
 evidence and return explainable, machine-readable failures.
 
-## 5. Compute Bindings — attach capability, not a vendor
+## 7. Compute Bindings — attach capability, not a vendor
 
 Treat compute as a repository resource with lifecycle and locality, not merely
 an Actions dropdown. A binding declares capability such as `gpu:h100`, trusted
@@ -136,7 +201,7 @@ Creative but practical workflows:
 **Viable first slice:** persistent release materialization on Daytona plus a
 binding resource that resolves one release and one accelerator capability.
 
-## 6. Lazy virtual repositories
+## 8. Lazy virtual repositories
 
 Expose a repository filesystem that materializes metadata immediately and
 fetches Arachne ranges only when read. This enables near-instant checkouts for
@@ -153,7 +218,7 @@ The same manifest can support:
 Start inside managed sandboxes, where the environment is controlled, before
 shipping a cross-platform desktop mount.
 
-## 7. Protocol mesh — one release, many ecosystems
+## 9. Protocol mesh — one release, many ecosystems
 
 Clotho already projects releases through Hugging Face read APIs. Generalize the
 projection layer so one verified release can be consumed as:
@@ -168,7 +233,7 @@ The underlying identity remains the Clotho release digest and evidence graph.
 This is a migration advantage: teams can adopt Clotho as the control plane
 without rewriting every downstream client on day one.
 
-## 8. Repository-bound data connectors
+## 10. Repository-bound data connectors
 
 Connect external databases, warehouses, vector stores, and object catalogs as
 scoped repository context without copying their contents into Git. Agents see
@@ -184,7 +249,7 @@ Requirements:
 
 This makes the repository describe the system it operates, not just its source.
 
-## 9. Atropos retention and verifiable deletion
+## 11. Atropos retention and verifiable deletion
 
 Use the reserved **Atropos** name for explicit lifecycle policy: retention,
 legal hold, garbage collection, cache eviction, credential revocation, and
@@ -194,7 +259,7 @@ Deletion should produce a signed tombstone/evidence record without retaining
 the deleted secret or content. This is necessary once global dedup, forks, and
 external stores coexist.
 
-## 10. Open provider and policy kit
+## 12. Open provider and policy kit
 
 Turn internal modularity into a supported extension ecosystem:
 
@@ -214,7 +279,8 @@ capability rather than complete an intentionally hollow product.
 - Cryptocurrency/token incentives for contributions.
 - Autonomous production deployment before task authority and evidence policy.
 - Semantic/AST merge as a marketing claim before durable runtime correctness.
-- Global social ranking before permission-safe, verified public artifacts.
+- Global Signal ranking before permission-safe aggregation, abuse controls,
+  moderation, and verified public artifacts.
 - A proprietary model-serving API that duplicates mature inference platforms;
   Clotho should bind and verify deployments rather than own every runtime.
 

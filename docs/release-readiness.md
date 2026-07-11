@@ -31,6 +31,32 @@ the original development conversation.
 
 Do not label Clotho production-ready before the stable gate.
 
+## Post-alpha production gates
+
+Stage 22 closes the public-alpha gate; it does not authorize a production or HA
+claim. The next two stages are mandatory foundations before frontier expansion:
+
+- **Stage 23 — identity and tenancy:** multi-user organizations, invitations and
+  lifecycle, hosted Clerk plus production-self-host OIDC, Clotho-owned RBAC and
+  repository grants, typed tenant context on every resource/job/storage/cache/
+  audit path, row-level-security defense in depth, and adversarial isolation.
+- **Stage 24 — production control plane:** stateless edge replicas, durable
+  operations/leases and reconciliation, tenant quotas/fairness/metering,
+  autoscaling workload cells, supported Compose and Helm/Kubernetes profiles,
+  HA/upgrade/restore/key-rotation evidence, SLOs, observability, signed artifacts,
+  and incident procedures.
+
+Hosted and self-hosted Clotho use the same contracts, schemas, migrations, and
+conformance suite. Hosted convenience may select managed providers, but must not
+create a proprietary authorization or data model. Autoscaling claims apply to
+the workload plane only where accepted work is durable and tenant fairness is
+proven; stateful services require explicit ownership and recovery designs.
+
+See [ADR-0023](adr/0023-production-tenancy-and-deployment-profiles.md). Signals
+and other public community features remain after these foundations; their
+privacy and trust semantics are recorded in
+[ADR-0024](adr/0024-signals-public-interest-semantics.md).
+
 ## P0 — public alpha blockers
 
 ### REST and OpenAPI

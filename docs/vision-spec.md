@@ -1,6 +1,6 @@
 # Clotho
 ### A version control & collaboration platform for humans and AI agents
-**Master Vision & Architecture Spec — v0.2 (July 2026)**
+**Master Vision & Architecture Spec — v0.3 (July 2026)**
 
 ---
 
@@ -23,12 +23,24 @@ Design targets, stated plainly:
 - **As powerful and robust as Cloudflare** — a real platform with a serious edge network and primitives underneath the simple surface, not a toy.
 - **Ultra-performant** — sub-second clone/push/pull even for multi-gigabyte repos, chunk-level dedup, global edge caching.
 - **Open, self-hostable, and modular** — every major subsystem (compute, storage, database, network) should be swappable. No lock-in, by design, as a competitive stance against GitHub/GitLab.
+- **One production architecture, two operating models** — Clotho-hosted and
+  self-hosted deployments share identity semantics, tenant isolation, schemas,
+  contracts, migrations, and conformance tests. Hosted convenience must not
+  depend on a proprietary control plane.
+- **Elastic where work is disposable, deliberate where state is durable** —
+  workload cells autoscale behind durable queues and tenant fairness; VCS,
+  database, storage, and lifecycle owners scale through explicit HA, sharding,
+  backup, and recovery contracts.
 - **Agent-native, not agent-adjacent** — agents are first-class identities with their own permissions, checkpoints, and structured APIs, not humans-with-a-bot-flag bolted onto a 2008-era data model.
 - **Verifiable by default** — a release is not merely a tag; it is a commit,
   artifact manifest, evidence graph, policy decision, and immutable digest.
 - **Protocol-friendly** — teams should be able to adopt Clotho without replacing
   every client immediately. Git, Hugging Face, OCI, and artifact protocols can
   project one Clotho-owned release without becoming competing sources of truth.
+- **Community interest without counterfeit trust** — Signals let humans and
+  organizations express public interest while Following stays private and
+  evidence-derived adoption stays verifiable. Popularity never becomes agent
+  authority or release evidence.
 
 ---
 

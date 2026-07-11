@@ -13,8 +13,8 @@
 5. [`handoff.md`](handoff.md) and
    [`release-gap-matrix.md`](release-gap-matrix.md) — current implementation
    evidence and next bounded acceptance
-6. [`frontier-roadmap.md`](frontier-roadmap.md) — direction, not permission to
-   skip hardening
+6. [`frontier-roadmap.md`](frontier-roadmap.md) — approved post-alpha sequence,
+   not permission to skip hardening
 7. [`api.md`](api.md), [`cli.md`](cli.md), [`mcp.md`](mcp.md), and
    [`openapi.yaml`](openapi.yaml)
 8. [`design/stage13-web-console.md`](design/stage13-web-console.md)
@@ -58,8 +58,12 @@ Recommended order:
 6. Complete authz/threat-model tests, data bounds, migrations, backup/restore,
    packaging, release metadata, and public project files.
 
-Do not start Stages 23–27 until a user explicitly reprioritizes them or the
-Stage 22 gate is materially closed.
+The product owner approved the revised Stages 23–29 and the Signals direction on
+July 11, 2026. That approval settles roadmap priority; it does **not** waive the
+Stage 22 release gate. Close Stage 22 materially, record release evidence, then
+start Stage 23 with the smallest end-to-end tenant-isolation slice. Stage 23
+precedes hosted autoscaling (Stage 24), and both precede Capsules, Signals, and
+other frontier work.
 
 ## Working rules
 
@@ -112,3 +116,18 @@ Every completed slice reports:
 The agent should keep working through safe, in-scope follow-ups rather than stop
 at a plan, but it must not broaden authority into destructive operations,
 external communication, production deployment, or credential handling.
+
+## Approved post-alpha sequence
+
+1. Stage 23: production identity, authorization, and tenant isolation.
+2. Stage 24: hosted/self-host production profiles and elastic workload cells.
+3. Stage 25: Handoff Capsules and repository task plane.
+4. Stage 26: Lachesis, executable release contracts, and Signals.
+5. Stage 27: Compute Bindings and GPU/data locality.
+6. Stage 28: lazy repositories and protocol mesh.
+7. Stage 29: connector/provider kit, Atropos lifecycle, and federation.
+
+Signals are a permission-safe, self-declared public interest primitive with
+optional `interested`, `using`, or `building_on` intent. Following is private
+and separate; evidence-derived adoption is separate; Signals never grant
+authority or satisfy policy. Read ADR-0023 and ADR-0024 before Stage 23 work.

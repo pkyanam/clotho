@@ -27,3 +27,5 @@ Context → Decision → Consequences. Supersede rather than edit.
 | [0020](0020-arachne-vcs-path.md) | Arachne on the VCS path — large files, LFS, repo kinds | Accepted |
 | [0021](0021-tailscale-network-provider.md) | Tailscale NetworkProvider — private reach and BYOC | Accepted |
 | [0022](0022-agent-runtime-v2.md) | Agent runtime v2 — durable queue, sandboxes, provenance | Accepted |
+| [0023](0023-production-tenancy-and-deployment-profiles.md) | Production tenancy and hosted/self-host deployment profiles | Accepted |
+| [0024](0024-signals-public-interest-semantics.md) | Signals as permission-safe public repository interest | Accepted |
