@@ -58,12 +58,31 @@ Filter by fabric layer:
 ```bash
 curl -s 'http://localhost:8080/api/v1/providers?layer=auth'
 curl -s 'http://localhost:8080/api/v1/providers?layer=storage'   # live Arachne + StorageSDK state
-curl -s 'http://localhost:8080/api/v1/providers?layer=network'   # stub until Stage 19
+curl -s 'http://localhost:8080/api/v1/providers?layer=network'   # live Tailscale probe
 curl -s 'http://localhost:8080/api/v1/providers?all=true'
 ```
 
 Storage reports live Arachne capacity and the optional StorageSDK bridge state.
 Network entries remain unconfigured until a provider is connected.
+
+Connect Tailscale with an OAuth client that has `auth_keys` scope. Clotho
+requests a short-lived access token to verify the client before encrypting the
+credentials; invalid clients are never stored:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/providers/tailscale/connect \
+  -H 'content-type: application/json' \
+  -H "Authorization: Bearer $CLOTHO_TOKEN" \
+  -d '{"org":"clotho","client_id":"…","client_secret":"…"}' | jq
+```
+
+Set repository network intent through the same source-of-truth API:
+
+```bash
+curl -s -X PATCH http://localhost:8080/api/v1/repos/weave \
+  -H 'content-type: application/json' \
+  -d '{"network_mode":"tailscale","network_tags":["tag:clotho-weave"]}' | jq
+```
 
 ## Quick start
 

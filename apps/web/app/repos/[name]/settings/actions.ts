@@ -11,6 +11,13 @@ export async function updateRepoSettings(repo: string, formData: FormData) {
   const defaultBranch = String(formData.get("default_branch") ?? "").trim();
   const kind = String(formData.get("kind") ?? "").trim();
   const threshold = Number(formData.get("large_file_threshold_bytes"));
+  const networkMode = String(formData.get("network_mode") ?? "public") as
+    | "public"
+    | "tailscale";
+  const networkTags = String(formData.get("network_tags") ?? "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
 
   await (await api()).updateRepo(repo, {
     description: description || undefined,
@@ -18,6 +25,8 @@ export async function updateRepoSettings(repo: string, formData: FormData) {
     defaultBranch: defaultBranch || undefined,
     kind: (kind || undefined) as "code" | "model" | "dataset" | undefined,
     largeFileThresholdBytes: Number.isFinite(threshold) ? threshold : undefined,
+    networkMode,
+    networkTags,
   });
 
   revalidatePath(`/repos/${repo}`);

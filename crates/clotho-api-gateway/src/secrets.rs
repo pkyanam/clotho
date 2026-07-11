@@ -27,6 +27,8 @@ const NONCE_LEN: usize = 12;
 /// Well-known secret names that bind to direct CCI providers.
 pub const SECRET_DAYTONA_API_KEY: &str = "DAYTONA_API_KEY";
 pub const SECRET_BOX_API_KEY: &str = "BOX_API_KEY";
+pub const SECRET_TAILSCALE_CLIENT_ID: &str = "TAILSCALE_OAUTH_CLIENT_ID";
+pub const SECRET_TAILSCALE_CLIENT_SECRET: &str = "TAILSCALE_OAUTH_CLIENT_SECRET";
 
 use crate::computesdk_catalog;
 
@@ -41,7 +43,16 @@ impl SecretsCrypto {
     pub fn from_env() -> Result<Option<Self>, String> {
         let raw = match std::env::var("CLOTHO_SECRETS_MASTER_KEY") {
             Ok(v) if !v.trim().is_empty() => v.trim().to_string(),
-            _ => return Ok(None),
+            _ => {
+                let Ok(path) = std::env::var("CLOTHO_SECRETS_KEY_FILE") else {
+                    return Ok(None);
+                };
+                let key = load_or_create_key_file(path.trim())?;
+                return Ok(Some(Self {
+                    cipher: Aes256Gcm::new_from_slice(&key)
+                        .map_err(|e| format!("secrets key file invalid: {e}"))?,
+                }));
+            }
         };
         let key = decode_master_key(&raw)?;
         let cipher = Aes256Gcm::new_from_slice(&key)
@@ -74,6 +85,46 @@ impl SecretsCrypto {
             .decrypt(nonce, ct)
             .map_err(|e| ApiError::Internal(format!("decrypt secret: {e}")))
     }
+}
+
+fn load_or_create_key_file(path: &str) -> Result<[u8; 32], String> {
+    if path.is_empty() {
+        return Err("CLOTHO_SECRETS_KEY_FILE cannot be empty".into());
+    }
+    let path = std::path::Path::new(path);
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            return bytes.try_into().map_err(|bytes: Vec<u8>| {
+                format!(
+                    "secrets key file must contain 32 bytes, got {}",
+                    bytes.len()
+                )
+            });
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("read secrets key file: {error}")),
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create secrets key directory: {e}"))?;
+    }
+    let mut key = [0u8; 32];
+    rand::Rng::fill_bytes(&mut rand::rng(), &mut key);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    use std::io::Write;
+    match options.open(path) {
+        Ok(mut file) => file
+            .write_all(&key)
+            .map_err(|e| format!("write secrets key file: {e}"))?,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return load_or_create_key_file(path.to_string_lossy().as_ref());
+        }
+        Err(error) => return Err(format!("create secrets key file: {error}")),
+    }
+    Ok(key)
 }
 
 fn getrandom_fill(buf: &mut [u8]) -> Result<(), ApiError> {
@@ -164,6 +215,11 @@ pub struct ConnectProviderRequest {
     /// is the sole credential when `credentials` is empty.
     #[serde(default)]
     pub api_key: String,
+    /// Multi-field OAuth providers such as Tailscale.
+    #[serde(default)]
+    pub client_id: String,
+    #[serde(default)]
+    pub client_secret: String,
     /// Org that owns the secret; defaults to bootstrap org.
     #[serde(default)]
     pub org: String,
@@ -597,6 +653,57 @@ async fn connect_provider(
         return Ok(Json(meta));
     }
 
+    if provider_id == "tailscale" {
+        if body.client_id.trim().is_empty() || body.client_secret.trim().is_empty() {
+            return Err(ApiError::InvalidRequest(
+                "Tailscale client_id and client_secret are required".into(),
+            ));
+        }
+        crate::providers::probe_tailscale_credentials(
+            &state.http,
+            body.client_id.trim(),
+            body.client_secret.trim(),
+        )
+        .await?;
+        upsert_org_secret(
+            pool,
+            crypto,
+            &org_row.id,
+            SECRET_TAILSCALE_CLIENT_ID,
+            body.client_id.trim(),
+            "Tailscale OAuth client id (auth_keys scope)",
+            &auth.user_id,
+            false,
+        )
+        .await?;
+        let meta = upsert_org_secret(
+            pool,
+            crypto,
+            &org_row.id,
+            SECRET_TAILSCALE_CLIENT_SECRET,
+            body.client_secret.trim(),
+            "Tailscale OAuth client secret (auth_keys scope)",
+            &auth.user_id,
+            false,
+        )
+        .await?;
+        control::log_activity(
+            pool,
+            ActivityEventInput {
+                actor_id: auth.user_id.clone(),
+                org_id: Some(org_row.id),
+                repo_id: None,
+                event_type: "provider.connected".into(),
+                payload: serde_json::json!({
+                    "provider": "tailscale",
+                    "probe": "oauth-token",
+                }),
+            },
+        )
+        .await?;
+        return Ok(Json(meta));
+    }
+
     if body.api_key.trim().is_empty() {
         return Err(ApiError::InvalidRequest("api_key is required".into()));
     }
@@ -711,6 +818,7 @@ pub fn provider_secret_name(provider_id: &str) -> Option<&'static str> {
         "box" => Some(SECRET_BOX_API_KEY),
         // Any connected ComputeSDK secret indicates overlay readiness.
         "computesdk" => computesdk_catalog::all_secret_names().into_iter().next(),
+        "tailscale" => Some(SECRET_TAILSCALE_CLIENT_SECRET),
         _ => None,
     }
 }
@@ -721,6 +829,7 @@ pub fn provider_secret_names(provider_id: &str) -> Vec<&'static str> {
         "daytona" => vec![SECRET_DAYTONA_API_KEY],
         "box" => vec![SECRET_BOX_API_KEY],
         "computesdk" => computesdk_catalog::all_secret_names(),
+        "tailscale" => vec![SECRET_TAILSCALE_CLIENT_ID, SECRET_TAILSCALE_CLIENT_SECRET],
         _ => vec![],
     }
 }
@@ -919,6 +1028,29 @@ async fn resolve_named_secret(
         ));
     }
     Ok(None)
+}
+
+/// Resolve one org secret for internal provider probes. Plaintext is never
+/// serialized and remains inside the gateway process.
+pub async fn resolve_org_secret(
+    state: &AppState,
+    org_name: Option<&str>,
+    secret_name: &str,
+) -> Result<Option<String>, ApiError> {
+    let (Some(pool), Some(crypto)) = (&state.pool, &state.secrets_crypto) else {
+        return Ok(None);
+    };
+    let org_id = match org_name.filter(|name| !name.trim().is_empty()) {
+        Some(name) => control::get_org(pool, name).await?.id,
+        None => state.bootstrap.org_id.clone(),
+    };
+    let Some(ciphertext) = load_ciphertext_org(pool, &org_id, secret_name).await? else {
+        return Ok(None);
+    };
+    let plain = crypto.open(&ciphertext)?;
+    String::from_utf8(plain)
+        .map(Some)
+        .map_err(|e| ApiError::Internal(format!("secret utf-8: {e}")))
 }
 
 /// Whether a provider has a Clotho-stored credential (settings overlay).
@@ -1272,5 +1404,23 @@ mod tests {
         assert_eq!(last4("abcdefgh"), "efgh");
         assert_eq!(last4("ab"), "ab");
         assert_eq!(last4(""), "");
+    }
+
+    #[test]
+    fn key_file_is_generated_once_and_reused() {
+        let path = std::env::temp_dir().join(format!("clotho-key-{}", Uuid::new_v4()));
+        let first = load_or_create_key_file(path.to_str().unwrap()).unwrap();
+        let second = load_or_create_key_file(path.to_str().unwrap()).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 32);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        std::fs::remove_file(path).unwrap();
     }
 }

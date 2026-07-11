@@ -11,6 +11,8 @@ export function GeneralForm({
   defaultBranch,
   kind,
   largeFileThresholdBytes,
+  networkMode,
+  networkTags,
 }: {
   repo: string;
   description: string;
@@ -18,6 +20,8 @@ export function GeneralForm({
   defaultBranch: string;
   kind: string;
   largeFileThresholdBytes: number;
+  networkMode: string;
+  networkTags: string[];
 }) {
   return (
     <form action={updateRepoSettings.bind(null, repo)} className="space-y-4">
@@ -58,6 +62,22 @@ export function GeneralForm({
         <span className="mt-1 block text-[0.75rem]">
           Files at or above this size use content-addressed artifact storage.
         </span>
+      </label>
+      <label className="block text-[0.8125rem] text-kumo-inactive">
+        network mode
+        <Select name="network_mode" defaultValue={networkMode} className="mt-1 w-full">
+          <option value="public">public — ordinary provider networking</option>
+          <option value="tailscale">Tailscale — fail closed unless connected</option>
+        </Select>
+      </label>
+      <label className="block text-[0.8125rem] text-kumo-inactive">
+        Tailscale tags (comma-separated)
+        <Input
+          name="network_tags"
+          defaultValue={networkTags.join(", ")}
+          className="mt-1 w-full"
+          placeholder="tag:clotho-org-repo"
+        />
       </label>
       <label className="block text-[0.8125rem] text-kumo-inactive">
         default branch

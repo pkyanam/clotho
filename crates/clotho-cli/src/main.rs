@@ -157,7 +157,7 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
     match sub.as_str() {
         "init" | "create" => {
             if args.is_empty() {
-                bail!("usage: clotho repo init <name> [--kind code|model|dataset] [--description <text>] [--visibility public|private|internal] [--large-file-threshold <bytes>]");
+                bail!("usage: clotho repo init <name> [--kind code|model|dataset] [--description <text>] [--visibility public|private|internal] [--large-file-threshold <bytes>] [--network public|tailscale] [--network-tag tag:name]...");
             }
             let name = args.remove(0);
             let kind = take_option(&mut args, "--kind").unwrap_or_else(|| "code".into());
@@ -171,6 +171,9 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
                         .context("--large-file-threshold must be an integer")
                 })
                 .transpose()?;
+            let network_mode =
+                take_option(&mut args, "--network").unwrap_or_else(|| "public".into());
+            let network_tags = take_repeated(&mut args, "--network-tag");
             if !args.is_empty() {
                 bail!("unrecognized repo init arguments: {}", args.join(" "));
             }
@@ -184,6 +187,8 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
                     "visibility": visibility,
                     "kind": kind,
                     "large_file_threshold_bytes": threshold,
+                    "network_mode": network_mode,
+                    "network_tags": network_tags,
                 })),
             )
             .await?;
@@ -314,13 +319,17 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
                         .context("--large-file-threshold must be an integer")
                 })
                 .transpose()?;
+            let network_mode = take_option(&mut args, "--network");
+            let network_tags = take_repeated(&mut args, "--network-tag");
             if description.is_none()
                 && visibility.is_none()
                 && default_branch.is_none()
                 && kind.is_none()
                 && threshold.is_none()
+                && network_mode.is_none()
+                && network_tags.is_empty()
             {
-                bail!("usage: clotho repo update <name> [--description] [--visibility] [--default-branch] [--kind code|model|dataset] [--large-file-threshold <bytes>]");
+                bail!("usage: clotho repo update <name> [--description] [--visibility] [--default-branch] [--kind code|model|dataset] [--large-file-threshold <bytes>] [--network public|tailscale] [--network-tag tag:name]...");
             }
             let mut patch = serde_json::Map::new();
             if let Some(d) = description {
@@ -337,6 +346,12 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
             }
             if let Some(threshold) = threshold {
                 patch.insert("large_file_threshold_bytes".into(), json!(threshold));
+            }
+            if let Some(mode) = network_mode {
+                patch.insert("network_mode".into(), json!(mode));
+            }
+            if !network_tags.is_empty() {
+                patch.insert("network_tags".into(), json!(network_tags));
             }
             let body = request_json(
                 config,
@@ -1293,17 +1308,19 @@ async fn cmd_actions(config: &Config, mut args: Vec<String>) -> Result<()> {
 
 async fn cmd_provider(config: &Config, mut args: Vec<String>) -> Result<()> {
     let Some(sub) = args.first().cloned() else {
-        bail!("usage: clotho provider <list|get|connect> ...");
+        bail!("usage: clotho provider <list|get|connect|disconnect> ...");
     };
     args.remove(0);
     match sub.as_str() {
         "list" => {
             let layer = take_option(&mut args, "--layer");
             let all = take_flag(&mut args, "--all");
+            let org = take_option(&mut args, "--org");
+            let org_query = org.map(|org| format!("&org={org}")).unwrap_or_default();
             let path = if let Some(layer) = layer {
-                format!("/api/v1/providers?layer={layer}")
+                format!("/api/v1/providers?layer={layer}{org_query}")
             } else if all {
-                "/api/v1/providers?all=true".to_string()
+                format!("/api/v1/providers?all=true{org_query}")
             } else {
                 "/api/v1/providers".to_string()
             };
@@ -1368,17 +1385,26 @@ async fn cmd_provider(config: &Config, mut args: Vec<String>) -> Result<()> {
         }
         "connect" => {
             if args.is_empty() {
-                bail!("usage: clotho provider connect <id> --api-key <key> [--org <org>]");
+                bail!("usage: clotho provider connect <id> (--api-key <key> | --client-id <id> --client-secret <secret>) [--org <org>]");
             }
             let id = args.remove(0);
-            let api_key = take_option(&mut args, "--api-key")
-                .context("provider API key required: --api-key <key>")?;
+            let api_key = take_option(&mut args, "--api-key").unwrap_or_default();
+            let client_id = take_option(&mut args, "--client-id").unwrap_or_default();
+            let client_secret = take_option(&mut args, "--client-secret").unwrap_or_default();
             let org = take_option(&mut args, "--org").unwrap_or_default();
+            if api_key.is_empty() && (client_id.is_empty() || client_secret.is_empty()) {
+                bail!("provider credentials required: --api-key, or both --client-id and --client-secret");
+            }
             let body = request_value(
                 config,
                 reqwest::Method::POST,
                 &format!("/api/v1/providers/{id}/connect"),
-                Some(json!({ "api_key": api_key, "org": org })),
+                Some(json!({
+                    "api_key": api_key,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "org": org,
+                })),
             )
             .await?;
             emit(config, &body, || {
@@ -1386,6 +1412,27 @@ async fn cmd_provider(config: &Config, mut args: Vec<String>) -> Result<()> {
                     "connected secret {} …{}",
                     body["name"].as_str().unwrap_or("?"),
                     body["value_last4"].as_str().unwrap_or("")
+                );
+            })
+        }
+        "disconnect" => {
+            if args.is_empty() {
+                bail!("usage: clotho provider disconnect <id> [--org <org>]");
+            }
+            let id = args.remove(0);
+            let org = take_option(&mut args, "--org").unwrap_or_default();
+            let body = request_value(
+                config,
+                reqwest::Method::DELETE,
+                &format!("/api/v1/providers/{id}/connect?org={org}"),
+                None,
+            )
+            .await?;
+            emit(config, &body, || {
+                println!(
+                    "disconnected {} ({} secrets removed)",
+                    body["provider"].as_str().unwrap_or(&id),
+                    body["deleted_secrets"].as_array().map_or(0, Vec::len)
                 );
             })
         }
@@ -1777,10 +1824,10 @@ fn usage() {
     clotho auth token revoke <id>
 
   repo
-    clotho repo init <name> [--kind code|model|dataset] [--large-file-threshold <bytes>]
+    clotho repo init <name> [--kind code|model|dataset] [--large-file-threshold <bytes>] [--network public|tailscale] [--network-tag tag:name]...
     clotho repo list
     clotho repo status <repo>
-    clotho repo update <name> [--description] [--visibility] [--default-branch] [--kind] [--large-file-threshold]
+    clotho repo update <name> [--description] [--visibility] [--default-branch] [--kind] [--large-file-threshold] [--network] [--network-tag]...
     clotho repo merge-policy get <repo>
     clotho repo merge-policy set <repo> [--require-actions] [--block-conflicted|--no-block-conflicted] [--approvals N] [--protect-default]
     clotho repo delete <name> [--yes]
@@ -1827,7 +1874,8 @@ fn usage() {
   provider
     clotho provider list [--layer compute|storage|network|auth] [--all]
     clotho provider get <id>
-    clotho provider connect <id> --api-key <key> [--org <org>]
+    clotho provider connect <id> (--api-key <key> | --client-id <id> --client-secret <secret>) [--org <org>]
+    clotho provider disconnect <id> [--org <org>]
 
   secret   (values are write-only; responses are metadata + last4)
     clotho secret list org|repo <name>

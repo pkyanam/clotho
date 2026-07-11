@@ -114,6 +114,8 @@ async fn token_mint_patch_and_delete_repo() {
         visibility: "public".into(),
         kind: "code".into(),
         large_file_threshold_bytes: None,
+        network_mode: "public".into(),
+        network_tags: vec![],
         default_branch: "main".into(),
         owner_org: String::new(),
     };
@@ -230,6 +232,8 @@ async fn non_admin_gets_forbidden_on_patch_repo() {
         visibility: "public".into(),
         kind: "code".into(),
         large_file_threshold_bytes: None,
+        network_mode: "public".into(),
+        network_tags: vec![],
         default_branch: "main".into(),
         owner_org: String::new(),
     };

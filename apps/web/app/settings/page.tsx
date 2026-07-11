@@ -31,6 +31,11 @@ export default function SettingsHubPage() {
           body="providers, defaults, and connection status for Actions and sandboxes."
         />
         <SettingsCard
+          href="/settings/network"
+          title="network"
+          body="Tailscale private reach, ephemeral runner identity, and BYOC connectivity."
+        />
+        <SettingsCard
           href="/settings/secrets"
           title="secrets"
           body="org-scoped credentials. never returned after save — rotate any time."

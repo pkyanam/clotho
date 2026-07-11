@@ -2,7 +2,7 @@
 //!
 //! Shared list metadata across layers: compute | storage | network | auth.
 //! Compute is real (CCI registry). Storage probes the live Arachne service;
-//! network remains an honest stub until Stage 19. Auth reports the active
+//! network probes the Tailscale OAuth connection. Auth reports the active
 //! AuthProvider.
 
 use std::sync::Arc;
@@ -54,6 +54,8 @@ pub struct ListProvidersQuery {
     /// When true (and layer omitted), include all fabric layers.
     #[serde(default)]
     pub all: bool,
+    /// Org-scoped connection state for network providers.
+    pub org: Option<String>,
 }
 
 /// Shared fabric provider metadata (non-secret).
@@ -178,31 +180,96 @@ async fn storage_providers(state: &AppState) -> Vec<FabricProvider> {
     providers
 }
 
-fn network_stubs() -> Vec<FabricProvider> {
+pub async fn probe_tailscale_credentials(
+    http: &reqwest::Client,
+    client_id: &str,
+    client_secret: &str,
+) -> Result<(), ApiError> {
+    let response = http
+        .post("https://api.tailscale.com/api/v2/oauth/token")
+        .timeout(std::time::Duration::from_secs(10))
+        .form(&[("client_id", client_id), ("client_secret", client_secret)])
+        .send()
+        .await
+        .map_err(|e| ApiError::InvalidRequest(format!("Tailscale OAuth probe failed: {e}")))?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(ApiError::InvalidRequest(format!(
+            "Tailscale rejected the OAuth client ({})",
+            response.status()
+        )))
+    }
+}
+
+async fn network_providers(state: &AppState, org: Option<&str>) -> Vec<FabricProvider> {
+    let client_id =
+        crate::secrets::resolve_org_secret(state, org, crate::secrets::SECRET_TAILSCALE_CLIENT_ID)
+            .await
+            .ok()
+            .flatten();
+    let client_secret = crate::secrets::resolve_org_secret(
+        state,
+        org,
+        crate::secrets::SECRET_TAILSCALE_CLIENT_SECRET,
+    )
+    .await
+    .ok()
+    .flatten();
+    let (configured, reason) = match (client_id, client_secret) {
+        (Some(id), Some(secret)) => {
+            match probe_tailscale_credentials(&state.http, &id, &secret).await {
+                Ok(()) => (
+                    true,
+                    "OAuth client verified live · ephemeral tagged nodes ready".into(),
+                ),
+                Err(err) => (
+                    false,
+                    format!("credentials stored, live probe failed: {err}"),
+                ),
+            }
+        }
+        _ => (
+            false,
+            "not connected — add an OAuth client from Clotho settings".into(),
+        ),
+    };
     vec![
         FabricProvider {
             id: "public".into(),
             name: "Public egress".into(),
             layer: ProviderLayer::Network.as_str().into(),
-            kind: "stub".into(),
+            kind: "direct".into(),
             enabled: true,
             configured: true,
             configured_reason: "Default network path (no mesh)".into(),
             capabilities: vec![],
-            notes: "Default NetworkProvider until Tailscale (Stage 19)".into(),
+            notes: "Default NetworkProvider; no private mesh".into(),
         },
         FabricProvider {
             id: "tailscale".into(),
             name: "Tailscale".into(),
             layer: ProviderLayer::Network.as_str().into(),
-            kind: "stub".into(),
+            kind: "direct".into(),
             enabled: true,
-            configured: false,
-            configured_reason: "not connected — Tailscale NetworkProvider ships in Stage 19".into(),
-            capabilities: vec!["private-net".into()],
-            notes: "Connect/disconnect not implemented in Stage 17".into(),
+            configured,
+            configured_reason: reason,
+            capabilities: vec![
+                "private-net".into(),
+                "ephemeral-nodes".into(),
+                "tagged-identity".into(),
+                "byoc".into(),
+            ],
+            notes: "OAuth credentials are encrypted in Clotho; access tokens are short-lived and never returned".into(),
         },
     ]
+}
+
+pub async fn tailscale_configured(state: &AppState, org: Option<&str>) -> bool {
+    network_providers(state, org)
+        .await
+        .into_iter()
+        .any(|provider| provider.id == "tailscale" && provider.configured)
 }
 
 fn auth_providers(state: &AppState) -> Vec<FabricProvider> {
@@ -253,7 +320,7 @@ pub async fn list_fabric_providers(
                 "unknown layer {raw:?}; expected compute|storage|network|auth"
             ))
         })?;
-        let list = fabric_for_layer(&state, layer).await;
+        let list = fabric_for_layer(&state, layer, query.org.as_deref()).await;
         return Ok(Json(serde_json::to_value(list).unwrap()));
     }
 
@@ -263,7 +330,7 @@ pub async fn list_fabric_providers(
         let mut providers = Vec::new();
         providers.extend(compute.providers.into_iter().map(FabricProvider::from));
         providers.extend(storage_providers(&state).await);
-        providers.extend(network_stubs());
+        providers.extend(network_providers(&state, query.org.as_deref()).await);
         providers.extend(auth_providers(&state));
         let list = FabricProviderListResponse {
             providers,
@@ -278,7 +345,11 @@ pub async fn list_fabric_providers(
     Ok(Json(serde_json::to_value(list).unwrap()))
 }
 
-async fn fabric_for_layer(state: &AppState, layer: ProviderLayer) -> FabricProviderListResponse {
+async fn fabric_for_layer(
+    state: &AppState,
+    layer: ProviderLayer,
+    org: Option<&str>,
+) -> FabricProviderListResponse {
     match layer {
         ProviderLayer::Compute => {
             let list = actions::list_providers_for(state).await;
@@ -298,7 +369,7 @@ async fn fabric_for_layer(state: &AppState, layer: ProviderLayer) -> FabricProvi
             layer: Some(layer.as_str().into()),
         },
         ProviderLayer::Network => FabricProviderListResponse {
-            providers: network_stubs(),
+            providers: network_providers(state, org).await,
             default_provider_id: "public".into(),
             layer: Some(layer.as_str().into()),
         },
@@ -325,7 +396,7 @@ pub async fn get_fabric_provider(
                 "unknown layer {raw:?}; expected compute|storage|network|auth"
             ))
         })?;
-        let list = fabric_for_layer(&state, layer).await;
+        let list = fabric_for_layer(&state, layer, query.org.as_deref()).await;
         let found = list
             .providers
             .into_iter()
@@ -335,7 +406,7 @@ pub async fn get_fabric_provider(
     }
 
     let mut non_compute = storage_providers(&state).await;
-    non_compute.extend(network_stubs());
+    non_compute.extend(network_providers(&state, query.org.as_deref()).await);
     non_compute.extend(auth_providers(&state));
     for p in non_compute {
         if p.id.eq_ignore_ascii_case(&provider) {

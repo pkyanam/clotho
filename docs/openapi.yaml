@@ -247,6 +247,14 @@ paths:
                   format: int64
                   minimum: 0
                   description: Kind-aware default when omitted (10 MiB code, 1 MiB model/dataset)
+                network_mode:
+                  type: string
+                  enum: [public, tailscale]
+                  default: public
+                network_tags:
+                  type: array
+                  items:
+                    type: string
                 default_branch:
                   type: string
                   default: main
@@ -394,6 +402,13 @@ paths:
                   type: integer
                   format: int64
                   minimum: 0
+                network_mode:
+                  type: string
+                  enum: [public, tailscale]
+                network_tags:
+                  type: array
+                  items:
+                    type: string
                 default_branch:
                   type: string
       responses:
@@ -1312,8 +1327,8 @@ paths:
       description: |
         Without `layer`, returns the compute provider registry (Stage 12 shape).
         With `layer=compute|storage|network|auth`, returns fabric metadata for
-        that layer. With `all=true`, returns every layer. Storage/network stubs
-        report `configured: false` until Stages 18–19 (ADR-0019).
+        that layer. With `all=true`, returns every layer. Storage probes
+        Arachne/StorageSDK and network live-probes stored Tailscale OAuth.
       parameters:
         - name: layer
           in: query
@@ -1329,6 +1344,12 @@ paths:
             type: boolean
             default: false
           description: When true and layer omitted, include all fabric layers
+        - name: org
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Organization whose provider connection state to probe
       responses:
         "200":
           description: Providers
@@ -1354,6 +1375,11 @@ paths:
           schema:
             type: string
             enum: [compute, storage, network, auth]
+        - name: org
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: Provider
@@ -1410,11 +1436,12 @@ paths:
     post:
       tags: [providers, secrets]
       operationId: connectProvider
-      summary: Store a provider API key as an org secret (metadata-only response)
+      summary: Verify and encrypt provider credentials (metadata-only response)
       description: |
         daytona/box: `api_key`. computesdk: any upstream from
         GET /providers/computesdk/upstreams via `upstream` + `credentials`
-        (env-name keys) or single-key `api_key`. Never returns the raw value.
+        (env-name keys) or single-key `api_key`. tailscale uses `client_id` +
+        `client_secret` and is live-probed before storage. Never returns raw values.
       parameters:
         - $ref: "#/components/parameters/provider"
       requestBody:
@@ -1426,6 +1453,11 @@ paths:
               properties:
                 api_key:
                   type: string
+                client_id:
+                  type: string
+                client_secret:
+                  type: string
+                  format: password
                 org:
                   type: string
                 upstream:
@@ -2247,6 +2279,13 @@ components:
         large_file_threshold_bytes:
           type: integer
           format: int64
+        network_mode:
+          type: string
+          enum: [public, tailscale]
+        network_tags:
+          type: array
+          items:
+            type: string
         has_issues:
           type: boolean
         has_pull_requests:
@@ -2280,6 +2319,13 @@ components:
         large_file_threshold_bytes:
           type: integer
           format: int64
+        network_mode:
+          type: string
+          enum: [public, tailscale]
+        network_tags:
+          type: array
+          items:
+            type: string
         default_branch:
           type: string
         clone_url:
@@ -2333,6 +2379,13 @@ components:
         large_file_threshold_bytes:
           type: integer
           format: int64
+        network_mode:
+          type: string
+          enum: [public, tailscale]
+        network_tags:
+          type: array
+          items:
+            type: string
         default_branch:
           type: string
         clone_url:

@@ -115,6 +115,8 @@ pub struct Repo {
     pub visibility: String,
     pub kind: String,
     pub large_file_threshold_bytes: i64,
+    pub network_mode: String,
+    pub network_tags: Vec<String>,
     pub default_branch: String,
     pub forgejo_owner: String,
     pub forgejo_repo_id: Option<i64>,
@@ -202,6 +204,10 @@ pub struct UpdateRepoRequest {
     #[serde(default)]
     pub large_file_threshold_bytes: Option<i64>,
     #[serde(default)]
+    pub network_mode: Option<String>,
+    #[serde(default)]
+    pub network_tags: Option<Vec<String>>,
+    #[serde(default)]
     pub default_branch: Option<String>,
 }
 
@@ -218,6 +224,10 @@ pub struct CreateRepoRequest {
     /// and dataset repos. Zero routes every non-empty payload through Arachne.
     #[serde(default)]
     pub large_file_threshold_bytes: Option<i64>,
+    #[serde(default = "default_network_mode")]
+    pub network_mode: String,
+    #[serde(default)]
+    pub network_tags: Vec<String>,
     #[serde(default = "default_default_branch")]
     pub default_branch: String,
     #[serde(default)]
@@ -236,6 +246,35 @@ fn default_visibility() -> String {
 
 fn default_repo_kind() -> String {
     "code".into()
+}
+
+fn default_network_mode() -> String {
+    "public".into()
+}
+
+pub fn validate_network_policy(mode: &str, tags: &[String]) -> Result<(), ApiError> {
+    if !matches!(mode, "public" | "tailscale") {
+        return Err(ApiError::InvalidRequest(format!(
+            "network_mode {mode:?} must be public or tailscale"
+        )));
+    }
+    if mode == "tailscale" && tags.is_empty() {
+        return Err(ApiError::InvalidRequest(
+            "tailscale network mode requires at least one tag".into(),
+        ));
+    }
+    if tags.iter().any(|tag| {
+        !tag.starts_with("tag:")
+            || tag.len() > 128
+            || !tag
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '_'))
+    }) {
+        return Err(ApiError::InvalidRequest(
+            "network tags must use tag:<name> with letters, digits, '-', or '_'".into(),
+        ));
+    }
+    Ok(())
 }
 
 pub fn validate_repo_kind(kind: &str) -> Result<(), ApiError> {
@@ -489,6 +528,7 @@ pub async fn get_repo_with_org(pool: &PgPool, name: &str) -> Result<Option<RepoW
         select
             r.id, r.org_id, r.name, r.description, r.visibility, r.kind,
             r.large_file_threshold_bytes,
+            r.network_mode, r.network_tags,
             r.default_branch, r.forgejo_owner, r.forgejo_repo_id,
             r.forgejo_full_name, r.created_by, r.created_at, r.updated_at,
             o.name as org_name, o.display_name as org_display_name
@@ -511,6 +551,7 @@ pub async fn list_repos_with_orgs(pool: &PgPool) -> Result<Vec<RepoWithOrg>, Api
         select
             r.id, r.org_id, r.name, r.description, r.visibility, r.kind,
             r.large_file_threshold_bytes,
+            r.network_mode, r.network_tags,
             r.default_branch, r.forgejo_owner, r.forgejo_repo_id,
             r.forgejo_full_name, r.created_by, r.created_at, r.updated_at,
             o.name as org_name, o.display_name as org_display_name
@@ -530,6 +571,7 @@ pub async fn list_repos_for_org(pool: &PgPool, org: &str) -> Result<Vec<RepoWith
         select
             r.id, r.org_id, r.name, r.description, r.visibility, r.kind,
             r.large_file_threshold_bytes,
+            r.network_mode, r.network_tags,
             r.default_branch, r.forgejo_owner, r.forgejo_repo_id,
             r.forgejo_full_name, r.created_by, r.created_at, r.updated_at,
             o.name as org_name, o.display_name as org_display_name
@@ -584,6 +626,7 @@ pub async fn insert_repo(
 ) -> Result<RepoWithOrg, ApiError> {
     valid_name(&req.name)?;
     let large_file_threshold_bytes = effective_large_file_threshold(req)?;
+    validate_network_policy(&req.network_mode, &req.network_tags)?;
     let id = Uuid::new_v4().to_string();
     let full_name = format!("{forgejo_owner}/{}", req.name);
 
@@ -592,11 +635,13 @@ pub async fn insert_repo(
         insert into repos (
             id, org_id, name, description, visibility, kind,
             large_file_threshold_bytes, default_branch,
-            forgejo_owner, forgejo_repo_id, forgejo_full_name, created_by
+            network_mode, network_tags, forgejo_owner, forgejo_repo_id,
+            forgejo_full_name, created_by
         )
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         returning id, org_id, name, description, visibility, kind,
                 large_file_threshold_bytes, default_branch,
+                network_mode, network_tags,
                 forgejo_owner, forgejo_repo_id, forgejo_full_name,
                 created_by, created_at, updated_at
         "#,
@@ -609,6 +654,8 @@ pub async fn insert_repo(
     .bind(&req.kind)
     .bind(large_file_threshold_bytes)
     .bind(&req.default_branch)
+    .bind(&req.network_mode)
+    .bind(&req.network_tags)
     .bind(forgejo_owner)
     .bind(forgejo_repo.id)
     .bind(&full_name)
@@ -634,6 +681,8 @@ pub async fn insert_repo(
         visibility: row.get("visibility"),
         kind: row.get("kind"),
         large_file_threshold_bytes: row.get("large_file_threshold_bytes"),
+        network_mode: row.get("network_mode"),
+        network_tags: row.get("network_tags"),
         default_branch: row.get("default_branch"),
         forgejo_owner: row.get("forgejo_owner"),
         forgejo_repo_id: row.get("forgejo_repo_id"),
@@ -665,6 +714,8 @@ pub async fn insert_repo(
                 "visibility": req.visibility,
                 "kind": req.kind,
                 "large_file_threshold_bytes": large_file_threshold_bytes,
+                "network_mode": req.network_mode,
+                "network_tags": req.network_tags,
                 "default_branch": req.default_branch,
             }),
         },
@@ -853,12 +904,16 @@ pub async fn update_repo_row(
     let default_branch = req.default_branch.as_deref();
     let kind = req.kind.as_deref();
     let large_file_threshold_bytes = req.large_file_threshold_bytes;
+    let network_mode = req.network_mode.as_deref();
+    let network_tags = req.network_tags.as_deref();
 
     if description.is_none()
         && visibility.is_none()
         && default_branch.is_none()
         && kind.is_none()
         && large_file_threshold_bytes.is_none()
+        && network_mode.is_none()
+        && network_tags.is_none()
     {
         return Err(ApiError::InvalidRequest(
             "at least one repository setting is required".into(),
@@ -871,6 +926,10 @@ pub async fn update_repo_row(
         return Err(ApiError::InvalidRequest(
             "large_file_threshold_bytes cannot be negative".into(),
         ));
+    }
+    let effective_mode = network_mode.unwrap_or("public");
+    if network_mode.is_some() || network_tags.is_some() {
+        validate_network_policy(effective_mode, network_tags.unwrap_or(&[]))?;
     }
 
     if let Some(v) = visibility {
@@ -889,10 +948,13 @@ pub async fn update_repo_row(
             default_branch = coalesce($4, default_branch),
             kind = coalesce($5, kind),
             large_file_threshold_bytes = coalesce($6, large_file_threshold_bytes),
+            network_mode = coalesce($7, network_mode),
+            network_tags = coalesce($8, network_tags),
             updated_at = now()
         where id = $1
         returning id, org_id, name, description, visibility, kind,
                 large_file_threshold_bytes, default_branch,
+                network_mode, network_tags,
                 forgejo_owner, forgejo_repo_id, forgejo_full_name,
                 created_by, created_at, updated_at
         "#,
@@ -903,6 +965,8 @@ pub async fn update_repo_row(
     .bind(default_branch)
     .bind(kind)
     .bind(large_file_threshold_bytes)
+    .bind(network_mode)
+    .bind(network_tags)
     .fetch_optional(pool)
     .await
     .map_err(|e| ApiError::Internal(format!("update repo: {e}")))?
@@ -916,6 +980,8 @@ pub async fn update_repo_row(
         visibility: row.get("visibility"),
         kind: row.get("kind"),
         large_file_threshold_bytes: row.get("large_file_threshold_bytes"),
+        network_mode: row.get("network_mode"),
+        network_tags: row.get("network_tags"),
         default_branch: row.get("default_branch"),
         forgejo_owner: row.get("forgejo_owner"),
         forgejo_repo_id: row.get("forgejo_repo_id"),
@@ -977,6 +1043,8 @@ pub fn build_repo_info(
     info.visibility = clotho.repo.visibility.clone();
     info.kind = clotho.repo.kind.clone();
     info.large_file_threshold_bytes = clotho.repo.large_file_threshold_bytes;
+    info.network_mode = clotho.repo.network_mode.clone();
+    info.network_tags = clotho.repo.network_tags.clone();
     info.provider = provider.into();
     info.configured = configured;
     info
@@ -1005,6 +1073,8 @@ pub fn fallback_repo_info(
         visibility: "public".into(),
         kind: "code".into(),
         large_file_threshold_bytes: 10 * 1024 * 1024,
+        network_mode: "public".into(),
+        network_tags: vec![],
         has_issues: true,
         has_pull_requests: true,
         open_issues_count: 0,
@@ -1289,6 +1359,8 @@ mod tests {
             visibility: "public".into(),
             kind: "model".into(),
             large_file_threshold_bytes: None,
+            network_mode: "public".into(),
+            network_tags: vec![],
             default_branch: "main".into(),
             owner_org: String::new(),
         };
@@ -1333,6 +1405,8 @@ mod tests {
                 visibility: "public".into(),
                 kind: "code".into(),
                 large_file_threshold_bytes: 10 * 1024 * 1024,
+                network_mode: "public".into(),
+                network_tags: vec![],
                 default_branch: "main".into(),
                 forgejo_owner: "clotho".into(),
                 forgejo_repo_id: Some(42),

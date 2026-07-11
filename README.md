@@ -117,6 +117,13 @@ dataset repos automatically route artifacts at or above 1 MiB through Arachne
 (10 MiB for code), with a per-repository policy editable from the web app, CLI,
 or API. The standard stack needs no `.env` file for this behavior.
 
+Tailscale is a first-class NetworkProvider: connect an org OAuth client from
+Clotho settings, verify it live, and mark repositories `public` or `tailscale`
+with scoped tags. Private repos fail closed when network attachment is not
+available instead of silently running over public egress. Provider credentials
+live in Clotho's encrypted vault; Docker generates a persistent vault key when
+an explicit master key is not supplied.
+
 ---
 
 ## Repository Layout

@@ -662,7 +662,19 @@ pub async fn create_run(
 ) -> Result<(StatusCode, Json<ActionRun>), ApiError> {
     let auth = auth::resolve_auth(&headers, &state).await?;
     if let Some(pool) = &state.pool {
-        control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
+        let repo = control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
+        if repo.repo.network_mode == "tailscale" {
+            if !crate::providers::tailscale_configured(&state, Some(&repo.org_name)).await {
+                return Err(ApiError::InvalidRequest(
+                    "repository requires Tailscale private networking, but its org OAuth client is not live-verified"
+                        .into(),
+                ));
+            }
+            return Err(ApiError::InvalidRequest(
+                "repository requires Tailscale private networking; no configured compute provider currently advertises private-net attachment"
+                    .into(),
+            ));
+        }
     }
     let config = state.actions.config_for(&name).await;
     if !config.enabled {

@@ -4,13 +4,14 @@ const items = [
   { href: "/settings", label: "overview", key: "overview" as const },
   { href: "/settings/appearance", label: "appearance", key: "appearance" as const },
   { href: "/settings/compute", label: "compute", key: "compute" as const },
+  { href: "/settings/network", label: "network", key: "network" as const },
   { href: "/settings/secrets", label: "secrets", key: "secrets" as const },
 ] as const;
 
 export function SettingsNav({
   active,
 }: {
-  active: "overview" | "appearance" | "compute" | "secrets";
+  active: "overview" | "appearance" | "compute" | "network" | "secrets";
 }) {
   return (
     <nav className="flex flex-wrap gap-1 border-b border-kumo-hairline pb-3">

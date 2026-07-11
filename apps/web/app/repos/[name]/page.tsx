@@ -100,6 +100,11 @@ export default async function RepoPage({
             <StatusChip label="branch" value={detail.default_branch} />
             <StatusChip label="visibility" value={detail.visibility} />
             <StatusChip
+              label="network"
+              value={detail.network_mode}
+              tone={detail.network_mode === "tailscale" ? "ok" : "neutral"}
+            />
+            <StatusChip
               label="compute"
               value={detail.configured ? detail.provider : "not connected"}
               tone={detail.configured ? "ok" : "warn"}

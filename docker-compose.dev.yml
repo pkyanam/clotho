@@ -318,6 +318,7 @@ services:
       CLOTHO_GATEWAY_DATABASE_URL: postgres://clotho:clotho-dev@postgres:5432/clotho
       # Stage 13 secrets seal key (docs/adr/0014). Generate with openssl rand -hex 32.
       CLOTHO_SECRETS_MASTER_KEY: ${CLOTHO_SECRETS_MASTER_KEY:-}
+      CLOTHO_SECRETS_KEY_FILE: /var/lib/clotho-secrets/master.key
       CLOTHO_VCS_GRPC_URL: http://clotho-vcs:50051
       CLOTHO_DIFF_GRPC_URL: http://clotho-diff:50055
       CLOTHO_MERGE_QUEUE_GRPC_URL: http://clotho-merge-queue:50053
@@ -349,6 +350,7 @@ services:
       - "8080:8080"
     volumes:
       - forgejo-token:/run/clotho:ro
+      - secrets-data:/var/lib/clotho-secrets
     depends_on:
       clotho-vcs:
         condition: service_started
@@ -392,5 +394,6 @@ volumes:
   storage-data:
   forgejo-data:
   forgejo-token:
+  secrets-data:
   # Bare git repos, written by clotho-vcs and read by Forgejo (docs/adr/0003).
   git-data:

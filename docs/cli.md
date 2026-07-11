@@ -103,9 +103,21 @@ clotho auth token revoke <id>
 clotho provider list                          # compute (default)
 clotho provider list --layer auth
 clotho provider list --layer storage          # live Arachne + StorageSDK state
-clotho provider list --layer network          # stub until Stage 19
+clotho provider list --layer network          # live Tailscale connection state
 clotho provider list --all
 ```
+
+Tailscale and repo network policy:
+
+```bash
+clotho provider connect tailscale --client-id '…' --client-secret '…' --org clotho
+clotho repo update my-demo --network tailscale --network-tag tag:clotho-my-demo
+clotho provider disconnect tailscale --org clotho
+```
+
+Clotho live-verifies the OAuth client before encrypting it. Repositories marked
+`tailscale` fail closed until both network credentials and a private-net-capable
+compute path are ready.
 
 ## Agents
 

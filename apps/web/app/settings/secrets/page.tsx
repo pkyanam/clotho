@@ -22,7 +22,8 @@ export default async function SecretsSettingsPage() {
   const orgs = await (await api())
     .orgs()
     .catch(() => []);
-  const primaryOrg = orgs[0]?.name ?? "clotho";
+  const primaryOrg =
+    orgs.find((org) => org.name === "clotho")?.name ?? orgs[0]?.name ?? "clotho";
 
   let secrets: SecretMeta[] = [];
   let loadError: string | null = null;

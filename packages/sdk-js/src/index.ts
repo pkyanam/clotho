@@ -30,6 +30,8 @@ export interface RepoInfo {
   visibility: string;
   kind: "code" | "model" | "dataset" | string;
   large_file_threshold_bytes: number;
+  network_mode: "public" | "tailscale" | string;
+  network_tags: string[];
   has_issues: boolean;
   has_pull_requests: boolean;
   open_issues_count: number;
@@ -61,6 +63,8 @@ export interface RepoDetail {
   visibility: string;
   kind: "code" | "model" | "dataset" | string;
   large_file_threshold_bytes: number;
+  network_mode: "public" | "tailscale" | string;
+  network_tags: string[];
   default_branch: string;
   clone_url: string;
   provider: string;
@@ -82,6 +86,8 @@ export interface CreatedRepo {
   visibility: string;
   kind: "code" | "model" | "dataset" | string;
   large_file_threshold_bytes: number;
+  network_mode: "public" | "tailscale" | string;
+  network_tags: string[];
   default_branch: string;
   clone_url: string;
   provider: string;
@@ -700,6 +706,8 @@ export class ClothoClient {
       defaultBranch?: string;
       kind?: "code" | "model" | "dataset";
       largeFileThresholdBytes?: number;
+      networkMode?: "public" | "tailscale";
+      networkTags?: string[];
       ownerOrg?: string;
     },
   ): Promise<CreatedRepo> {
@@ -714,6 +722,8 @@ export class ClothoClient {
         owner_org: options?.ownerOrg,
         kind: options?.kind ?? "code",
         large_file_threshold_bytes: options?.largeFileThresholdBytes,
+        network_mode: options?.networkMode ?? "public",
+        network_tags: options?.networkTags ?? [],
       }),
     });
   }
@@ -1217,22 +1227,25 @@ export class ClothoClient {
   listProviders(options?: {
     layer?: ProviderLayer | string;
     all?: boolean;
+    org?: string;
   }): Promise<FabricProviderList | ComputeProviderList> {
     return this.request(
       `/api/v1/providers${qs({
         layer: options?.layer,
         all: options?.all ? "true" : undefined,
+        org: options?.org,
       })}`,
     );
   }
 
   getProvider(
     provider: string,
-    options?: { layer?: ProviderLayer | string },
+    options?: { layer?: ProviderLayer | string; org?: string },
   ): Promise<FabricProvider | ComputeProvider> {
     return this.request(
       `/api/v1/providers/${encodeURIComponent(provider)}${qs({
         layer: options?.layer,
+        org: options?.org,
       })}`,
     );
   }
@@ -1314,6 +1327,8 @@ export class ClothoClient {
       defaultBranch?: string;
       kind?: "code" | "model" | "dataset";
       largeFileThresholdBytes?: number;
+      networkMode?: "public" | "tailscale";
+      networkTags?: string[];
     },
   ): Promise<RepoDetail> {
     return this.request(`/api/v1/repos/${encodeURIComponent(name)}`, {
@@ -1325,6 +1340,8 @@ export class ClothoClient {
         default_branch: options.defaultBranch,
         kind: options.kind,
         large_file_threshold_bytes: options.largeFileThresholdBytes,
+        network_mode: options.networkMode,
+        network_tags: options.networkTags,
       }),
     });
   }
@@ -1559,6 +1576,8 @@ export class ClothoClient {
     provider: string,
     options: {
       apiKey?: string;
+      clientId?: string;
+      clientSecret?: string;
       org?: string;
       upstream?: string;
       credentials?: Record<string, string>;
@@ -1573,6 +1592,8 @@ export class ClothoClient {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           api_key: options.apiKey ?? "",
+          client_id: options.clientId ?? "",
+          client_secret: options.clientSecret ?? "",
           org: options.org ?? "",
           upstream: options.upstream ?? "",
           credentials: options.credentials ?? {},

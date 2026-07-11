@@ -110,3 +110,12 @@ boundary.
   private-net jobs.
 - Security: OAuth client compromise equals ability to mint nodes — treat
   like a cloud provider key; support rotate/disconnect.
+
+## Implementation status (2026-07-11)
+
+Shipped: zero-env persistent vault bootstrap for Compose; in-app OAuth client
+connect/disconnect; live token probe; Provider Fabric metadata; generated grant
+policy helper; repo `public|tailscale` mode and tags across REST/SDK/CLI/web;
+Actions fail closed when private networking cannot be honored. Remaining:
+ephemeral auth-key mint and provider-specific sandbox attachment, followed by
+the `clotho-runner` BYOC registration protocol.

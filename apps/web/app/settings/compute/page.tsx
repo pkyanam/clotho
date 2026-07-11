@@ -31,7 +31,8 @@ export default async function ComputeSettingsPage() {
   const orgs = await (await api())
     .orgs()
     .catch(() => []);
-  const primaryOrg = orgs[0]?.name ?? "clotho";
+  const primaryOrg =
+    orgs.find((org) => org.name === "clotho")?.name ?? orgs[0]?.name ?? "clotho";
 
   try {
     const list = await (await api()).computeProviderList();

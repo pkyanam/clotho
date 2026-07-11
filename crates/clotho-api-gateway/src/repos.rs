@@ -117,6 +117,8 @@ pub struct RepoDetailResponse {
     pub visibility: String,
     pub kind: String,
     pub large_file_threshold_bytes: i64,
+    pub network_mode: String,
+    pub network_tags: Vec<String>,
     pub default_branch: String,
     pub clone_url: String,
     pub provider: String,
@@ -216,6 +218,8 @@ pub async fn get_repo(
         .into_inner();
     let kind = repo_info.kind.clone();
     let large_file_threshold_bytes = repo_info.large_file_threshold_bytes;
+    let network_mode = repo_info.network_mode.clone();
+    let network_tags = repo_info.network_tags.clone();
     Ok(Json(RepoDetailResponse {
         name,
         owner,
@@ -224,6 +228,8 @@ pub async fn get_repo(
         visibility,
         kind,
         large_file_threshold_bytes,
+        network_mode,
+        network_tags,
         default_branch,
         clone_url,
         provider: state.actions.default_provider(),
@@ -274,6 +280,8 @@ pub async fn update_repo(
                     "visibility": req.visibility,
                     "kind": req.kind,
                     "large_file_threshold_bytes": req.large_file_threshold_bytes,
+                    "network_mode": req.network_mode,
+                    "network_tags": req.network_tags,
                     "default_branch": req.default_branch,
                 }),
             },
@@ -302,6 +310,8 @@ pub async fn update_repo(
             visibility: clotho_with_org.repo.visibility.clone(),
             kind: clotho_with_org.repo.kind.clone(),
             large_file_threshold_bytes: clotho_with_org.repo.large_file_threshold_bytes,
+            network_mode: clotho_with_org.repo.network_mode.clone(),
+            network_tags: clotho_with_org.repo.network_tags.clone(),
             default_branch: clotho_with_org.repo.default_branch.clone(),
             clone_url,
             provider,

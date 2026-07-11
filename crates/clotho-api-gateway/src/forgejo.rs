@@ -52,6 +52,10 @@ pub struct RepoInfo {
     pub kind: String,
     #[serde(default = "default_large_file_threshold")]
     pub large_file_threshold_bytes: i64,
+    #[serde(default = "default_network_mode")]
+    pub network_mode: String,
+    #[serde(default)]
+    pub network_tags: Vec<String>,
     #[serde(default)]
     pub has_issues: bool,
     #[serde(default)]
@@ -74,6 +78,10 @@ fn default_repo_kind() -> String {
 
 fn default_large_file_threshold() -> i64 {
     10 * 1024 * 1024
+}
+
+fn default_network_mode() -> String {
+    "public".into()
 }
 
 /// One endpoint of a pull request (its head or base).

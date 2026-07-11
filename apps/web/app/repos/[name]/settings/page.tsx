@@ -105,11 +105,14 @@ export default async function SettingsPage({
               defaultBranch={detail.default_branch}
               kind={detail.kind}
               largeFileThresholdBytes={detail.large_file_threshold_bytes}
+              networkMode={detail.network_mode}
+              networkTags={detail.network_tags}
             />
             <dl className="mt-6 border-t border-kumo-hairline pt-4">
               <MetaRow label="owner" value={ownerOrg} />
               <MetaRow label="visibility" value={detail.visibility} />
               <MetaRow label="kind" value={detail.kind} />
+              <MetaRow label="network" value={detail.network_mode} />
               <MetaRow label="default branch" value={detail.default_branch} />
               <MetaRow
                 label="clone url"

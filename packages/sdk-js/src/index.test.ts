@@ -98,6 +98,8 @@ describe("ClothoClient", () => {
           owner_org: "clotho",
           kind: "model",
           large_file_threshold_bytes: 524288,
+          network_mode: "public",
+          network_tags: [],
         }),
       }),
     );
@@ -265,6 +267,8 @@ describe("ClothoClient", () => {
         method: "POST",
         body: JSON.stringify({
           api_key: "key-abcd",
+          client_id: "",
+          client_secret: "",
           org: "clotho",
           upstream: "",
           credentials: {},
@@ -273,6 +277,24 @@ describe("ClothoClient", () => {
         }),
       }),
     );
+  });
+
+  it("sends Tailscale OAuth credentials only to the provider connect route", async () => {
+    const { client, fetchMock } = clientWith(
+      jsonResponse({ name: "TAILSCALE_OAUTH_CLIENT_SECRET", value_last4: "tail" }),
+    );
+    await client.connectProvider("tailscale", {
+      clientId: "client-id",
+      clientSecret: "tskey-client-tail",
+      org: "clotho",
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(body).toMatchObject({
+      api_key: "",
+      client_id: "client-id",
+      client_secret: "tskey-client-tail",
+      org: "clotho",
+    });
   });
 
   it("disconnects a provider via DELETE connect", async () => {
