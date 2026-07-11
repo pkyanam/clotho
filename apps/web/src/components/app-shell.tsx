@@ -10,6 +10,7 @@ import { NotificationBell } from "./notification-bell";
 const NAV = [
   { href: "/", label: "dashboard" },
   { href: "/repos", label: "repos" },
+  { href: "/hub", label: "hub" },
   { href: "/agents", label: "agents" },
   { href: "/activity", label: "activity" },
   { href: "/notifications", label: "notifications" },
@@ -161,6 +162,11 @@ const PALETTE_COMMANDS = [
   { href: "/", label: "go to dashboard", keywords: "home" },
   { href: "/repos", label: "all repositories", keywords: "repos list" },
   { href: "/repos/new", label: "create repository", keywords: "new repo" },
+  {
+    href: "/hub",
+    label: "model and dataset hub",
+    keywords: "hugging face ml weights datasets releases catalog",
+  },
   { href: "/agents", label: "agents", keywords: "sessions identity presence" },
   { href: "/activity", label: "activity", keywords: "feed events" },
   { href: "/notifications", label: "notifications", keywords: "alerts mentions" },

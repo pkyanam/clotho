@@ -233,6 +233,24 @@ export interface RepoRelease extends RepoReleaseSummary {
   manifest: ArtifactManifest;
 }
 
+export interface HubCatalogEntry {
+  id: string;
+  modelId: string;
+  author: string;
+  sha: string;
+  lastModified: string;
+  private: boolean;
+  tags: string[];
+  pipeline_tag?: string | null;
+  library_name?: string | null;
+  usedStorage: number;
+  clotho: {
+    release: string;
+    manifest_sha256: string;
+    source_of_truth: true;
+  };
+}
+
 export interface FileContent {
   commit_id: string;
   path: string;
@@ -976,6 +994,42 @@ export class ClothoClient {
       `/api/v1/repos/${encodeURIComponent(name)}/releases`,
     );
     return response.releases;
+  }
+
+  hubModels(options?: {
+    search?: string;
+    filter?: string;
+    author?: string;
+    pipelineTag?: string;
+    limit?: number;
+  }): Promise<HubCatalogEntry[]> {
+    return this.request(
+      `/api/models${qs({
+        search: options?.search,
+        filter: options?.filter,
+        author: options?.author,
+        pipeline_tag: options?.pipelineTag,
+        limit: options?.limit,
+        full: "true",
+      })}`,
+    );
+  }
+
+  hubDatasets(options?: {
+    search?: string;
+    filter?: string;
+    author?: string;
+    limit?: number;
+  }): Promise<HubCatalogEntry[]> {
+    return this.request(
+      `/api/datasets${qs({
+        search: options?.search,
+        filter: options?.filter,
+        author: options?.author,
+        limit: options?.limit,
+        full: "true",
+      })}`,
+    );
   }
 
   release(name: string, version: string): Promise<RepoRelease> {

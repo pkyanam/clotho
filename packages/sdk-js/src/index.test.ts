@@ -201,6 +201,28 @@ describe("ClothoClient", () => {
     );
   });
 
+  it("searches the Clotho-owned model and dataset catalog", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse([])));
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    await client.hubModels({
+      search: "llama",
+      pipelineTag: "text-generation",
+      limit: 20,
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://gateway.test/api/models?search=llama&pipeline_tag=text-generation&limit=20&full=true",
+      expect.objectContaining({ headers: {} }),
+    );
+    await client.hubDatasets({ filter: "jsonl", author: "clotho" });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://gateway.test/api/datasets?filter=jsonl&author=clotho&full=true",
+      expect.objectContaining({ headers: {} }),
+    );
+  });
+
   it("streams exact release files without JSON materialization", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(new Uint8Array([0, 1, 2, 255]), {
