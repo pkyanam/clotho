@@ -6,7 +6,7 @@
 //! first, then overlays collaboration metadata. Slice A adds PATCH/DELETE for
 //! repo settings.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -411,6 +411,315 @@ pub async fn tree(
     }))
 }
 
+#[derive(Serialize)]
+pub struct ArtifactEntryJson {
+    pub path: String,
+    /// Semantic purpose in an ML repository, such as weights, dataset_shard,
+    /// tokenizer, card, evaluation, or source.
+    pub role: String,
+    /// Portable on-disk format inferred from the filename.
+    pub format: String,
+    /// Broad workload family used by clients for grouping.
+    pub family: String,
+    /// Logical bytes after composing an Arachne pointer.
+    pub size_bytes: u64,
+    pub storage: String,
+    pub conflicted: bool,
+}
+
+#[derive(Serialize)]
+pub struct ArtifactReadinessJson {
+    pub card: bool,
+    pub primary_artifacts: bool,
+    pub metadata: bool,
+    pub ready: bool,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct ArtifactManifestResponse {
+    pub commit_id: String,
+    pub kind: String,
+    pub total_files: u64,
+    pub total_bytes: u64,
+    pub arachne_files: u64,
+    pub role_counts: BTreeMap<String, u64>,
+    pub format_counts: BTreeMap<String, u64>,
+    pub readiness: ArtifactReadinessJson,
+    pub artifacts: Vec<ArtifactEntryJson>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ArtifactClass {
+    role: &'static str,
+    format: &'static str,
+    family: &'static str,
+}
+
+fn artifact_class(path: &str) -> ArtifactClass {
+    let lower = path.to_ascii_lowercase();
+    let name = lower.rsplit('/').next().unwrap_or(&lower);
+    let extension = name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("");
+
+    if matches!(
+        name,
+        "readme" | "readme.md" | "modelcard.md" | "datasetcard.md"
+    ) {
+        return ArtifactClass {
+            role: "card",
+            format: "markdown",
+            family: "documentation",
+        };
+    }
+    if name.contains("tokenizer") || matches!(name, "vocab.json" | "merges.txt" | "spiece.model") {
+        return ArtifactClass {
+            role: "tokenizer",
+            format: match extension {
+                "model" => "sentencepiece",
+                "txt" => "text",
+                _ => "json",
+            },
+            family: "model",
+        };
+    }
+    if name.contains("eval") || name.contains("metric") || name.contains("benchmark") {
+        return ArtifactClass {
+            role: "evaluation",
+            format: structured_format(extension),
+            family: "evaluation",
+        };
+    }
+    if matches!(
+        name,
+        "config.json" | "generation_config.json" | "model_index.json"
+    ) {
+        return ArtifactClass {
+            role: "model_config",
+            format: "json",
+            family: "model",
+        };
+    }
+
+    let model_format = match extension {
+        "safetensors" => Some("safetensors"),
+        "gguf" => Some("gguf"),
+        "onnx" => Some("onnx"),
+        "pt" | "pth" | "bin" => Some("pytorch"),
+        "ckpt" => Some("checkpoint"),
+        "h5" | "keras" | "pb" => Some("tensorflow"),
+        "tflite" => Some("tflite"),
+        "mlmodel" | "mlpackage" => Some("coreml"),
+        _ => None,
+    };
+    if let Some(format) = model_format {
+        return ArtifactClass {
+            role: "weights",
+            format,
+            family: "model",
+        };
+    }
+
+    let dataset_format = match extension {
+        "parquet" => Some("parquet"),
+        "arrow" => Some("arrow"),
+        "jsonl" | "ndjson" => Some("jsonl"),
+        "csv" => Some("csv"),
+        "tsv" => Some("tsv"),
+        "avro" => Some("avro"),
+        "orc" => Some("orc"),
+        _ => None,
+    };
+    if let Some(format) = dataset_format {
+        return ArtifactClass {
+            role: "dataset_shard",
+            format,
+            family: "dataset",
+        };
+    }
+    if matches!(
+        name,
+        "dataset_info.json" | "dataset_infos.json" | "features.json"
+    ) {
+        return ArtifactClass {
+            role: "dataset_schema",
+            format: "json",
+            family: "dataset",
+        };
+    }
+    if matches!(extension, "md" | "mdx" | "rst") {
+        return ArtifactClass {
+            role: "documentation",
+            format: if extension == "rst" {
+                "rst"
+            } else {
+                "markdown"
+            },
+            family: "documentation",
+        };
+    }
+    if matches!(extension, "json" | "yaml" | "yml" | "toml") {
+        return ArtifactClass {
+            role: "metadata",
+            format: structured_format(extension),
+            family: "metadata",
+        };
+    }
+    if matches!(
+        extension,
+        "py" | "rs" | "ts" | "tsx" | "js" | "jsx" | "go" | "sh"
+    ) {
+        return ArtifactClass {
+            role: "source",
+            format: extension_format(extension),
+            family: "source",
+        };
+    }
+    ArtifactClass {
+        role: "other",
+        format: extension_format(extension),
+        family: "other",
+    }
+}
+
+fn structured_format(extension: &str) -> &'static str {
+    match extension {
+        "yaml" | "yml" => "yaml",
+        "toml" => "toml",
+        "csv" => "csv",
+        _ => "json",
+    }
+}
+
+fn extension_format(extension: &str) -> &'static str {
+    match extension {
+        "py" => "python",
+        "rs" => "rust",
+        "ts" | "tsx" => "typescript",
+        "js" | "jsx" => "javascript",
+        "go" => "go",
+        "sh" => "shell",
+        "txt" => "text",
+        "png" | "jpg" | "jpeg" | "webp" => "image",
+        "wav" | "flac" | "mp3" => "audio",
+        "mp4" | "webm" => "video",
+        "tar" | "gz" | "zip" => "archive",
+        "" => "unknown",
+        _ => "other",
+    }
+}
+
+/// Semantic inventory for code, model, and dataset repositories. Clotho owns
+/// this view: clients do not need to download multi-GB payloads or inspect the
+/// backing Forgejo repository to understand what a repository contains.
+pub async fn artifact_manifest(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Query(query): Query<TreeQuery>,
+) -> Result<Json<ArtifactManifestResponse>, ApiError> {
+    let (repo, ..) = load_repo_detail(&state, &name).await?;
+    let kind = repo.kind;
+    let mut vcs = state.vcs.clone();
+    let tree = vcs
+        .list_files(ListFilesRequest {
+            repo: name.clone(),
+            commit_id: query.commit_id,
+        })
+        .await?
+        .into_inner();
+
+    let mut artifacts = Vec::with_capacity(tree.files.len());
+    let mut total_bytes = 0u64;
+    let mut arachne_files = 0u64;
+    let mut role_counts = BTreeMap::new();
+    let mut format_counts = BTreeMap::new();
+    for entry in tree.files {
+        let mut logical_bytes = entry.size_bytes;
+        let mut storage = "git";
+        if entry.size_bytes <= 1024 {
+            let file = vcs
+                .get_file(GetFileRequest {
+                    repo: name.clone(),
+                    commit_id: tree.commit_id.clone(),
+                    path: entry.path.clone(),
+                })
+                .await?
+                .into_inner();
+            if let Ok(pointer) = clotho_common::lfs_pointer::LfsPointer::parse(&file.content) {
+                logical_bytes = pointer.size;
+                storage = "arachne";
+                arachne_files += 1;
+            }
+        }
+        let class = artifact_class(&entry.path);
+        *role_counts.entry(class.role.to_string()).or_insert(0) += 1;
+        *format_counts.entry(class.format.to_string()).or_insert(0) += 1;
+        total_bytes = total_bytes.saturating_add(logical_bytes);
+        artifacts.push(ArtifactEntryJson {
+            path: entry.path,
+            role: class.role.into(),
+            format: class.format.into(),
+            family: class.family.into(),
+            size_bytes: logical_bytes,
+            storage: storage.into(),
+            conflicted: entry.conflicted,
+        });
+    }
+    artifacts.sort_by(|a, b| {
+        b.size_bytes
+            .cmp(&a.size_bytes)
+            .then_with(|| a.path.cmp(&b.path))
+    });
+
+    let card = role_counts.contains_key("card");
+    let metadata = role_counts.keys().any(|role| {
+        matches!(
+            role.as_str(),
+            "model_config" | "dataset_schema" | "metadata"
+        )
+    });
+    let primary_role = if kind == "model" {
+        "weights"
+    } else if kind == "dataset" {
+        "dataset_shard"
+    } else {
+        "source"
+    };
+    let primary_artifacts = role_counts.contains_key(primary_role);
+    let mut warnings = Vec::new();
+    if matches!(kind.as_str(), "model" | "dataset") && !card {
+        warnings.push(format!("add a README.md {} card", kind));
+    }
+    if !primary_artifacts {
+        warnings.push(format!("no {primary_role} artifacts detected"));
+    }
+    if matches!(kind.as_str(), "model" | "dataset") && !metadata {
+        warnings.push(format!("add structured {kind} metadata"));
+    }
+    let ready = if matches!(kind.as_str(), "model" | "dataset") {
+        card && primary_artifacts && metadata
+    } else {
+        primary_artifacts
+    };
+
+    Ok(Json(ArtifactManifestResponse {
+        commit_id: tree.commit_id,
+        kind,
+        total_files: artifacts.len() as u64,
+        total_bytes,
+        arachne_files,
+        role_counts,
+        format_counts,
+        readiness: ArtifactReadinessJson {
+            card,
+            primary_artifacts,
+            metadata,
+            ready,
+            warnings,
+        },
+        artifacts,
+    }))
+}
+
 #[derive(Deserialize)]
 pub struct FileQuery {
     pub path: String,
@@ -573,6 +882,35 @@ pub struct CommitsQuery {
 
 fn default_commits_limit() -> u32 {
     50
+}
+
+#[cfg(test)]
+mod artifact_tests {
+    use super::*;
+
+    #[test]
+    fn classifies_portable_model_artifacts() {
+        assert_eq!(
+            artifact_class("model-00001-of-00004.safetensors").role,
+            "weights"
+        );
+        assert_eq!(artifact_class("weights/model.Q4_K_M.gguf").format, "gguf");
+        assert_eq!(artifact_class("tokenizer.json").role, "tokenizer");
+        assert_eq!(artifact_class("config.json").role, "model_config");
+        assert_eq!(artifact_class("README.md").role, "card");
+    }
+
+    #[test]
+    fn classifies_dataset_and_evaluation_artifacts() {
+        let shard = artifact_class("data/train-00001-of-00010.parquet");
+        assert_eq!(shard.role, "dataset_shard");
+        assert_eq!(shard.family, "dataset");
+        assert_eq!(artifact_class("dataset_info.json").role, "dataset_schema");
+        assert_eq!(
+            artifact_class("benchmarks/eval_results.json").role,
+            "evaluation"
+        );
+    }
 }
 
 #[derive(Serialize)]

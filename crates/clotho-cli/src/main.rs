@@ -151,7 +151,7 @@ async fn cmd_auth(config: &Config, mut args: Vec<String>) -> Result<()> {
 
 async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
     let Some(sub) = args.first().cloned() else {
-        bail!("usage: clotho repo <init|list|status|log|commit|submit|tree|get> ...");
+        bail!("usage: clotho repo <init|list|status|log|commit|submit|tree|artifacts|get> ...");
     };
     args.remove(0);
     match sub.as_str() {
@@ -291,6 +291,50 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
                             ""
                         }
                     );
+                }
+            })
+        }
+        "artifacts" => {
+            let repo = require_one(&args, "clotho repo artifacts <repo>")?;
+            let body: Value = request_json(
+                config,
+                reqwest::Method::GET,
+                &format!("/api/v1/repos/{repo}/artifacts"),
+                None,
+            )
+            .await?;
+            emit(config, &body, || {
+                println!(
+                    "{}  {} files  {} bytes  {}",
+                    body["kind"].as_str().unwrap_or("repository"),
+                    body["total_files"].as_u64().unwrap_or(0),
+                    body["total_bytes"].as_u64().unwrap_or(0),
+                    if body["readiness"]["ready"].as_bool().unwrap_or(false) {
+                        "publishable"
+                    } else {
+                        "needs attention"
+                    }
+                );
+                for artifact in body["artifacts"].as_array().into_iter().flatten() {
+                    println!(
+                        "{}  {}  {}  {}B{}",
+                        artifact["role"].as_str().unwrap_or("other"),
+                        artifact["format"].as_str().unwrap_or("unknown"),
+                        artifact["path"].as_str().unwrap_or("?"),
+                        artifact["size_bytes"].as_u64().unwrap_or(0),
+                        if artifact["storage"].as_str() == Some("arachne") {
+                            "  Arachne"
+                        } else {
+                            ""
+                        }
+                    );
+                }
+                for warning in body["readiness"]["warnings"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                {
+                    println!("warning: {}", warning.as_str().unwrap_or(""));
                 }
             })
         }
@@ -1847,6 +1891,7 @@ fn usage() {
     clotho repo delete <name> [--yes]
     clotho repo log <repo>
     clotho repo tree <repo>
+    clotho repo artifacts <repo>
     clotho repo commit <repo> -m <msg> --file <path> [...] [--submit]
     clotho repo submit <repo> <commit-id>
 

@@ -72,7 +72,7 @@ clotho --json actions list demo-loop
 | Group | Subcommands |
 |---|---|
 | `auth` | `whoami`, `token create\|list\|revoke` |
-| `repo` | `init`, `list`, `status`, `log`, `tree`, `commit`, `submit`, `update`, `delete`, `merge-policy get\|set` |
+| `repo` | `init`, `list`, `status`, `log`, `tree`, `artifacts`, `commit`, `submit`, `update`, `delete`, `merge-policy get\|set` |
 | `issue` | `list`, `create`, `get`, `comment`, `update` |
 | `label` | `list`, `create` |
 | `milestone` | `list`, `create` |
@@ -157,6 +157,14 @@ clotho repo delete my-demo --yes
 Repository kinds are `code`, `model`, and `dataset`. When no threshold is
 provided, Clotho uses 10 MiB for code and 1 MiB for model/dataset artifacts;
 no environment variable is required.
+
+Inspect model/dataset formats, logical sizes, Arachne placement, and card /
+metadata / primary-artifact readiness directly from the Clotho control plane:
+
+```bash
+clotho repo artifacts my-model
+clotho --json repo artifacts my-dataset
+```
 
 ## Secrets
 

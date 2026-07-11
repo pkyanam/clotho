@@ -463,6 +463,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/Tree"
 
+  /api/v1/repos/{name}/artifacts:
+    get:
+      tags: [repos]
+      operationId: getArtifactManifest
+      summary: Get the semantic model/dataset artifact inventory and readiness
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - name: commit_id
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Logical artifact inventory; Arachne pointers are composed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactManifest"
+
   /api/v1/repos/{name}/file:
     get:
       tags: [repos]
@@ -2446,8 +2465,78 @@ components:
           type: string
         files:
           type: array
+            items:
+              $ref: "#/components/schemas/TreeEntry"
+    ArtifactEntry:
+      type: object
+      required: [path, role, format, family, size_bytes, storage, conflicted]
+      properties:
+        path:
+          type: string
+        role:
+          type: string
+          description: Semantic purpose such as weights, dataset_shard, card, tokenizer, or evaluation
+        format:
+          type: string
+        family:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+          description: Logical bytes after Arachne pointer composition
+        storage:
+          type: string
+          enum: [git, arachne]
+        conflicted:
+          type: boolean
+    ArtifactReadiness:
+      type: object
+      required: [card, primary_artifacts, metadata, ready, warnings]
+      properties:
+        card:
+          type: boolean
+        primary_artifacts:
+          type: boolean
+        metadata:
+          type: boolean
+        ready:
+          type: boolean
+        warnings:
+          type: array
           items:
-            $ref: "#/components/schemas/TreeEntry"
+            type: string
+    ArtifactManifest:
+      type: object
+      required: [commit_id, kind, total_files, total_bytes, arachne_files, role_counts, format_counts, readiness, artifacts]
+      properties:
+        commit_id:
+          type: string
+        kind:
+          type: string
+          enum: [code, model, dataset]
+        total_files:
+          type: integer
+          format: int64
+        total_bytes:
+          type: integer
+          format: int64
+        arachne_files:
+          type: integer
+          format: int64
+        role_counts:
+          type: object
+          additionalProperties:
+            type: integer
+        format_counts:
+          type: object
+          additionalProperties:
+            type: integer
+        readiness:
+          $ref: "#/components/schemas/ArtifactReadiness"
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactEntry"
     FileContent:
       type: object
       properties:

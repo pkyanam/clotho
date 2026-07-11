@@ -117,6 +117,13 @@ dataset repos automatically route artifacts at or above 1 MiB through Arachne
 (10 MiB for code), with a per-repository policy editable from the web app, CLI,
 or API. The standard stack needs no `.env` file for this behavior.
 
+Every repository also has a Clotho-owned semantic artifact manifest. Model
+weights (Safetensors, GGUF, ONNX, PyTorch, TensorFlow), tokenizers, dataset
+shards (Parquet, Arrow, JSONL, CSV), schemas, cards, and evaluations are
+classified with logical sizes and publication-readiness checks. The web app,
+CLI, and SDK consume that control-plane view without exposing Forgejo or
+downloading multi-gigabyte Arachne payloads.
+
 Tailscale is a first-class NetworkProvider: connect an org OAuth client from
 Clotho settings, verify it live, and mark repositories `public` or `tailscale`
 with scoped tags. Private repos fail closed when network attachment is not

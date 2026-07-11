@@ -96,6 +96,19 @@ curl -s -X PUT http://localhost:8080/api/v1/repos/weave/actions/config \
 For Daytona, Clotho maps GPU intent to `daytona-gpu`. The preferences are also
 injected as `CLOTHO_GPU_TYPES` for job provenance and workflow decisions.
 
+Model and dataset repositories expose a logical, provider-independent artifact
+manifest. It classifies portable model weights, tokenizers, dataset shards,
+schemas, cards, and evaluations without downloading large Arachne payloads:
+
+```bash
+curl -s http://localhost:8080/api/v1/repos/weave/artifacts | jq
+clotho repo artifacts weave
+```
+
+The response includes logical sizes, Git/Arachne placement, format and role
+counts, and publication-readiness warnings. This is Clotho-owned metadata;
+Forgejo remains an implementation detail.
+
 ## Quick start
 
 ```bash
@@ -149,7 +162,7 @@ curl -s http://localhost:8080/api/v1/providers | jq
 |---|---|
 | Auth | `/api/v1/me`, `/api/v1/tokens` |
 | Control plane | `/api/v1/users`, `/orgs`, `/activity` |
-| Repos / VCS | `/api/v1/repos`, `…/tree`, `…/file`, `…/commits`, `…/submit` |
+| Repos / VCS | `/api/v1/repos`, `…/tree`, `…/artifacts`, `…/file`, `…/commits`, `…/submit` |
 | Repo settings | `PATCH /api/v1/repos/{name}`, `DELETE /api/v1/repos/{name}` |
 | Issues | `…/issues`, `…/issues/{n}` (PATCH), `…/issues/{n}/comments` |
 | Labels / milestones | `…/labels`, `…/milestones` (Slice D) |

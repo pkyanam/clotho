@@ -279,6 +279,10 @@ pub fn router_with_pool(
                 .delete(repos::delete_repo),
         )
         .route("/api/v1/repos/{name}/tree", get(repos::tree))
+        .route(
+            "/api/v1/repos/{name}/artifacts",
+            get(repos::artifact_manifest),
+        )
         .route("/api/v1/repos/{name}/file", get(repos::file))
         .route("/api/v1/repos/{name}/storage", get(repos::storage_stats))
         .route(

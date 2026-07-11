@@ -34,11 +34,12 @@ export default async function RepoPage({
     if (e instanceof ClothoApiError && e.status === 404) notFound();
     throw e;
   });
-  const [tree, commits, opLog, storage] = await Promise.all([
+  const [tree, commits, opLog, storage, manifest] = await Promise.all([
     client.tree(name),
     client.commits(name, { limit: 20 }),
     client.opLog(name, 20),
     client.storageStats(name),
+    client.artifacts(name),
   ]);
   const [pulls, issues, branches, statuses, sessions, actionRuns] =
     await Promise.all([
@@ -161,9 +162,69 @@ export default async function RepoPage({
 
       <div className="mt-8 flex flex-col gap-8 lg:flex-row">
         <div className="min-w-0 grow space-y-10">
+          {detail.kind !== "code" && (
+            <section>
+              <SectionHeader
+                title={`${detail.kind} artifacts`}
+                meta={manifest.readiness.ready ? "publishable" : "needs attention"}
+              />
+              <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <StatCell label="payload" value={formatBytes(manifest.total_bytes)} />
+                <StatCell label="artifacts" value={manifest.total_files} />
+                <StatCell label="Arachne" value={manifest.arachne_files} />
+                <StatCell
+                  label="formats"
+                  value={Object.keys(manifest.format_counts).length}
+                />
+              </div>
+              <div className="mt-3 border border-kumo-hairline">
+                <div className="flex flex-wrap items-center gap-2 border-b border-kumo-hairline px-4 py-3 text-[0.8125rem]">
+                  <ReadinessItem label={`${detail.kind} card`} ready={manifest.readiness.card} />
+                  <ReadinessItem
+                    label={detail.kind === "model" ? "weights" : "dataset shards"}
+                    ready={manifest.readiness.primary_artifacts}
+                  />
+                  <ReadinessItem label="metadata" ready={manifest.readiness.metadata} />
+                  {Object.entries(manifest.format_counts).map(([format, count]) => (
+                    <Badge key={format} variant="outline">
+                      {format} · {count}
+                    </Badge>
+                  ))}
+                </div>
+                {manifest.readiness.warnings.length > 0 && (
+                  <ul className="border-b border-kumo-hairline bg-kumo-base px-4 py-2 text-[0.8125rem] text-kumo-inactive">
+                    {manifest.readiness.warnings.map((warning) => (
+                      <li key={warning}>→ {warning}</li>
+                    ))}
+                  </ul>
+                )}
+                <ul className="divide-y divide-kumo-hairline">
+                  {manifest.artifacts.slice(0, 8).map((artifact) => (
+                    <li key={artifact.path}>
+                      <Link
+                        href={`/repos/${name}/blob/${artifact.path}`}
+                        className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.875rem] transition-colors hover:bg-kumo-elevated"
+                      >
+                        <span className="min-w-0 truncate">{artifact.path}</span>
+                        <span className="flex shrink-0 items-center gap-2 text-[0.75rem] text-kumo-inactive">
+                          <span>{artifact.role}</span>
+                          <Badge variant="outline">{artifact.format}</Badge>
+                          {artifact.storage === "arachne" && (
+                            <Badge variant="outline">Arachne</Badge>
+                          )}
+                          <span>{formatBytes(artifact.size_bytes)}</span>
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </section>
+          )}
+
           <section>
             <SectionHeader
-              title="code"
+              title="repository files"
               meta={
                 tree.commit_id
                   ? `at ${shortId(tree.commit_id)}`
@@ -301,6 +362,17 @@ export default async function RepoPage({
         </div>
       </div>
     </PageFrame>
+  );
+}
+
+function ReadinessItem({ label, ready }: { label: string; ready: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span aria-hidden>{ready ? "✓" : "○"}</span>
+      <span className={ready ? "text-kumo-default" : "text-kumo-inactive"}>
+        {label}
+      </span>
+    </span>
   );
 }
 

@@ -69,6 +69,11 @@ describe("ClothoClient", () => {
       "http://gateway.test/api/v1/repos/weave/tree",
       expect.objectContaining({ headers: {} }),
     );
+    await client.artifacts("weave", "deadbeef");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://gateway.test/api/v1/repos/weave/artifacts?commit_id=deadbeef",
+      expect.objectContaining({ headers: {} }),
+    );
     await client.file("weave", "src/a b.rs", "deadbeef");
     expect(fetchMock).toHaveBeenLastCalledWith(
       "http://gateway.test/api/v1/repos/weave/file?path=src%2Fa+b.rs&commit_id=deadbeef",

@@ -134,6 +134,35 @@ export interface Tree {
   files: TreeEntry[];
 }
 
+export interface ArtifactEntry {
+  path: string;
+  role: string;
+  format: string;
+  family: string;
+  /** Logical bytes after Arachne pointer composition. */
+  size_bytes: number;
+  storage: "git" | "arachne" | string;
+  conflicted: boolean;
+}
+
+export interface ArtifactManifest {
+  commit_id: string;
+  kind: "code" | "model" | "dataset" | string;
+  total_files: number;
+  total_bytes: number;
+  arachne_files: number;
+  role_counts: Record<string, number>;
+  format_counts: Record<string, number>;
+  readiness: {
+    card: boolean;
+    primary_artifacts: boolean;
+    metadata: boolean;
+    ready: boolean;
+    warnings: string[];
+  };
+  artifacts: ArtifactEntry[];
+}
+
 export interface FileContent {
   commit_id: string;
   path: string;
@@ -779,6 +808,12 @@ export class ClothoClient {
   tree(name: string, commitId?: string): Promise<Tree> {
     return this.request(
       `/api/v1/repos/${encodeURIComponent(name)}/tree${qs({ commit_id: commitId })}`,
+    );
+  }
+
+  artifacts(name: string, commitId?: string): Promise<ArtifactManifest> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/artifacts${qs({ commit_id: commitId })}`,
     );
   }
 
