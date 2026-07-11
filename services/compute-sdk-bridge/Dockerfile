@@ -8,4 +8,5 @@ RUN pnpm install --prod --no-frozen-lockfile
 COPY src ./src
 ENV PORT=8091
 EXPOSE 8091
+USER node
 CMD ["node", "src/server.mjs"]

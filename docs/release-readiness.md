@@ -1,5 +1,10 @@
 # Public release readiness
 
+**Stage 22 gate disposition (July 11, 2026): closed for public alpha.** Cross-
+system evidence is linked from `docs/release-gap-matrix.md`; incomplete beta or
+release-event behavior is explicitly owner-accepted in `docs/known-limitations.md`.
+This is not a production or HA claim.
+
 **Target:** credible public alpha, then a compatibility-frozen beta.
 
 This is the release gate for Clotho. It is intentionally stricter than “the

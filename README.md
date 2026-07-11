@@ -20,15 +20,9 @@
   </p>
 </div>
 
-<!--
-PUBLIC RELEASE SCREENSHOT
-
-Add the final light/dark product screenshot here before announcing the release:
-
 <p align="center">
-  <img src="./docs/assets/clotho-dashboard.png" alt="Clotho dashboard" width="1200" />
+  <img src="./docs/evidence/stage22-web/dashboard-light.png" alt="Clotho public-alpha operations dashboard" width="1200" />
 </p>
--->
 
 ---
 

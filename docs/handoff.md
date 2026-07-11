@@ -1,12 +1,12 @@
-# Current handoff — Stage 22 public alpha
+# Current handoff — Stage 22 closed / Stage 23 ready
 
 **Updated:** July 11, 2026
 
 ## Release target
 
-Clotho is hardening for a credible public alpha. Stage 22 is active. The product
-owner approved revised Stages 23–29, but they remain implementation-blocked until
-the public-alpha gate is materially closed.
+Stage 22 closed for public alpha on July 11, 2026. The closure includes explicit
+owner-accepted alpha limitations and is not a production or HA claim. Stage 23
+may now begin with the approved production identity and tenant-isolation scope.
 
 The current evidence-backed gap inventory is
 [`release-gap-matrix.md`](release-gap-matrix.md). The governing checklist is
@@ -86,6 +86,13 @@ not_found` and added a live MCP↔REST error-equivalence assertion.
   gateway suite now covers these directory boundaries.
 
 ## Baseline state
+
+The Stage 22 closure run passed the complete host baseline, both production web
+builds, the 109-operation contract gate, non-destructive Compose rebuild, live
+stack diagnostics, collaboration/MCP/storage suites, byte-identical REST/MCP
+capability discovery, complete backup/restore drill, recursive clean-clone
+bootstrap, history secret scan, and high/critical dependency/config audit. See
+[`evidence/stage22-closure.md`](evidence/stage22-closure.md).
 
 The host baseline passes:
 
@@ -171,16 +178,10 @@ removed.
 
 ## Next bounded acceptance test
 
-Continue Stage 22; do not start Stage 23. The next smallest authorization slice
-is authorization/sanitization of human provider configuration metadata with
-two hostile organizations and authorization before provider probes. Then close
-complete backup/restore, migration forward-repair, supply-chain,
-clean-clone, machine capability, CLI/MCP contract, and browser-journey gaps in
-the release matrix. Stage 22 remains active and must not be called complete.
-
-After Stage 22 is materially closed, begin Stage 23—not the previous Capsule
-plan. Stage 23 establishes production identity, authorization, and tenant
-isolation; Stage 24 establishes hosted/self-host production profiles and elastic
-workload cells. Capsules move to Stage 25, Lachesis plus Signals to Stage 26,
-Compute Bindings to Stage 27, lazy/protocol work to Stage 28, and the provider/
-lifecycle/federation kit to Stage 29. See ADR-0023 and ADR-0024.
+Begin Stage 23—not the previous Capsule plan. Start with the typed tenant
+context and route/resource permission inventory before adding invitations or
+hosted identity behavior. Stage 24 establishes hosted/self-host production
+profiles and elastic workload cells. Capsules move to Stage 25, Lachesis plus
+Signals to Stage 26, Compute Bindings to Stage 27, lazy/protocol work to Stage
+28, and the provider/lifecycle/federation kit to Stage 29. See ADR-0023 and
+ADR-0024.

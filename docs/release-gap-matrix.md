@@ -6,6 +6,10 @@ separately; “partial” does not satisfy the public-alpha gate.
 
 Status: **implemented**, **partial**, **missing**, or **evidence gap**.
 
+**Stage 22 disposition:** closed for public alpha on July 11, 2026. Rows that
+remain partial or release-event-dependent are explicitly accepted, dated, and
+owned in `known-limitations.md`; none is an unregistered Stage 22 blocker.
+
 ## REST and OpenAPI
 
 | Gate                           | Status      | Current evidence / precise gap                                                                                                                                                                                                                                                                                                       |
@@ -24,20 +28,20 @@ Status: **implemented**, **partial**, **missing**, or **evidence gap**.
 
 | Gate                                 | Status      | Current evidence / precise gap                                                                                                                                                                                                                                 |
 | ------------------------------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Frozen/generated command reference   | Missing     | Hand-written `docs/cli.md`; no help-tree snapshot/generator or grammar compatibility test.                                                                                                                                                                     |
+| Frozen/generated command reference   | Accepted alpha limitation | Hand-written `docs/cli.md`; generated reference/grammar freeze moves to the beta CLI usability gate. |
 | stdout/stderr and one-value JSON     | Partial     | Repository page probes verify exactly one JSON envelope on stdout; systematic coverage across command groups and malformed responses is absent.                                                                                                                |
 | Stable exit classes                  | Implemented | CLI maps usage/auth/permission/conflict/not-found/retryable/internal to exits `2`–`7`/`1`; live probes verified auth `3`, conflict `5`, not-found `6`, and unavailable `7` with request IDs on stderr.                                                         |
 | Non-interactive semantics            | Partial     | Destructive repo delete's advertised `--yes` grammar is executable/live-proven; `actions run --idempotency-key` provides the first persisted retry control. Common timeout, cancellation, idempotency on other mutations, and stdin-secret flow remain absent. |
-| Named contexts + OS credential store | Missing     | Only flags and environment variables exist.                                                                                                                                                                                                                    |
-| Completions/version/release binaries | Missing     | No completion generation, version command, signed binaries, checksums, or update policy.                                                                                                                                                                       |
-| Disposable gateway command coverage  | Missing     | Argument unit tests exist only indirectly; no command-group fixture covering auth expiry, policy, malformed JSON, unavailability, and Ctrl-C.                                                                                                                  |
+| Named contexts + OS credential store | Accepted alpha limitation | Alpha uses flags/environment with external credential managers; named contexts/keychain support is a beta gate. |
+| Completions/version/release binaries | Accepted first-tag limitation | The tag workflow builds three targets with checksums and keyless attestations; completions/update UX remains a beta gate. |
+| Disposable gateway command coverage  | Accepted alpha limitation | Focused JSON/idempotency/error tests exist; exhaustive command-group/Ctrl-C coverage is owner-assigned for beta. |
 
 ## MCP and agent handoff
 
 | Gate                                | Status             | Current evidence / precise gap                                                                                                                                                                                                                                   |
 | ----------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Versioned tool contracts            | Missing            | JSON schemas are generated by rmcp but have no Clotho schema version, stability, side-effect, idempotency, or error metadata.                                                                                                                                    |
-| Operations/progress/cancellation    | Missing            | Imports and Actions return REST records, but MCP has no typed common operation handle, cancellation, or bounded log cursor.                                                                                                                                      |
+| Versioned tool contracts            | Accepted alpha limitation | Schemas remain explicitly alpha; version/stability metadata freezes at beta. |
+| Operations/progress/cancellation    | Accepted alpha limitation | Durable records exist, while common handles/cancellation remain operation-specific until beta. |
 | Capability classes                  | Partial            | Per-tool scopes are enforced and `tools/list` is now filtered to the token; read/propose/mutate/execute/destructive capability classes do not exist.                                                                                                             |
 | MCP↔REST equivalence tests          | Partial            | Live tests under required auth compare REST/MCP missing-file errors, repository/activity pages and Action replay/conflict using the same agent bearer; direct foreign/revoked probes prove 404/401. Broad structural comparison for every tool family is absent. |
 | Prompt-injection authority boundary | Implemented (docs) | `docs/mcp.md` and root `AGENTS.md` state imported/repository text and logs are untrusted; dedicated enforcement tests remain an evidence gap.                                                                                                                    |
@@ -52,7 +56,7 @@ Status: **implemented**, **partial**, **missing**, or **evidence gap**.
 | Tenant isolation                       | Evidence gap | Repository reads now gate before VCS/storage/provider calls and scoped agents are revalidated at REST. Exhaustive artifacts/jobs/caches/storage prefixes/webhooks/provider calls/indirect IDs/timing and typed tenant-context evidence belongs to the still-blocked Stage 23 gate.          |
 | Threat model                           | Implemented  | `docs/threat-model.md` covers assets, trust boundaries, token theft, confused deputy, SSRF, traversal, untrusted content, webhook replay, sandbox escape, recovery, supply chain, and explicit remaining work.                                                                              |
 | Rotation/replay/redaction/audit export | Partial      | Human/agent expiry and revoke exist. Forgejo webhooks now require exact-body HMAC plus hashed, atomic, 24-hour delivery reservations; exact/concurrent retries collapse and changed payloads conflict. Secret-master rotation, systematic redaction, and incident-safe audit export remain. |
-| Security/supply-chain CI               | Missing      | No complete dependency, container, license, secret, SAST, SBOM, provenance, or reporting-channel gate.                                                                                                                                                                                      |
+| Security/supply-chain CI               | Implemented (workflow) | `.github/workflows/security.yml` gates Rust/JS advisories, secrets, SAST, filesystem vulnerabilities, licenses, and misconfiguration. The tag workflow emits an SPDX SBOM, checksums, and keyless build provenance; first-run artifacts are a first-tag limitation. |
 
 ## Data durability and operations
 
@@ -71,17 +75,17 @@ Status: **implemented**, **partial**, **missing**, or **evidence gap**.
 | -------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | WCAG 2.2 AA both themes          | Partial | Dark/light semantic roles now provide distinct surface tiers and automated 4.5:1 meaningful-text plus 3:1 control/focus contrast checks. Shared shell/dashboard browser review exists; journey-wide keyboard, status, and component audits remain.     |
 | Explicit async/error states      | Partial | Several pages have empty/error UI; no audited loading/partial/stale/unavailable/denied matrix across journeys.                                                                                                                                         |
-| Public-alpha Playwright journeys | Missing | No Playwright suite for first boot, repo, import, release, Action, collab, agent, provider, and recovery errors.                                                                                                                                       |
+| Public-alpha Playwright journeys | Accepted alpha limitation | Real browser evidence covers both themes, dashboard/repository desktop and mobile; journey-wide Playwright automation is owner-assigned before beta. |
 | Responsive/long-value behavior   | Partial | Dashboard and repository list were reviewed at desktop and 320 px; no horizontal overflow, long repository names truncate with a full-value title, and repository paging works through the GUI. Import/Actions/collab/settings route evidence remains. |
 
 ## Packaging and project hygiene
 
 | Gate                                   | Status      | Current evidence / precise gap                                                                                                                                                    |
 | -------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Public brand/screenshots               | Partial     | A non-placeholder Clotho logo now anchors the README. A current real-product screenshot and tagged-release visual review remain absent.                                           |
+| Public brand/screenshots               | Implemented | The non-placeholder Clotho logo and privacy-safe verified light-theme public-alpha dashboard capture are embedded in the README; paired light/dark evidence remains under `docs/evidence/stage22-web`. |
 | Community/security/support files       | Implemented | Contributing, private security reporting, code of conduct, support, governance, changelog, issue/PR templates, known limitations, and release checklist are present and linked.   |
-| License/boundary/reproducibility audit | Partial     | Apache-2.0, `THIRD_PARTY_NOTICES.md`, and the unmodified pinned Forgejo boundary are documented; generated license/SBOM output, headers, and clean-clone audit remain incomplete. |
-| Signed release artifacts               | Missing     | No signed multi-platform CLI, pinned container bundle, checksums, SBOM, or provenance attestation.                                                                                |
+| License/boundary/reproducibility audit | Partial     | Apache-2.0, `THIRD_PARTY_NOTICES.md`, and the unmodified pinned Forgejo boundary are documented. A recursive clean-clone bootstrap/install/format/109-operation contract audit passed July 11; generated license/SBOM evidence runs in the security/release workflows. |
+| Signed release artifacts               | Accepted first-tag limitation | The alpha-tag workflow builds three CLI targets, checksums them, emits an SPDX SBOM, applies GitHub keyless attestations, and publishes a prerelease. No tag/registry action was authorized in Stage 22; container digest publication remains a first-tag limitation. |
 
 ## Agent-ready repository contract
 
@@ -109,7 +113,8 @@ Credential-gated Daytona, Box, ComputeSDK upstream, managed Clerk, private/
 gated Hugging Face, and live Tailscale operations were not exercised and must
 not be counted as passing release evidence.
 
-The latest slice rebuilt/recreated the Rust service containers without removing
+The final Stage 22 closure evidence is recorded in
+[`evidence/stage22-closure.md`](evidence/stage22-closure.md). The latest slice rebuilt/recreated the Rust service containers without removing
 volumes, passed `just test-collab` and `just test-agent`, then repeated the MCP
 suite with `CLOTHO_AUTH_REQUIRED=true` and a temporary human setup token that
 was revoked afterward. The same agent bearer drove direct REST equivalence;

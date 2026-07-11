@@ -1,0 +1,63 @@
+name: public-alpha-release
+
+on:
+  push:
+    tags: ["v*-alpha.*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  cli:
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, archive: tar.gz }
+          - { os: macos-14, target: aarch64-apple-darwin, archive: tar.gz }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, archive: zip }
+    runs-on: "${{ matrix.os }}"
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "${{ matrix.target }}" }
+      - run: cargo build --release --locked -p clotho-cli --target "${{ matrix.target }}"
+      - name: Package Unix CLI
+        if: runner.os != 'Windows'
+        shell: bash
+        run: tar -C "target/${{ matrix.target }}/release" -czf "clotho-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" clotho
+      - name: Package Windows CLI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive "target/${{ matrix.target }}/release/clotho.exe" "clotho-${{ github.ref_name }}-${{ matrix.target }}.zip"
+      - name: Checksums
+        shell: bash
+        run: shasum -a 256 clotho-${{ github.ref_name }}-${{ matrix.target }}.* > clotho-${{ github.ref_name }}-${{ matrix.target }}.sha256
+      - uses: actions/attest-build-provenance@v2
+        with: { subject-path: "clotho-${{ github.ref_name }}-${{ matrix.target }}.*" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: "clotho-${{ matrix.target }}"
+          path: "clotho-${{ github.ref_name }}-${{ matrix.target }}.*"
+
+  sbom-and-release:
+    needs: cli
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: anchore/sbom-action@v0
+        with: { path: ., format: spdx-json, output-file: clotho-source.spdx.json }
+      - uses: actions/attest-sbom@v2
+        with: { subject-path: clotho-source.spdx.json, sbom-path: clotho-source.spdx.json }
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: true
+          files: |
+            dist/*
+            clotho-source.spdx.json
