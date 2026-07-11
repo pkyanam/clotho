@@ -2972,6 +2972,14 @@ components:
           type: string
         timeout_seconds:
           type: integer
+        accelerator:
+          type: string
+          enum: [cpu, gpu]
+          default: cpu
+        gpu_types:
+          type: array
+          items:
+            type: string
     ProviderCapabilities:
       type: object
       properties:
@@ -2997,6 +3005,12 @@ components:
           type: boolean
         terminal_streaming:
           type: boolean
+        gpu:
+          type: boolean
+        gpu_types:
+          type: array
+          items:
+            type: string
         cost_hints:
           type: string
     Provider:

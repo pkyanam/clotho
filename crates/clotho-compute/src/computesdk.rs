@@ -182,6 +182,8 @@ impl ComputeSdkBridgeProvider {
                 public_url: false,
                 file_api: true,
                 terminal_streaming: false,
+                gpu: false,
+                gpu_types: vec![],
                 cost_hints: "depends on upstream ComputeSDK provider".into(),
             },
             default_snapshot: String::new(),

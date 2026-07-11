@@ -85,6 +85,10 @@ message ProviderCapabilities {
   bool terminal_streaming = 10;
   // Free-text cost/tier hint when known (e.g. "pay-as-you-go"); never a secret.
   string cost_hints = 11;
+  // Provider adapter can allocate GPU-backed jobs through this CCI path.
+  bool gpu = 12;
+  // Stable provider-native preference ids (e.g. H100, RTX-5090).
+  repeated string gpu_types = 13;
 }
 
 // Non-secret provider state for API/web/SDK.

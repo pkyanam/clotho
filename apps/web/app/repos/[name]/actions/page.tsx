@@ -64,14 +64,14 @@ export default async function ActionsPage({
         <form action={startRun}>
           <Button
             type="submit"
-            disabled={!detail.main_commit_id || !config.enabled}
+            disabled={!detail.main_commit_id || !config.enabled || !provider?.configured}
           >
             run
           </Button>
         </form>
       </div>
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <StatCell label="provider" value={provider?.name ?? config.provider} />
         <StatCell
           label="status"
@@ -79,8 +79,16 @@ export default async function ActionsPage({
           muted={!provider?.configured}
         />
         <StatCell
+          label="accelerator"
+          value={config.accelerator === "gpu" ? "GPU" : "CPU"}
+        />
+        <StatCell
           label="default image"
-          value={config.default_image || "provider default"}
+          value={
+            config.accelerator === "gpu" && config.provider === "daytona"
+              ? "daytona-gpu"
+              : config.default_image || "provider default"
+          }
         />
         <StatCell
           label="latest run"
@@ -105,7 +113,7 @@ export default async function ActionsPage({
                 title="no action runs yet"
                 description="start a manual run from the current main commit, or push a change to trigger one automatically."
                 action={
-                  detail.main_commit_id && config.enabled ? (
+                  detail.main_commit_id && config.enabled && provider?.configured ? (
                     <form action={startRun}>
                       <Button type="submit">start first run</Button>
                     </form>
@@ -189,6 +197,10 @@ export default async function ActionsPage({
               <Meta label="trigger" value="push or manual start" />
               <Meta label="status target" value="pull request checks" />
               <Meta
+                label="GPU preference"
+                value={config.gpu_types.join(", ") || "provider default"}
+              />
+              <Meta
                 label="capabilities"
                 value={(provider?.capabilities ?? []).join(", ") || "unknown"}
               />
@@ -207,6 +219,8 @@ function fallbackActionsConfig(error: unknown): ActionsConfig {
       provider: "daytona",
       default_image: "ubuntu:22.04",
       timeout_seconds: 900,
+      accelerator: "cpu",
+      gpu_types: [],
     };
   }
   throw error;

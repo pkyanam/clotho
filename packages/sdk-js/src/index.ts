@@ -357,6 +357,8 @@ export interface ActionsConfig {
   provider: string;
   default_image: string;
   timeout_seconds: number;
+  accelerator: "cpu" | "gpu" | string;
+  gpu_types: string[];
 }
 
 /** Structured capability flags from the CCI provider registry (Stage 12). */
@@ -371,6 +373,8 @@ export interface ProviderCapabilities {
   public_url: boolean;
   file_api: boolean;
   terminal_streaming: boolean;
+  gpu: boolean;
+  gpu_types: string[];
   cost_hints: string;
 }
 

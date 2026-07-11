@@ -124,6 +124,11 @@ available instead of silently running over public egress. Provider credentials
 live in Clotho's encrypted vault; Docker generates a persistent vault key when
 an explicit master key is not supplied.
 
+GPU compute is repository policy too. CCI advertises provider GPU capability
+and supported types; a repo can select `accelerator: gpu` and preferences such
+as H100/H200. Daytona-backed Actions translate that intent to the official
+`daytona-gpu` snapshot while keeping provider syntax out of the repository.
+
 ---
 
 ## Repository Layout

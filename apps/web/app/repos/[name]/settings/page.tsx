@@ -18,7 +18,11 @@ import {
 import { GeneralForm } from "./general-form";
 import { DeleteForm } from "./delete-form";
 import { MergePolicyForm } from "./merge-policy-form";
-import { createRepoSecret, deleteRepoSecret } from "./actions";
+import {
+  createRepoSecret,
+  deleteRepoSecret,
+  updateActionsPolicy,
+} from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -290,6 +294,45 @@ export default async function SettingsPage({
               </>
             }
           >
+            <form
+              action={updateActionsPolicy.bind(null, name)}
+              className="mb-6 grid gap-4 border-b border-kumo-hairline pb-6 sm:grid-cols-2"
+            >
+              <label className="flex items-center gap-2 text-[0.8125rem] text-kumo-inactive sm:col-span-2">
+                <input type="checkbox" name="enabled" defaultChecked={actionsConfig.enabled} />
+                enable Actions for this repository
+              </label>
+              <label className="text-[0.8125rem] text-kumo-inactive">
+                provider
+                <select name="provider" defaultValue={actionsConfig.provider} className="mt-1 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 text-kumo-default">
+                  {providers.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-[0.8125rem] text-kumo-inactive">
+                accelerator
+                <select name="accelerator" defaultValue={actionsConfig.accelerator} className="mt-1 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 text-kumo-default">
+                  <option value="cpu">CPU</option>
+                  <option value="gpu">GPU</option>
+                </select>
+              </label>
+              <label className="text-[0.8125rem] text-kumo-inactive">
+                image / snapshot
+                <input name="default_image" defaultValue={actionsConfig.default_image} className="mt-1 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 text-kumo-default" />
+              </label>
+              <label className="text-[0.8125rem] text-kumo-inactive">
+                timeout (seconds)
+                <input name="timeout_seconds" type="number" min="1" defaultValue={actionsConfig.timeout_seconds} className="mt-1 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 text-kumo-default" />
+              </label>
+              <label className="text-[0.8125rem] text-kumo-inactive sm:col-span-2">
+                preferred GPU types (comma-separated)
+                <input name="gpu_types" defaultValue={actionsConfig.gpu_types.join(", ")} placeholder="H100, H200, RTX-5090" className="mt-1 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 text-kumo-default" />
+              </label>
+              <div className="sm:col-span-2">
+                <Button type="submit" variant="outline">save runner policy</Button>
+              </div>
+            </form>
             <dl>
               <MetaRow
                 label="provider"
@@ -308,6 +351,14 @@ export default async function SettingsPage({
               <MetaRow
                 label="timeout"
                 value={`${actionsConfig.timeout_seconds} seconds`}
+              />
+              <MetaRow
+                label="accelerator"
+                value={
+                  actionsConfig.accelerator === "gpu"
+                    ? `GPU${actionsConfig.gpu_types.length ? ` · ${actionsConfig.gpu_types.join(", ")}` : ""}`
+                    : "CPU"
+                }
               />
             </dl>
             {!provider?.configured && (
@@ -433,6 +484,8 @@ function fallbackActionsConfig(error: unknown): ActionsConfig {
       provider: "daytona",
       default_image: "ubuntu:22.04",
       timeout_seconds: 900,
+      accelerator: "cpu",
+      gpu_types: [],
     };
   }
   throw error;

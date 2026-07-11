@@ -84,6 +84,18 @@ curl -s -X PATCH http://localhost:8080/api/v1/repos/weave \
   -d '{"network_mode":"tailscale","network_tags":["tag:clotho-weave"]}' | jq
 ```
 
+GPU runner policy is stored in the repo's Actions config. The provider must
+advertise GPU support; unsupported providers/types are rejected before save:
+
+```bash
+curl -s -X PUT http://localhost:8080/api/v1/repos/weave/actions/config \
+  -H 'content-type: application/json' \
+  -d '{"enabled":true,"provider":"daytona","accelerator":"gpu","gpu_types":["H100","H200"],"default_image":"","timeout_seconds":1800}' | jq
+```
+
+For Daytona, Clotho maps GPU intent to `daytona-gpu`. The preferences are also
+injected as `CLOTHO_GPU_TYPES` for job provenance and workflow decisions.
+
 ## Quick start
 
 ```bash

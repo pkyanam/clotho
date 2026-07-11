@@ -59,6 +59,8 @@ fn to_pb_info(d: ProviderDescriptor, enabled: bool) -> ProviderInfo {
             file_api: caps.file_api,
             terminal_streaming: caps.terminal_streaming,
             cost_hints: caps.cost_hints,
+            gpu: caps.gpu,
+            gpu_types: caps.gpu_types,
         }),
         default_snapshot: d.default_snapshot,
         notes: d.notes,

@@ -493,6 +493,8 @@ impl ComputeProvider for BoxProvider {
                 public_url: true,
                 file_api: true,
                 terminal_streaming: true,
+                gpu: false,
+                gpu_types: vec![],
                 cost_hints: "persistent Ubuntu VM; TTL / pay-per-use (see Box dashboard)".into(),
             },
             default_snapshot: String::new(),

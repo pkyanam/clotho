@@ -168,14 +168,7 @@ async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<CiOutput, St
     // pick a configured one-shot provider.
     let config = state.actions.config_for(repo).await;
     let provider_id = config.provider.trim().to_string();
-    let snapshot =
-        if config.default_image.trim().is_empty() || config.default_image == "ubuntu:22.04" {
-            // Leave empty so the provider uses its own default snapshot when the
-            // repo still has the generic gateway fallback image.
-            String::new()
-        } else {
-            config.default_image.clone()
-        };
+    let snapshot = job_snapshot(&config, &provider_id);
     let timeout_secs = config.timeout_seconds;
 
     // Resolve provider credentials from Clotho secrets (docs/adr/0014).
@@ -206,12 +199,17 @@ async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<CiOutput, St
         content: archive.tar,
     }];
     job_files.extend(materialized_large_files(state, repo, &checkout).await?);
+    let mut env = std::collections::HashMap::new();
+    env.insert("CLOTHO_ACCELERATOR".into(), config.accelerator.clone());
+    if !config.gpu_types.is_empty() {
+        env.insert("CLOTHO_GPU_TYPES".into(), config.gpu_types.join(","));
+    }
     let job = RunJobRequest {
         label: format!("{repo}@{}", checkout.get(..12).unwrap_or(&checkout)),
         snapshot,
         files: job_files,
         commands: vec![script],
-        env: Default::default(),
+        env,
         timeout_secs,
         provider_id,
         provider_credentials,
@@ -229,6 +227,22 @@ async fn execute(state: &AppState, repo: &str, sha: &str) -> Result<CiOutput, St
         provider: result.provider,
         sandbox_id: result.sandbox_id,
     })
+}
+
+fn job_snapshot(config: &crate::actions::ActionsConfig, provider_id: &str) -> String {
+    if config.accelerator == "gpu" && provider_id.eq_ignore_ascii_case("daytona") {
+        // Daytona's supported GPU entry point is a provider-native snapshot;
+        // keeping this translation at the CCI edge avoids vendor syntax in
+        // repository workflow files.
+        return "daytona-gpu".into();
+    }
+    if config.default_image.trim().is_empty() || config.default_image == "ubuntu:22.04" {
+        // Leave empty so the provider uses its own default snapshot when the
+        // repo still has the generic gateway fallback image.
+        String::new()
+    } else {
+        config.default_image.clone()
+    }
 }
 
 /// Ship Arachne payloads beside the bare-repo archive. Sandboxes may have no
@@ -337,5 +351,39 @@ fn truncate(s: &str, max: usize) -> String {
         let mut out: String = s.chars().take(max).collect();
         out.push('…');
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::job_snapshot;
+    use crate::actions::ActionsConfig;
+
+    fn config(accelerator: &str, image: &str) -> ActionsConfig {
+        ActionsConfig {
+            enabled: true,
+            provider: "daytona".into(),
+            default_image: image.into(),
+            timeout_seconds: 900,
+            accelerator: accelerator.into(),
+            gpu_types: vec!["H100".into()],
+        }
+    }
+
+    #[test]
+    fn daytona_gpu_policy_maps_to_provider_snapshot() {
+        assert_eq!(
+            job_snapshot(&config("gpu", "ubuntu:22.04"), "daytona"),
+            "daytona-gpu"
+        );
+    }
+
+    #[test]
+    fn cpu_policy_keeps_provider_default_or_explicit_image() {
+        assert_eq!(job_snapshot(&config("cpu", "ubuntu:22.04"), "daytona"), "");
+        assert_eq!(
+            job_snapshot(&config("cpu", "custom-snapshot"), "daytona"),
+            "custom-snapshot"
+        );
     }
 }

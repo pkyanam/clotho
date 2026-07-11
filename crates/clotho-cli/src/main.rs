@@ -1251,7 +1251,13 @@ async fn cmd_actions(config: &Config, mut args: Vec<String>) -> Result<()> {
             let repo = args.remove(0);
             let provider = take_option(&mut args, "--provider");
             let enabled = take_option(&mut args, "--enabled");
-            if provider.is_none() && enabled.is_none() {
+            let accelerator = take_option(&mut args, "--accelerator");
+            let gpu_types = take_repeated(&mut args, "--gpu-type");
+            if provider.is_none()
+                && enabled.is_none()
+                && accelerator.is_none()
+                && gpu_types.is_empty()
+            {
                 let body: Value = request_json(
                     config,
                     reqwest::Method::GET,
@@ -1261,9 +1267,10 @@ async fn cmd_actions(config: &Config, mut args: Vec<String>) -> Result<()> {
                 .await?;
                 return emit(config, &body, || {
                     println!(
-                        "enabled={} provider={} image={} timeout={}s",
+                        "enabled={} provider={} accelerator={} image={} timeout={}s",
                         body["enabled"].as_bool().unwrap_or(false),
                         body["provider"].as_str().unwrap_or(""),
+                        body["accelerator"].as_str().unwrap_or("cpu"),
                         body["default_image"].as_str().unwrap_or(""),
                         body["timeout_seconds"].as_u64().unwrap_or(0)
                     );
@@ -1283,6 +1290,12 @@ async fn cmd_actions(config: &Config, mut args: Vec<String>) -> Result<()> {
             if let Some(e) = enabled {
                 cfg["enabled"] = json!(e == "true" || e == "1" || e == "yes");
             }
+            if let Some(accelerator) = accelerator {
+                cfg["accelerator"] = json!(accelerator);
+            }
+            if !gpu_types.is_empty() {
+                cfg["gpu_types"] = json!(gpu_types);
+            }
             let body = request_value(
                 config,
                 reqwest::Method::PUT,
@@ -1292,9 +1305,10 @@ async fn cmd_actions(config: &Config, mut args: Vec<String>) -> Result<()> {
             .await?;
             emit(config, &body, || {
                 println!(
-                    "updated enabled={} provider={}",
+                    "updated enabled={} provider={} accelerator={}",
                     body["enabled"].as_bool().unwrap_or(false),
-                    body["provider"].as_str().unwrap_or("")
+                    body["provider"].as_str().unwrap_or(""),
+                    body["accelerator"].as_str().unwrap_or("cpu")
                 );
             })
         }
@@ -1869,7 +1883,7 @@ fn usage() {
     clotho actions run <repo> [--commit <id>] [--branch main] [--actor cli]
     clotho actions get <repo> <run-id>
     clotho actions logs <repo> <run-id>
-    clotho actions config <repo> [--provider <id>] [--enabled true|false]
+    clotho actions config <repo> [--provider <id>] [--enabled true|false] [--accelerator cpu|gpu] [--gpu-type <id>]...
 
   provider
     clotho provider list [--layer compute|storage|network|auth] [--all]

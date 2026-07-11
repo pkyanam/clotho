@@ -57,6 +57,23 @@ export async function updateMergePolicy(repo: string, formData: FormData) {
   revalidatePath(`/repos/${repo}/pulls`);
 }
 
+export async function updateActionsPolicy(repo: string, formData: FormData) {
+  const gpuTypes = String(formData.get("gpu_types") ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  await (await api()).updateActionsConfig(repo, {
+    enabled: formData.get("enabled") === "on",
+    provider: String(formData.get("provider") ?? "daytona"),
+    default_image: String(formData.get("default_image") ?? ""),
+    timeout_seconds: Number(formData.get("timeout_seconds") ?? 900),
+    accelerator: String(formData.get("accelerator") ?? "cpu"),
+    gpu_types: gpuTypes,
+  });
+  revalidatePath(`/repos/${repo}/settings`);
+  revalidatePath(`/repos/${repo}/actions`);
+}
+
 export async function createRepoSecret(repo: string, formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const value = String(formData.get("value") ?? "");

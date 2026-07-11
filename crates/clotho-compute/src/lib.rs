@@ -86,6 +86,8 @@ pub struct ProviderCapabilities {
     pub public_url: bool,
     pub file_api: bool,
     pub terminal_streaming: bool,
+    pub gpu: bool,
+    pub gpu_types: Vec<String>,
     /// Free-text cost/tier hint when known; never a secret.
     pub cost_hints: String,
 }
@@ -120,6 +122,12 @@ impl ProviderCapabilities {
         }
         if self.terminal_streaming {
             tags.push("terminal-streaming".into());
+        }
+        if self.gpu {
+            tags.push("gpu".into());
+        }
+        if !self.gpu_types.is_empty() {
+            tags.push(format!("gpu-types:{}", self.gpu_types.join(",")));
         }
         if !self.regions.is_empty() {
             tags.push(format!("regions:{}", self.regions.join(",")));

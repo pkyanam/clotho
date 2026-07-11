@@ -119,6 +119,16 @@ Clotho live-verifies the OAuth client before encrypting it. Repositories marked
 `tailscale` fail closed until both network credentials and a private-net-capable
 compute path are ready.
 
+GPU Actions policy:
+
+```bash
+clotho actions config model-repo --provider daytona --accelerator gpu --gpu-type H100 --gpu-type H200
+clotho actions run model-repo
+```
+
+CCI validates that the chosen provider advertises GPU support. Daytona jobs use
+its `daytona-gpu` snapshot; CPU remains the default for every repository.
+
 ## Agents
 
 Manage non-human identities (requires org admin or bootstrap; gateway needs

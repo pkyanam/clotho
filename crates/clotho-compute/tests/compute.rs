@@ -63,6 +63,20 @@ async fn registry_lists_multiple_providers_with_capabilities() {
     assert!(matches!(err, ComputeError::Disabled(_)));
 }
 
+#[test]
+fn daytona_advertises_the_gpu_path_clotho_can_allocate() {
+    let descriptor = DaytonaProvider::from_env_or_unconfigured().descriptor();
+    assert!(descriptor.capabilities.gpu);
+    assert!(descriptor
+        .capabilities
+        .gpu_types
+        .contains(&"H100".to_string()));
+    assert!(descriptor
+        .capabilities
+        .gpu_types
+        .contains(&"RTX-5090".to_string()));
+}
+
 #[tokio::test]
 async fn daytona_runs_a_real_job_and_reports_exit_and_logs() {
     let Some(provider) = DaytonaProvider::from_env() else {

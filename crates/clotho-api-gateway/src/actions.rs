@@ -92,7 +92,8 @@ impl ActionsState {
         if let Some(pool) = &self.pool {
             match sqlx::query(
                 r#"
-                select enabled, provider, default_image, timeout_seconds
+                select enabled, provider, default_image, timeout_seconds,
+                       accelerator, gpu_types
                 from actions_configs
                 where repo = $1
                 "#,
@@ -107,6 +108,8 @@ impl ActionsState {
                         provider: row.get("provider"),
                         default_image: row.get("default_image"),
                         timeout_seconds: row.get::<i32, _>("timeout_seconds").max(0) as u32,
+                        accelerator: row.get("accelerator"),
+                        gpu_types: row.get("gpu_types"),
                     };
                 }
                 Ok(None) => {}
@@ -123,6 +126,8 @@ impl ActionsState {
                 provider: self.defaults.provider.clone(),
                 default_image: self.defaults.default_image_or_fallback(),
                 timeout_seconds: self.defaults.timeout_seconds,
+                accelerator: "cpu".into(),
+                gpu_types: vec![],
             })
     }
 
@@ -131,13 +136,16 @@ impl ActionsState {
             match sqlx::query(
                 r#"
                 insert into actions_configs
-                    (repo, enabled, provider, default_image, timeout_seconds)
-                values ($1, $2, $3, $4, $5)
+                    (repo, enabled, provider, default_image, timeout_seconds,
+                     accelerator, gpu_types)
+                values ($1, $2, $3, $4, $5, $6, $7)
                 on conflict (repo) do update set
                     enabled = excluded.enabled,
                     provider = excluded.provider,
                     default_image = excluded.default_image,
                     timeout_seconds = excluded.timeout_seconds,
+                    accelerator = excluded.accelerator,
+                    gpu_types = excluded.gpu_types,
                     updated_at = now()
                 "#,
             )
@@ -146,6 +154,8 @@ impl ActionsState {
             .bind(&config.provider)
             .bind(&config.default_image)
             .bind(config.timeout_seconds as i32)
+            .bind(&config.accelerator)
+            .bind(&config.gpu_types)
             .execute(pool)
             .await
             {
@@ -506,6 +516,10 @@ pub struct ActionsConfig {
     pub default_image: String,
     #[serde(default = "default_timeout")]
     pub timeout_seconds: u32,
+    #[serde(default = "default_accelerator")]
+    pub accelerator: String,
+    #[serde(default)]
+    pub gpu_types: Vec<String>,
 }
 
 fn default_enabled() -> bool {
@@ -518,6 +532,10 @@ fn default_provider() -> String {
 
 fn default_timeout() -> u32 {
     900
+}
+
+fn default_accelerator() -> String {
+    "cpu".into()
 }
 
 #[derive(Serialize)]
@@ -562,6 +580,8 @@ pub struct ProviderCapabilitiesJson {
     pub public_url: bool,
     pub file_api: bool,
     pub terminal_streaming: bool,
+    pub gpu: bool,
+    pub gpu_types: Vec<String>,
     pub cost_hints: String,
 }
 
@@ -594,6 +614,12 @@ impl ProviderCapabilitiesJson {
         }
         if self.terminal_streaming {
             tags.push("terminal-streaming".into());
+        }
+        if self.gpu {
+            tags.push("gpu".into());
+        }
+        if !self.gpu_types.is_empty() {
+            tags.push(format!("gpu-types:{}", self.gpu_types.join(",")));
         }
         tags
     }
@@ -738,6 +764,45 @@ pub async fn put_config(
     }
     if config.timeout_seconds == 0 {
         config.timeout_seconds = state.actions.defaults.timeout_seconds;
+    }
+    if !matches!(config.accelerator.as_str(), "cpu" | "gpu") {
+        return Err(ApiError::InvalidRequest(
+            "accelerator must be cpu or gpu".into(),
+        ));
+    }
+    if config.accelerator == "cpu" {
+        config.gpu_types.clear();
+    } else {
+        let providers = list_providers_for(&state).await;
+        let provider = providers
+            .providers
+            .iter()
+            .find(|provider| provider.id.eq_ignore_ascii_case(&config.provider))
+            .ok_or_else(|| {
+                ApiError::InvalidRequest(format!(
+                    "compute provider {:?} is not registered",
+                    config.provider
+                ))
+            })?;
+        if !provider.capability_detail.gpu {
+            return Err(ApiError::InvalidRequest(format!(
+                "compute provider {:?} does not advertise GPU jobs",
+                config.provider
+            )));
+        }
+        for gpu_type in &config.gpu_types {
+            if !provider
+                .capability_detail
+                .gpu_types
+                .iter()
+                .any(|supported| supported.eq_ignore_ascii_case(gpu_type))
+            {
+                return Err(ApiError::InvalidRequest(format!(
+                    "GPU type {gpu_type:?} is not advertised by provider {:?}",
+                    config.provider
+                )));
+            }
+        }
     }
     state.actions.set_config(name, config.clone()).await;
     Ok(Json(config))
@@ -894,6 +959,8 @@ fn provider_from_pb(p: clotho_common::pb::compute::v1::ProviderInfo) -> ComputeP
             public_url: c.public_url,
             file_api: c.file_api,
             terminal_streaming: c.terminal_streaming,
+            gpu: c.gpu,
+            gpu_types: c.gpu_types,
             cost_hints: c.cost_hints,
         },
         None => ProviderCapabilitiesJson {
@@ -907,6 +974,8 @@ fn provider_from_pb(p: clotho_common::pb::compute::v1::ProviderInfo) -> ComputeP
             public_url: false,
             file_api: false,
             terminal_streaming: false,
+            gpu: false,
+            gpu_types: vec![],
             cost_hints: String::new(),
         },
     };
@@ -946,6 +1015,14 @@ fn fallback_providers(state: &AppState) -> ComputeProviderListResponse {
                 public_url: false,
                 file_api: true,
                 terminal_streaming: false,
+                gpu: true,
+                gpu_types: vec![
+                    "H100".into(),
+                    "H200".into(),
+                    "RTX-PRO-6000".into(),
+                    "RTX-4090".into(),
+                    "RTX-5090".into(),
+                ],
                 cost_hints: "Daytona cloud sandbox (API-key billed)".into(),
             },
             state.actions.defaults.default_image_or_fallback(),
@@ -969,6 +1046,8 @@ fn fallback_providers(state: &AppState) -> ComputeProviderListResponse {
                 public_url: false,
                 file_api: true,
                 terminal_streaming: false,
+                gpu: false,
+                gpu_types: vec![],
                 cost_hints: "depends on upstream ComputeSDK provider".into(),
             },
             String::new(),
@@ -992,6 +1071,8 @@ fn fallback_providers(state: &AppState) -> ComputeProviderListResponse {
                 public_url: true,
                 file_api: true,
                 terminal_streaming: true,
+                gpu: false,
+                gpu_types: vec![],
                 cost_hints: "persistent Ubuntu VM; TTL / pay-per-use (see Box dashboard)".into(),
             },
             String::new(),
