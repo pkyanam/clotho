@@ -152,6 +152,9 @@ export default async function ActionsPage({
                           {run.release_version && (
                             <Badge variant="outline">{run.release_version}</Badge>
                           )}
+                          {run.attempt > 1 && (
+                            <Badge variant="outline">attempt {run.attempt}</Badge>
+                          )}
                         </div>
                         <p className="mt-1 break-all text-[0.8125rem] text-kumo-inactive">
                           {shortId(run.commit_id)} · {run.provider}

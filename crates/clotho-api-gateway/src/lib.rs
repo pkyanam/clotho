@@ -250,6 +250,7 @@ pub fn router_with_pool(
         secrets_crypto,
     });
     hub::recover_hub_import_jobs(state.clone());
+    actions::recover_action_runs(state.clone());
     Ok(Router::new()
         .route("/healthz", get(healthz))
         // Stage 15: published OpenAPI contract (hand-maintained docs/openapi.yaml).

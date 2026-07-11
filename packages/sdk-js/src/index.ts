@@ -439,6 +439,7 @@ export interface ActionRun {
   started_at_millis: number;
   finished_at_millis: number;
   duration_ms: number;
+  attempt: number;
   jobs: ActionJob[];
 }
 

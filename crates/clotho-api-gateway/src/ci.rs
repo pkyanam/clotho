@@ -64,7 +64,30 @@ pub async fn run_existing(state: Arc<AppState>, run_id: String, repo: String, sh
             return;
         }
     };
-    state.actions.mark_running(&run_id).await;
+    let Some(worker_id) = state.actions.claim_run(&run_id).await else {
+        return;
+    };
+    let (stop_heartbeat, mut heartbeat_stopped) = tokio::sync::oneshot::channel();
+    let heartbeat_state = state.clone();
+    let heartbeat_run_id = run_id.clone();
+    let heartbeat_worker_id = worker_id.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+        interval.tick().await;
+        loop {
+            tokio::select! {
+                _ = &mut heartbeat_stopped => break,
+                _ = interval.tick() => {
+                    if !heartbeat_state.actions
+                        .renew_run_lease(&heartbeat_run_id, &heartbeat_worker_id)
+                        .await
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+    });
 
     // Mark pending immediately so reviewers see CI is running.
     if let Err(e) = state
@@ -122,10 +145,12 @@ pub async fn run_existing(state: Arc<AppState>, run_id: String, repo: String, sh
                 )
             }
         };
+    let _ = stop_heartbeat.send(());
     state
         .actions
         .finish_run(
             &run_id,
+            &worker_id,
             FinishedRun {
                 status: state_str.into(),
                 conclusion: conclusion.into(),

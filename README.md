@@ -146,6 +146,9 @@ Evaluation, inference, and benchmark Actions can be pinned to those releases;
 GPU sandboxes receive the verified release digest and exact commit, making a
 "repo linked to an H100" a reproducible platform primitive rather than an
 untracked notebook session.
+Action workers use database leases and heartbeats too: gateway restarts and
+replica failures are reclaimed automatically, with stale workers fenced and
+the recovery attempt visible in Clotho.
 
 Tailscale is a first-class NetworkProvider: connect an org OAuth client from
 Clotho settings, verify it live, and mark repositories `public` or `tailscale`

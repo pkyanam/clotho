@@ -9,7 +9,7 @@ use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -18,6 +18,7 @@ use clotho_common::pb::vcs::v1::GetHeadsRequest;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 use crate::auth;
 use crate::control;
@@ -201,6 +202,7 @@ impl ActionsState {
             started_at_millis: 0,
             finished_at_millis: 0,
             duration_ms: 0,
+            attempt: 0,
             jobs: vec![ActionJob {
                 id: format!("{id}-job-1"),
                 run_id: id.clone(),
@@ -264,41 +266,80 @@ impl ActionsState {
         run
     }
 
-    pub async fn mark_running(&self, run_id: &str) {
+    pub(crate) async fn claim_run(&self, run_id: &str) -> Option<String> {
+        let worker_id = Uuid::new_v4().to_string();
         if let Some(pool) = &self.pool {
-            match db_run_by_id(pool, run_id).await {
-                Ok(Some(mut run)) => {
-                    run.status = "running".into();
-                    run.started_at_millis = now_millis();
-                    if let Some(job) = run.jobs.first_mut() {
-                        job.status = "running".into();
-                    }
-                    if let Err(e) = update_run(pool, &run).await {
-                        tracing::warn!(%run_id, error = %e, "failed to mark action run running");
-                    }
-                    return;
+            let claimed = sqlx::query(
+                r#"update action_runs set
+                     status = 'running', conclusion = '', started_at_millis = $3,
+                     finished_at_millis = 0, duration_ms = 0,
+                     locked_by = $2, lease_expires_at = now() + interval '30 seconds',
+                     attempt = attempt + 1
+                   where id = $1 and (
+                     status = 'queued' or
+                     (status = 'running' and (lease_expires_at is null or lease_expires_at < now()))
+                   )"#,
+            )
+            .bind(run_id)
+            .bind(&worker_id)
+            .bind(now_millis())
+            .execute(pool)
+            .await;
+            match claimed {
+                Ok(result) if result.rows_affected() == 1 => return Some(worker_id),
+                Ok(_) => return None,
+                Err(error) => {
+                    tracing::error!(%run_id, %error, "failed to claim Action run");
+                    return None;
                 }
-                Ok(None) => {}
-                Err(e) => tracing::warn!(%run_id, error = %e, "failed to load action run"),
             }
         }
         if let Some(run) = self.runs.lock().await.get_mut(run_id) {
+            if !matches!(run.status.as_str(), "queued" | "running") {
+                return None;
+            }
             run.status = "running".into();
             run.started_at_millis = now_millis();
             if let Some(job) = run.jobs.first_mut() {
                 job.status = "running".into();
             }
+            return Some(worker_id);
         }
+        None
     }
 
-    pub async fn finish_run(&self, run_id: &str, update: FinishedRun) {
+    pub(crate) async fn renew_run_lease(&self, run_id: &str, worker_id: &str) -> bool {
+        let Some(pool) = &self.pool else {
+            return self.runs.lock().await.contains_key(run_id);
+        };
+        matches!(
+            sqlx::query(
+                "update action_runs set lease_expires_at = now() + interval '30 seconds' where id = $1 and locked_by = $2 and status = 'running'",
+            )
+            .bind(run_id)
+            .bind(worker_id)
+            .execute(pool)
+            .await,
+            Ok(result) if result.rows_affected() == 1
+        )
+    }
+
+    pub(crate) async fn finish_run(&self, run_id: &str, worker_id: &str, update: FinishedRun) {
         let finished = now_millis();
         if let Some(pool) = &self.pool {
             match db_run_by_id(pool, run_id).await {
                 Ok(Some(mut run)) => {
                     apply_finished(&mut run, update, finished);
-                    if let Err(e) = update_run(pool, &run).await {
-                        tracing::warn!(%run_id, error = %e, "failed to persist finished action run");
+                    match update_run_leased(pool, &run, worker_id).await {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            tracing::warn!(%run_id, "discarded result from stale Action worker");
+                            return;
+                        }
+                        Err(error) => {
+                            tracing::warn!(%run_id, %error, "failed to persist finished Action run");
+                            return;
+                        }
                     }
                     if let Err(e) = sqlx::query(
                         r#"
@@ -360,7 +401,7 @@ impl ActionsState {
                     select id, repo, commit_id, branch, status, conclusion, trigger, actor,
                            workflow, release_version, release_manifest_sha256,
                            provider, sandbox_id, created_at_millis, started_at_millis,
-                           finished_at_millis, duration_ms, jobs
+                           finished_at_millis, duration_ms, attempt, jobs
                     from action_runs
                     where repo = $1 and created_at_millis < $2
                     order by created_at_millis desc, id desc
@@ -378,7 +419,7 @@ impl ActionsState {
                     select id, repo, commit_id, branch, status, conclusion, trigger, actor,
                            workflow, release_version, release_manifest_sha256,
                            provider, sandbox_id, created_at_millis, started_at_millis,
-                           finished_at_millis, duration_ms, jobs
+                           finished_at_millis, duration_ms, attempt, jobs
                     from action_runs
                     where repo = $1
                     order by created_at_millis desc, id desc
@@ -493,6 +534,7 @@ pub struct ActionRun {
     pub started_at_millis: i64,
     pub finished_at_millis: i64,
     pub duration_ms: u64,
+    pub attempt: i32,
     pub jobs: Vec<ActionJob>,
     #[serde(skip)]
     log_text: String,
@@ -813,6 +855,45 @@ pub async fn create_run(
         .await;
     tokio::spawn(ci::run_existing(state, run.id.clone(), name, commit_id));
     Ok((StatusCode::ACCEPTED, Json(run)))
+}
+
+/// Continuously dispatch queued runs and reclaim expired worker leases. The
+/// claim inside `ci::run_existing` fences concurrent gateway replicas.
+pub fn recover_action_runs(state: Arc<AppState>) {
+    let Some(pool) = state.pool.clone() else {
+        return;
+    };
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    runtime.spawn(async move {
+        loop {
+            match sqlx::query(
+                r#"select id, repo, commit_id from action_runs
+                   where status = 'queued' or (
+                     status = 'running' and
+                     (lease_expires_at is null or lease_expires_at < now())
+                   )
+                   order by created_at_millis limit 50"#,
+            )
+            .fetch_all(&pool)
+            .await
+            {
+                Ok(rows) => {
+                    for row in rows {
+                        let run_id: String = row.get("id");
+                        let repo: String = row.get("repo");
+                        let commit_id: String = row.get("commit_id");
+                        tokio::spawn(ci::run_existing(state.clone(), run_id, repo, commit_id));
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(%error, "failed to discover recoverable Action runs");
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    });
 }
 
 pub async fn get_config(
@@ -1229,7 +1310,7 @@ async fn db_run_by_id(pool: &PgPool, run_id: &str) -> Result<Option<ActionRun>, 
         select id, repo, commit_id, branch, status, conclusion, trigger, actor,
                workflow, release_version, release_manifest_sha256,
                provider, sandbox_id, created_at_millis, started_at_millis,
-               finished_at_millis, duration_ms, jobs
+               finished_at_millis, duration_ms, attempt, jobs
         from action_runs
         where id = $1
         "#,
@@ -1240,7 +1321,11 @@ async fn db_run_by_id(pool: &PgPool, run_id: &str) -> Result<Option<ActionRun>, 
     .map(|row| row.map(row_to_run))
 }
 
-async fn update_run(pool: &PgPool, run: &ActionRun) -> Result<(), sqlx::Error> {
+async fn update_run_leased(
+    pool: &PgPool,
+    run: &ActionRun,
+    worker_id: &str,
+) -> Result<bool, sqlx::Error> {
     let jobs = serde_json::to_value(&run.jobs).unwrap_or_else(|_| serde_json::json!([]));
     sqlx::query(
         r#"
@@ -1252,8 +1337,10 @@ async fn update_run(pool: &PgPool, run: &ActionRun) -> Result<(), sqlx::Error> {
             started_at_millis = $6,
             finished_at_millis = $7,
             duration_ms = $8,
-            jobs = $9
-        where id = $1
+            jobs = $9,
+            locked_by = null,
+            lease_expires_at = null
+        where id = $1 and locked_by = $10
         "#,
     )
     .bind(&run.id)
@@ -1265,9 +1352,10 @@ async fn update_run(pool: &PgPool, run: &ActionRun) -> Result<(), sqlx::Error> {
     .bind(run.finished_at_millis)
     .bind(run.duration_ms as i64)
     .bind(jobs)
+    .bind(worker_id)
     .execute(pool)
-    .await?;
-    Ok(())
+    .await
+    .map(|result| result.rows_affected() == 1)
 }
 
 fn row_to_run(row: sqlx::postgres::PgRow) -> ActionRun {
@@ -1290,6 +1378,7 @@ fn row_to_run(row: sqlx::postgres::PgRow) -> ActionRun {
         started_at_millis: row.get("started_at_millis"),
         finished_at_millis: row.get("finished_at_millis"),
         duration_ms: row.get::<i64, _>("duration_ms").max(0) as u64,
+        attempt: row.get("attempt"),
         jobs: serde_json::from_value(jobs).unwrap_or_default(),
         log_text: String::new(),
     }

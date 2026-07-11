@@ -3453,6 +3453,9 @@ components:
           format: int64
         duration_ms:
           type: integer
+        attempt:
+          type: integer
+          description: Leased worker attempts; values above one indicate automatic recovery
         jobs:
           type: array
           items:
