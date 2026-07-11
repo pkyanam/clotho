@@ -33,10 +33,10 @@ export function PageTitle({
   eyebrow?: ReactNode;
 }) {
   return (
-    <div className="relative flex flex-wrap items-start justify-between gap-5 border-b border-kumo-hairline pb-7 after:absolute after:-bottom-px after:left-0 after:h-0.5 after:w-20 after:bg-accent">
+    <div className="flex flex-wrap items-start justify-between gap-5 border-b border-kumo-hairline pb-7">
       <div className="min-w-0 max-w-3xl">
         {eyebrow && (
-          <div className="mb-2 text-[0.75rem] uppercase tracking-[0.14em] text-accent-strong">
+          <div className="clotho-display mb-2 text-[0.75rem] uppercase tracking-[0.14em] text-accent-strong">
             {eyebrow}
           </div>
         )}
@@ -70,8 +70,7 @@ export function SectionHeader({
 }) {
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-3">
-      <div className="flex items-center gap-3">
-        <span className="h-4 w-1 rounded-full bg-accent" aria-hidden="true" />
+      <div className="flex items-baseline gap-3">
         <h2 className="text-[0.9375rem] font-medium text-kumo-default">
           {title}
         </h2>
@@ -126,8 +125,8 @@ export function StatCell({
   muted?: boolean;
 }) {
   return (
-    <div className="clotho-panel relative overflow-hidden px-4 py-4 before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-accent">
-      <div className="text-[0.75rem] uppercase tracking-[0.12em] text-kumo-inactive">
+    <div className="clotho-panel overflow-hidden px-4 py-4">
+      <div className="clotho-display text-[0.75rem] uppercase tracking-[0.12em] text-kumo-inactive">
         {label}
       </div>
       <div

@@ -11,29 +11,46 @@ function repositoryHref(repo: string, href?: string) {
 }
 
 function withoutFrontmatter(content: string) {
-  if (!content.startsWith("---\n") && !content.startsWith("---\r\n")) return content;
+  if (!content.startsWith("---\n") && !content.startsWith("---\r\n"))
+    return content;
   const match = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
   return match ? content.slice(match[0].length) : content;
 }
 
-export function MarkdownCard({ repo, content }: { repo: string; content: string }) {
+export function MarkdownCard({
+  repo,
+  content,
+}: {
+  repo: string;
+  content: string;
+}) {
   const components: Components = {
     h1: ({ children }) => (
-      <h1 className="mb-4 mt-8 text-[1.5rem] leading-tight first:mt-0">{children}</h1>
+      <h1 className="mb-4 mt-8 text-[1.5rem] leading-tight first:mt-0">
+        {children}
+      </h1>
     ),
     h2: ({ children }) => (
       <h2 className="mb-3 mt-8 border-b border-kumo-hairline pb-2 text-[1.125rem]">
         {children}
       </h2>
     ),
-    h3: ({ children }) => <h3 className="mb-2 mt-6 font-semibold">{children}</h3>,
-    p: ({ children }) => (
-      <p className="my-3 max-w-4xl text-[0.875rem] leading-7 text-kumo-default">{children}</p>
+    h3: ({ children }) => (
+      <h3 className="mb-2 mt-6 font-semibold">{children}</h3>
     ),
-    ul: ({ children }) => <ul className="my-3 list-disc space-y-1 pl-6">{children}</ul>,
-    ol: ({ children }) => <ol className="my-3 list-decimal space-y-1 pl-6">{children}</ol>,
+    p: ({ children }) => (
+      <p className="my-3 max-w-4xl text-[0.875rem] leading-7 text-kumo-default">
+        {children}
+      </p>
+    ),
+    ul: ({ children }) => (
+      <ul className="my-3 list-disc space-y-1 pl-6">{children}</ul>
+    ),
+    ol: ({ children }) => (
+      <ol className="my-3 list-decimal space-y-1 pl-6">{children}</ol>
+    ),
     blockquote: ({ children }) => (
-      <blockquote className="my-4 border-l-2 border-kumo-contrast/40 pl-4 text-kumo-inactive">
+      <blockquote className="my-4 rounded-md bg-kumo-recessed px-4 py-3 text-kumo-inactive">
         {children}
       </blockquote>
     ),
@@ -43,7 +60,9 @@ export function MarkdownCard({ repo, content }: { repo: string; content: string 
         <a
           href={repositoryHref(repo, href)}
           className="underline decoration-kumo-contrast/40 underline-offset-2 hover:decoration-kumo-contrast"
-          {...(external ? { target: "_blank", rel: "nofollow noreferrer" } : {})}
+          {...(external
+            ? { target: "_blank", rel: "nofollow noreferrer" }
+            : {})}
         >
           {children}
         </a>
@@ -61,7 +80,9 @@ export function MarkdownCard({ repo, content }: { repo: string; content: string 
     ),
     table: ({ children }) => (
       <div className="my-4 overflow-x-auto">
-        <table className="w-full border-collapse text-left text-[0.8125rem]">{children}</table>
+        <table className="w-full border-collapse text-left text-[0.8125rem]">
+          {children}
+        </table>
       </div>
     ),
     th: ({ children }) => (
@@ -69,14 +90,18 @@ export function MarkdownCard({ repo, content }: { repo: string; content: string 
         {children}
       </th>
     ),
-    td: ({ children }) => <td className="border border-kumo-hairline px-3 py-2">{children}</td>,
+    td: ({ children }) => (
+      <td className="border border-kumo-hairline px-3 py-2">{children}</td>
+    ),
     pre: ({ children }) => (
       <pre className="my-4 overflow-x-auto border border-kumo-hairline bg-kumo-base p-4 text-[0.8125rem]">
         {children}
       </pre>
     ),
     code: ({ children }) => (
-      <code className="bg-kumo-base px-1 py-0.5 font-mono text-[0.8125rem]">{children}</code>
+      <code className="bg-kumo-base px-1 py-0.5 font-mono text-[0.8125rem]">
+        {children}
+      </code>
     ),
   };
 

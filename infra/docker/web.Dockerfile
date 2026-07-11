@@ -25,8 +25,8 @@ WORKDIR /app
 
 COPY --from=build /workspace/apps/web/.next/standalone ./
 COPY --from=build /workspace/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build /workspace/apps/web/public ./apps/web/public
 
 USER node
 EXPOSE 3100
 CMD ["node", "apps/web/server.js"]
-

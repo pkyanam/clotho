@@ -41,17 +41,17 @@ export function RepoNav({
         <span>/</span>
         <span className="text-kumo-default">{name}</span>
       </div>
-      <nav className="flex items-center gap-4 overflow-x-auto pb-px">
+      <nav className="flex items-center gap-1 overflow-x-auto pb-2">
         {sections.map((section) => {
           const current = active === section.key;
           return (
             <Link
               key={section.key}
               href={`/repos/${name}${section.href}`}
-              className={`shrink-0 border-b-2 pb-2.5 text-[0.8125rem] transition-colors ${
+              className={`shrink-0 rounded-md px-3 py-1.5 text-[0.8125rem] transition-colors ${
                 current
-                  ? "border-kumo-contrast text-kumo-default"
-                  : "border-transparent text-kumo-inactive hover:text-kumo-default"
+                  ? "bg-accent-surface font-medium text-accent-strong"
+                  : "text-kumo-inactive hover:bg-kumo-elevated hover:text-kumo-default"
               }`}
             >
               {section.label}

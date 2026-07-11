@@ -42,7 +42,7 @@ export function AppearanceForm() {
                 onClick={() => setPreference(option)}
                 className={`relative rounded-lg border px-4 py-3 text-left transition-colors ${
                   selected
-                    ? "border-accent bg-accent-surface text-kumo-default shadow-[inset_0_-3px_0_var(--accent)]"
+                    ? "border-accent bg-accent-surface text-kumo-default"
                     : "border-kumo-hairline bg-kumo-base text-kumo-inactive hover:border-accent hover:text-kumo-default"
                 }`}
               >

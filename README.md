@@ -17,7 +17,7 @@
 </div>
 
 <p align="center">
-  <img src="./dashboard-light.png" alt="Clotho public-alpha operations dashboard" width="1200" />
+  <img src="./dashboard.png" alt="Clotho public-alpha operations dashboard in the ink and ivory theme" width="1200" />
 </p>
 
 ---

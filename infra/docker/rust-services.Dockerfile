@@ -12,8 +12,9 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY proto ./proto
-# Stage 15: api-gateway embeds openapi.yaml via include_str!.
-COPY docs ./docs
+# The gateways embed the public contract and capability inventory at compile time.
+COPY openapi.yaml ./openapi.yaml
+COPY docs/capabilities.json ./docs/capabilities.json
 RUN --mount=type=cache,id=clotho-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=clotho-cargo-target,target=/build/target,sharing=locked \
     cargo build --release --bin "${SERVICE}" \

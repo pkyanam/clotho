@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -63,10 +64,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             href="/"
             className="group flex items-center gap-2 text-[0.9375rem] font-medium tracking-wide text-kumo-default"
           >
-            <span className="grid h-7 w-7 place-items-center rounded-md bg-accent text-[0.75rem] text-white shadow-sm">
-              c
-            </span>
-            <span>clotho</span>
+            <Image
+              src="/logo.svg"
+              alt=""
+              width={28}
+              height={28}
+              priority
+              className="h-7 w-7 rounded-md shadow-sm"
+            />
+            <span className="clotho-display">clotho</span>
           </Link>
 
           <nav className="hidden items-center gap-1 md:flex">

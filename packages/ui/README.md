@@ -4,9 +4,10 @@ Clotho's shared semantic design system.
 
 ## Design language
 
-Clotho is an operational control room: cool ink/navy foundations, clearly
-separated surface tiers, high-legibility text, and an indigo interaction
-accent. Status colors are reserved for labelled status communication.
+Clotho is an operational control room informed by its namesake: ink-black and
+warm-ivory foundations, graphite surface tiers, and thread-like line details.
+Interaction emphasis stays monochrome; status colors are reserved for labelled
+status communication.
 
 Both themes expose semantic roles rather than raw grayscale choices. Meaningful
 primary, secondary, and muted text meets WCAG 2.2 AA on canvas and surface;

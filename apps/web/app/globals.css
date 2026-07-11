@@ -10,7 +10,7 @@
 @import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
 
-/* Clotho semantic tokens: accessible control-room surfaces and interaction color. */
+/* Clotho semantic tokens: accessible ink, graphite, and warm-ivory surfaces. */
 @import "@clotho/ui/tokens.css";
 
 @theme inline {
@@ -93,15 +93,17 @@
 }
 
 /*
- * geist pixel is the single typeface. route tailwind's `--font-sans` (and
- * therefore kumo's `--default-font-family`) to it so every kumo component
- * renders in geist pixel without per-component overrides.
+ * Typography uses a readable system sans for interface copy and Geist Pixel
+ * as a restrained display/technical accent. Keeping the pixel face out of
+ * paragraphs and controls materially improves scan speed at small sizes.
  */
 :root {
   --font-sans:
-    var(--font-geist-pixel), ui-monospace, "SFMono-Regular", monospace;
+    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
   --default-font-family:
-    var(--font-geist-pixel), ui-monospace, "SFMono-Regular", monospace;
+    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
 }
 
 @layer base {
@@ -122,13 +124,21 @@
   body {
     font-size: 0.9375rem; /* 15px */
     line-height: 1.55;
-    background-image:
-      radial-gradient(
-        circle at 15% -10%,
-        color-mix(in srgb, var(--accent) 12%, transparent),
-        transparent 30rem
-      ),
-      linear-gradient(var(--background), var(--background));
+    font-family:
+      Inter,
+      ui-sans-serif,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      sans-serif !important;
+    background-image: linear-gradient(var(--background), var(--background));
+  }
+  h1,
+  h2,
+  h3,
+  .clotho-display {
+    font-family:
+      var(--font-geist-pixel), ui-monospace, "SFMono-Regular", monospace;
   }
   code,
   pre,
@@ -155,7 +165,6 @@
 .clotho-active-nav {
   background: var(--accent-surface);
   color: var(--accent-strong);
-  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .clotho-row {
@@ -166,7 +175,6 @@
 .clotho-row:hover,
 .clotho-row:focus-within {
   background: var(--surface-hover);
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 /*

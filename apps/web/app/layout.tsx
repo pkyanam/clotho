@@ -24,6 +24,11 @@ const geistPixel = localFont({
 export const metadata: Metadata = {
   title: "clotho",
   description: "version control for humans and ai agents.",
+  icons: {
+    icon: "/logo.svg",
+    shortcut: "/logo.svg",
+    apple: "/logo.svg",
+  },
 };
 
 export default function RootLayout({
