@@ -1,7 +1,7 @@
 # Stage 22 release gap matrix
 
-**Audited:** July 11, 2026 through the Stage 22 repository/agent authorization
-and webhook-replay slice. This matrix records implementation and evidence
+**Audited:** July 11, 2026 through the Stage 22 tenant-directory authorization
+slice. This matrix records implementation and evidence
 separately; “partial” does not satisfy the public-alpha gate.
 
 Status: **implemented**, **partial**, **missing**, or **evidence gap**.
@@ -48,7 +48,7 @@ Status: **implemented**, **partial**, **missing**, or **evidence gap**.
 
 | Gate                                   | Status       | Current evidence / precise gap                                                                                                                                                                                                                                                              |
 | -------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Route/tool permission matrix           | Partial      | A two-human/two-org suite covers 32 repository read shapes, lists/activity before pagination, secret metadata, and scoped REST-backed MCP tools under required auth. User/org directories, human provider metadata, indirect ids, and a complete deny-by-default inventory remain.          |
+| Route/tool permission matrix           | Partial      | A two-human/two-org suite covers 32 repository read shapes, lists/activity before pagination, secret metadata, scoped REST-backed MCP tools, membership-filtered user/org directories, and concealed foreign org rosters under required auth. Human provider metadata, indirect ids, and a complete deny-by-default inventory remain. |
 | Tenant isolation                       | Evidence gap | Repository reads now gate before VCS/storage/provider calls and scoped agents are revalidated at REST. Exhaustive artifacts/jobs/caches/storage prefixes/webhooks/provider calls/indirect IDs/timing and typed tenant-context evidence belongs to the still-blocked Stage 23 gate.          |
 | Threat model                           | Implemented  | `docs/threat-model.md` covers assets, trust boundaries, token theft, confused deputy, SSRF, traversal, untrusted content, webhook replay, sandbox escape, recovery, supply chain, and explicit remaining work.                                                                              |
 | Rotation/replay/redaction/audit export | Partial      | Human/agent expiry and revoke exist. Forgejo webhooks now require exact-body HMAC plus hashed, atomic, 24-hour delivery reservations; exact/concurrent retries collapse and changed payloads conflict. Secret-master rotation, systematic redaction, and incident-safe audit export remain. |

@@ -406,11 +406,49 @@ pub async fn list_users(pool: &PgPool) -> Result<Vec<User>, ApiError> {
         .map_err(|e| ApiError::Internal(format!("list users: {e}")))
 }
 
+/// List only users who share an organization with the authenticated caller.
+///
+/// The membership predicate is applied in SQL so future pagination cannot
+/// select foreign-directory rows and filter them after the page boundary.
+pub async fn list_users_for_member(pool: &PgPool, user_id: &str) -> Result<Vec<User>, ApiError> {
+    sqlx::query_as::<_, User>(
+        r#"
+        select distinct u.*
+        from users u
+        join org_memberships visible on visible.user_id = u.id
+        join org_memberships caller on caller.org_id = visible.org_id
+        where caller.user_id = $1
+        order by u.created_at desc
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| ApiError::Internal(format!("list visible users: {e}")))
+}
+
 pub async fn list_orgs(pool: &PgPool) -> Result<Vec<Org>, ApiError> {
     sqlx::query_as::<_, Org>("select * from orgs order by created_at desc")
         .fetch_all(pool)
         .await
         .map_err(|e| ApiError::Internal(format!("list orgs: {e}")))
+}
+
+/// List organizations in which the authenticated caller is a member.
+pub async fn list_orgs_for_member(pool: &PgPool, user_id: &str) -> Result<Vec<Org>, ApiError> {
+    sqlx::query_as::<_, Org>(
+        r#"
+        select o.*
+        from orgs o
+        join org_memberships caller on caller.org_id = o.id
+        where caller.user_id = $1
+        order by o.created_at desc
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| ApiError::Internal(format!("list visible orgs: {e}")))
 }
 
 pub async fn create_org(
@@ -543,6 +581,48 @@ pub async fn get_org_with_members(
     .fetch_all(pool)
     .await
     .map_err(|e| ApiError::Internal(format!("get org members: {e}")))?;
+
+    Ok(Some(OrgWithMembers { org, members }))
+}
+
+/// Fetch an organization and its member roster only when `user_id` belongs to
+/// it. Foreign and absent organizations intentionally produce the same `None`
+/// result so the REST layer cannot reveal tenant existence.
+pub async fn get_org_with_members_for_member(
+    pool: &PgPool,
+    org: &str,
+    user_id: &str,
+) -> Result<Option<OrgWithMembers>, ApiError> {
+    let Some(org) = sqlx::query_as::<_, Org>(
+        r#"
+        select o.*
+        from orgs o
+        join org_memberships caller on caller.org_id = o.id
+        where (o.name = $1 or o.id = $1) and caller.user_id = $2
+        "#,
+    )
+    .bind(org)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| ApiError::Internal(format!("get visible org: {e}")))?
+    else {
+        return Ok(None);
+    };
+
+    let members = sqlx::query_as::<_, OrgMembership>(
+        r#"
+        select m.org_id, m.user_id, m.role, u.name as user_name, u.display_name as user_display_name
+        from org_memberships m
+        join users u on u.id = m.user_id
+        where m.org_id = $1
+        order by u.name
+        "#,
+    )
+    .bind(&org.id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| ApiError::Internal(format!("get visible org members: {e}")))?;
 
     Ok(Some(OrgWithMembers { org, members }))
 }
@@ -1394,15 +1474,17 @@ pub fn fallback_repo_info(
 
 pub(crate) async fn list_users_handler(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<UserListResponse>, ApiError> {
+    let auth = crate::auth::resolve_auth(&headers, &state).await?;
     let users = if let Some(pool) = &state.pool {
-        list_users(pool).await?
+        list_users_for_member(pool, &auth.user_id).await?
     } else {
         vec![User {
-            id: state.bootstrap.user_id.clone(),
-            name: state.bootstrap.user_name.clone(),
+            id: auth.user_id,
+            name: auth.user_name.clone(),
             email: state.bootstrap.user_email.clone(),
-            display_name: state.bootstrap.user_name.clone(),
+            display_name: auth.user_name,
             created_at: Utc::now(),
         }]
     };
@@ -1411,9 +1493,11 @@ pub(crate) async fn list_users_handler(
 
 pub(crate) async fn list_orgs_handler(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<OrgListResponse>, ApiError> {
+    let auth = crate::auth::resolve_auth(&headers, &state).await?;
     let orgs = if let Some(pool) = &state.pool {
-        list_orgs(pool)
+        list_orgs_for_member(pool, &auth.user_id)
             .await?
             .into_iter()
             .map(OrgPublic::from)
@@ -1447,10 +1531,14 @@ pub(crate) async fn create_org_handler(
 
 pub(crate) async fn get_org_handler(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(org): Path<String>,
 ) -> Result<Json<OrgDetailResponse>, ApiError> {
+    let auth = crate::auth::resolve_auth(&headers, &state).await?;
     let Some(pool) = &state.pool else {
-        if org == state.bootstrap.org_name || org == state.bootstrap.org_id {
+        if auth.user_id == state.bootstrap.user_id
+            && (org == state.bootstrap.org_name || org == state.bootstrap.org_id)
+        {
             return Ok(Json(OrgDetailResponse {
                 org: OrgPublic {
                     id: state.bootstrap.org_id.clone(),
@@ -1468,14 +1556,14 @@ pub(crate) async fn get_org_handler(
                 }],
             }));
         }
-        return Err(ApiError::NotFound(format!("org {org:?} not found")));
+        return Err(ApiError::NotFound("organization not found".into()));
     };
-    match get_org_with_members(pool, &org).await? {
+    match get_org_with_members_for_member(pool, &org, &auth.user_id).await? {
         Some(OrgWithMembers { org, members }) => Ok(Json(OrgDetailResponse {
             org: OrgPublic::from(org),
             members,
         })),
-        None => Err(ApiError::NotFound(format!("org {org:?} not found"))),
+        None => Err(ApiError::NotFound("organization not found".into())),
     }
 }
 
@@ -1691,6 +1779,39 @@ mod tests {
         assert!(detail.members.iter().any(|m| m.role == "admin"));
 
         cleanup(&pool, &created.id, "no-such-repo", &b.user_id).await;
+        cleanup(&pool, &b.org_id, "no-such-repo", &b.user_id).await;
+    }
+
+    #[tokio::test]
+    async fn user_and_org_directories_are_membership_scoped() {
+        let Some(pool) = pool().await else { return };
+        let a = test_bootstrap();
+        let b = test_bootstrap();
+        ensure_bootstrap(&pool, &a).await.unwrap();
+        ensure_bootstrap(&pool, &b).await.unwrap();
+
+        let users_a = list_users_for_member(&pool, &a.user_id).await.unwrap();
+        assert!(users_a.iter().any(|user| user.id == a.user_id));
+        assert!(!users_a.iter().any(|user| user.id == b.user_id));
+
+        let orgs_a = list_orgs_for_member(&pool, &a.user_id).await.unwrap();
+        assert!(orgs_a.iter().any(|org| org.id == a.org_id));
+        assert!(!orgs_a.iter().any(|org| org.id == b.org_id));
+
+        assert!(
+            get_org_with_members_for_member(&pool, &a.org_id, &a.user_id)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            get_org_with_members_for_member(&pool, &b.org_id, &a.user_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        cleanup(&pool, &a.org_id, "no-such-repo", &a.user_id).await;
         cleanup(&pool, &b.org_id, "no-such-repo", &b.user_id).await;
     }
 

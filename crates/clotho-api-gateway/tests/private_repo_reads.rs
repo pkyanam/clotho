@@ -552,6 +552,63 @@ async fn private_repo_reads_are_tenant_safe_and_lists_filter_before_pagination()
             .unwrap();
         assert_eq!(malformed.status(), StatusCode::UNAUTHORIZED);
 
+        // Human directories are tenant-scoped before serialization. A caller
+        // sees only users and organizations connected by its memberships, and
+        // a foreign organization detail is concealed as absent.
+        let (status, users) = json_body(
+            get(
+                &client,
+                &required_base,
+                "/api/v1/users",
+                Some(&fixture.token_a),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let users = users["users"].as_array().unwrap();
+        assert!(users.iter().any(|user| user["id"] == fixture.user_a));
+        assert!(!users.iter().any(|user| user["id"] == fixture.user_b));
+
+        let (status, orgs) = json_body(
+            get(
+                &client,
+                &required_base,
+                "/api/v1/orgs",
+                Some(&fixture.token_a),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let orgs = orgs["orgs"].as_array().unwrap();
+        assert!(orgs.iter().any(|org| org["id"] == fixture.org_a));
+        assert!(!orgs.iter().any(|org| org["id"] == fixture.org_b));
+
+        assert_eq!(
+            get(
+                &client,
+                &required_base,
+                &format!("/api/v1/orgs/{}", fixture.org_a),
+                Some(&fixture.token_a),
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        let (status, foreign_org) = json_body(
+            get(
+                &client,
+                &required_base,
+                &format!("/api/v1/orgs/{}", fixture.org_b),
+                Some(&fixture.token_a),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(foreign_org["code"], "not_found");
+
         // Every name-routed read returns before the unreachable providers for
         // a foreign private repository. Missing and unauthorized are the same
         // stable 404 envelope.

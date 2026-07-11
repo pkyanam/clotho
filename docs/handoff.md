@@ -80,6 +80,10 @@ not_found` and added a live MCP↔REST error-equivalence assertion.
   issue/PR templates, and a non-placeholder Clotho logo.
 - Fixed the advertised non-interactive `clotho repo delete <name> --yes`
   grammar after a live cleanup probe exposed its pre-validation ordering bug.
+- Scoped `/users` and `/orgs` to the authenticated human's organization
+  memberships and concealed foreign `/orgs/{org}` member rosters as the same
+  stable 404 used for absent organizations. The hostile two-human/two-org
+  gateway suite now covers these directory boundaries.
 
 ## Baseline state
 
@@ -168,10 +172,9 @@ removed.
 ## Next bounded acceptance test
 
 Continue Stage 22; do not start Stage 23. The next smallest authorization slice
-is membership-filtered `/users` and `/orgs`, concealed `/orgs/{org}` member
-views, and authorization/sanitization of human provider configuration metadata,
-with two hostile organizations and filtering before pagination/provider calls.
-Then close complete backup/restore, migration forward-repair, supply-chain,
+is authorization/sanitization of human provider configuration metadata with
+two hostile organizations and authorization before provider probes. Then close
+complete backup/restore, migration forward-repair, supply-chain,
 clean-clone, machine capability, CLI/MCP contract, and browser-journey gaps in
 the release matrix. Stage 22 remains active and must not be called complete.
 
