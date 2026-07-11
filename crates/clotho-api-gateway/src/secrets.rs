@@ -33,7 +33,8 @@ pub const SECRET_TAILSCALE_CLIENT_SECRET: &str = "TAILSCALE_OAUTH_CLIENT_SECRET"
 
 use crate::computesdk_catalog;
 
-/// Master key for sealing secret values. Loaded from CLOTHO_SECRETS_MASTER_KEY.
+/// Master key for sealing secret values. Uses an explicit deployment key when
+/// supplied, otherwise a generated persistent key file in the normal stack.
 #[derive(Clone)]
 pub struct SecretsCrypto {
     cipher: Aes256Gcm,

@@ -316,7 +316,9 @@ services:
       RUST_LOG: info
       CLOTHO_GATEWAY_HTTP_ADDR: 0.0.0.0:8080
       CLOTHO_GATEWAY_DATABASE_URL: postgres://clotho:clotho-dev@postgres:5432/clotho
-      # Stage 13 secrets seal key (docs/adr/0014). Generate with openssl rand -hex 32.
+      # Optional externally managed override. When empty, Clotho generates a
+      # 0600 key at CLOTHO_SECRETS_KEY_FILE in the persistent secrets-data
+      # volume; contributors do not need to edit .env.
       CLOTHO_SECRETS_MASTER_KEY: ${CLOTHO_SECRETS_MASTER_KEY:-}
       CLOTHO_SECRETS_KEY_FILE: /var/lib/clotho-secrets/master.key
       CLOTHO_VCS_GRPC_URL: http://clotho-vcs:50051
