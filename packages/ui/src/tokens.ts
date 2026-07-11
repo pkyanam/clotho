@@ -1,40 +1,48 @@
-/**
- * Clotho design tokens.
- *
- * The design language: a precision instrument. Pure black & white — no grey
- * fills, no accent color. Geist Pixel as the one typeface. All copy lowercase
- * (via CSS transform; semantics preserved). Hairline borders are the only
- * structural lines; surfaces are flat. Hierarchy comes from size, weight, and
- * spacing — never from color.
- *
- * Dark is the default product look. Light is the exact invert (see
- * packages/ui/styles/tokens.css `[data-mode="light"]`).
- */
-
+/** Clotho's theme-specific semantic design tokens. */
 export const colors = {
-  background: "#000000",
-  foreground: "#ffffff",
-  /** "muted"/"faint" deliberately map to white — hierarchy is not grey. */
-  muted: "#ffffff",
-  faint: "#ffffff",
-  surface: "#070707",
-  surfaceHover: "#0c0c0c",
-  panel: "#0a0a0a",
-  border: "rgba(255, 255, 255, 0.16)",
-  borderStrong: "rgba(255, 255, 255, 0.32)",
+  background: "#080d1a",
+  foreground: "#f8fafc",
+  muted: "#b7c2d6",
+  faint: "#91a0b8",
+  disabled: "#77859d",
+  surface: "#11192b",
+  surfaceHover: "#18243a",
+  surfaceRaised: "#18243a",
+  panel: "#0d1424",
+  border: "#607291",
+  borderStrong: "#9ca8ff",
+  accent: "#9ca8ff",
+  accentStrong: "#c3caff",
+  accentSurface: "#1d2850",
+  action: "#6554c0",
+  actionHover: "#5847ae",
+  focus: "#c3caff",
+  success: "#5ee6a8",
+  warning: "#ffd166",
+  danger: "#ff8f9b",
 } as const;
 
-/** Inverted belweave palette for light mode (mirrors CSS tokens). */
 export const colorsLight = {
-  background: "#ffffff",
-  foreground: "#000000",
-  muted: "#000000",
-  faint: "#000000",
-  surface: "#f8f8f8",
-  surfaceHover: "#f3f3f3",
-  panel: "#f5f5f5",
-  border: "rgba(0, 0, 0, 0.16)",
-  borderStrong: "rgba(0, 0, 0, 0.32)",
+  background: "#f4f6fb",
+  foreground: "#172033",
+  muted: "#475569",
+  faint: "#5b6475",
+  disabled: "#687386",
+  surface: "#ffffff",
+  surfaceHover: "#eef1f8",
+  surfaceRaised: "#e7eaf5",
+  panel: "#edf0f7",
+  border: "#7f8da5",
+  borderStrong: "#6554c0",
+  accent: "#6554c0",
+  accentStrong: "#49379b",
+  accentSurface: "#e8e5fb",
+  action: "#6554c0",
+  actionHover: "#5847ae",
+  focus: "#49379b",
+  success: "#16794b",
+  warning: "#8a5700",
+  danger: "#b4233b",
 } as const;
 
 export const typography = {
@@ -66,9 +74,10 @@ export const typography = {
 } as const;
 
 export const radii = {
-  md: "8px",
-  lg: "12px",
-  xl: "16px",
+  sm: "6px",
+  md: "10px",
+  lg: "14px",
+  xl: "18px",
   pill: "9999px",
 } as const;
 

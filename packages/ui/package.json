@@ -9,6 +9,7 @@
     "./fonts/*": "./fonts/*"
   },
   "scripts": {
+    "test": "node --test test/contrast.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

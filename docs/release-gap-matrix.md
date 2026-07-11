@@ -1,99 +1,99 @@
 # Stage 22 release gap matrix
 
-**Audited:** July 11, 2026 against commit `aa20ce0` plus the active Stage 22
-bootstrap slice. This matrix records implementation and evidence separately;
-“partial” does not satisfy the public-alpha gate.
+**Audited:** July 11, 2026 through the active Stage 22 web-quality slice. This
+matrix records implementation and evidence separately; “partial” does not
+satisfy the public-alpha gate.
 
 Status: **implemented**, **partial**, **missing**, or **evidence gap**.
 
 ## REST and OpenAPI
 
-| Gate | Status | Current evidence / precise gap |
-|---|---|---|
-| Complete operation inventory | Partial | Axum↔path presence test exists in `openapi_drift.rs`; YAML now parses, but operations lack consistent auth, examples, stability labels, complete error responses, pagination, and several response schemas are generic objects. |
-| Versioned stable errors | Implemented | Envelope version `1` has stable `code`, safe `message`, `request_id`, optional `details`, and `retryable`; catch-all middleware normalizes Axum errors and redacts internal provider/gRPC topology. SDK, CLI, MCP, OpenAPI, tests, and docs preserve the fields. |
-| Cursor pagination and bounds | Partial | Actions has `before`/`next_cursor`; several lists expose only `limit` or unbounded arrays. No shared cursor envelope or maximum for every collection. |
-| Idempotency keys | Missing | Create/start/import/submit routes do not accept or persist a common idempotency key. |
-| Request and audit correlation | Partial | Every response carries `X-Request-Id`; valid caller IDs are accepted, generated IDs replace invalid values, and structured gateway spans include the same ID. Durable activity/agent-audit schema links are still missing. |
-| Conditional reads/writes | Partial | Release downloads emit an ETag, but `If-None-Match` and policy `If-Match` behavior are absent. |
-| Transfer/async conventions | Partial | Release byte ranges and bounded previews exist; durable imports/Actions exist. Common operation handles, cancellation, log paging, timeouts, and limit documentation do not. |
-| Compatibility/deprecation rule | Partial | Prose exists in `docs/api.md`; no deprecation headers, API-diff report, or enforced compatibility check. |
-| Structural SDK parity | Missing | SDK is hand-written with method tests; CI checks route paths only, not request/response schema equivalence. |
+| Gate                           | Status      | Current evidence / precise gap                                                                                                                                                                                                                                   |
+| ------------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Complete operation inventory   | Partial     | Axum↔path presence test exists in `openapi_drift.rs`; YAML now parses, but operations lack consistent auth, examples, stability labels, complete error responses, pagination, and several response schemas are generic objects.                                  |
+| Versioned stable errors        | Implemented | Envelope version `1` has stable `code`, safe `message`, `request_id`, optional `details`, and `retryable`; catch-all middleware normalizes Axum errors and redacts internal provider/gRPC topology. SDK, CLI, MCP, OpenAPI, tests, and docs preserve the fields. |
+| Cursor pagination and bounds   | Partial     | Actions has `before`/`next_cursor`; several lists expose only `limit` or unbounded arrays. No shared cursor envelope or maximum for every collection.                                                                                                            |
+| Idempotency keys               | Missing     | Create/start/import/submit routes do not accept or persist a common idempotency key.                                                                                                                                                                             |
+| Request and audit correlation  | Partial     | Every response carries `X-Request-Id`; valid caller IDs are accepted, generated IDs replace invalid values, and structured gateway spans include the same ID. Durable activity/agent-audit schema links are still missing.                                       |
+| Conditional reads/writes       | Partial     | Release downloads emit an ETag, but `If-None-Match` and policy `If-Match` behavior are absent.                                                                                                                                                                   |
+| Transfer/async conventions     | Partial     | Release byte ranges and bounded previews exist; durable imports/Actions exist. Common operation handles, cancellation, log paging, timeouts, and limit documentation do not.                                                                                     |
+| Compatibility/deprecation rule | Partial     | Prose exists in `docs/api.md`; no deprecation headers, API-diff report, or enforced compatibility check.                                                                                                                                                         |
+| Structural SDK parity          | Missing     | SDK is hand-written with method tests; CI checks route paths only, not request/response schema equivalence.                                                                                                                                                      |
 
 ## CLI
 
-| Gate | Status | Current evidence / precise gap |
-|---|---|---|
-| Frozen/generated command reference | Missing | Hand-written `docs/cli.md`; no help-tree snapshot/generator or grammar compatibility test. |
-| stdout/stderr and one-value JSON | Partial | `--json` prints JSON for successful commands; systematic stdout/stderr and malformed-response tests are absent. |
-| Stable exit classes | Implemented | CLI maps usage/auth/permission/conflict/not-found/retryable/internal to exits `2`–`7`/`1`; live probes verified auth `3`, conflict `5`, not-found `6`, and unavailable `7` with request IDs on stderr. |
-| Non-interactive semantics | Partial | Destructive repo delete has `--yes`; no common timeout, cancellation, idempotency, or stdin-secret flow. |
-| Named contexts + OS credential store | Missing | Only flags and environment variables exist. |
-| Completions/version/release binaries | Missing | No completion generation, version command, signed binaries, checksums, or update policy. |
-| Disposable gateway command coverage | Missing | Argument unit tests exist only indirectly; no command-group fixture covering auth expiry, policy, malformed JSON, unavailability, and Ctrl-C. |
+| Gate                                 | Status      | Current evidence / precise gap                                                                                                                                                                         |
+| ------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Frozen/generated command reference   | Missing     | Hand-written `docs/cli.md`; no help-tree snapshot/generator or grammar compatibility test.                                                                                                             |
+| stdout/stderr and one-value JSON     | Partial     | `--json` prints JSON for successful commands; systematic stdout/stderr and malformed-response tests are absent.                                                                                        |
+| Stable exit classes                  | Implemented | CLI maps usage/auth/permission/conflict/not-found/retryable/internal to exits `2`–`7`/`1`; live probes verified auth `3`, conflict `5`, not-found `6`, and unavailable `7` with request IDs on stderr. |
+| Non-interactive semantics            | Partial     | Destructive repo delete has `--yes`; no common timeout, cancellation, idempotency, or stdin-secret flow.                                                                                               |
+| Named contexts + OS credential store | Missing     | Only flags and environment variables exist.                                                                                                                                                            |
+| Completions/version/release binaries | Missing     | No completion generation, version command, signed binaries, checksums, or update policy.                                                                                                               |
+| Disposable gateway command coverage  | Missing     | Argument unit tests exist only indirectly; no command-group fixture covering auth expiry, policy, malformed JSON, unavailability, and Ctrl-C.                                                          |
 
 ## MCP and agent handoff
 
-| Gate | Status | Current evidence / precise gap |
-|---|---|---|
-| Versioned tool contracts | Missing | JSON schemas are generated by rmcp but have no Clotho schema version, stability, side-effect, idempotency, or error metadata. |
-| Operations/progress/cancellation | Missing | Imports and Actions return REST records, but MCP has no typed common operation handle, cancellation, or bounded log cursor. |
-| Capability classes | Partial | Per-tool scopes are enforced and `tools/list` is now filtered to the token; read/propose/mutate/execute/destructive capability classes do not exist. |
-| MCP↔REST equivalence tests | Partial | Tools use the REST edge; live tests compare a REST error code to the MCP tool error and require its request ID. Broad result/error structural comparisons for every tool family are absent. |
-| Prompt-injection authority boundary | Implemented (docs) | `docs/mcp.md` and root `AGENTS.md` state imported/repository text and logs are untrusted; dedicated enforcement tests remain an evidence gap. |
-| Request/audit correlation | Partial | REST-backed MCP failures preserve request IDs and every call is audited by agent/token/tool/repo/outcome. The audit row still lacks request ID, originating session, durable operation, and final async outcome links. |
-| Public agent bootstrap | Partial | Root `AGENTS.md`, `docs/handoff.md`, and `just bootstrap` now exist; a least-privileged public-surface demo without admin/internal setup is not yet automated. |
+| Gate                                | Status             | Current evidence / precise gap                                                                                                                                                                                         |
+| ----------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Versioned tool contracts            | Missing            | JSON schemas are generated by rmcp but have no Clotho schema version, stability, side-effect, idempotency, or error metadata.                                                                                          |
+| Operations/progress/cancellation    | Missing            | Imports and Actions return REST records, but MCP has no typed common operation handle, cancellation, or bounded log cursor.                                                                                            |
+| Capability classes                  | Partial            | Per-tool scopes are enforced and `tools/list` is now filtered to the token; read/propose/mutate/execute/destructive capability classes do not exist.                                                                   |
+| MCP↔REST equivalence tests          | Partial            | Tools use the REST edge; live tests compare a REST error code to the MCP tool error and require its request ID. Broad result/error structural comparisons for every tool family are absent.                            |
+| Prompt-injection authority boundary | Implemented (docs) | `docs/mcp.md` and root `AGENTS.md` state imported/repository text and logs are untrusted; dedicated enforcement tests remain an evidence gap.                                                                          |
+| Request/audit correlation           | Partial            | REST-backed MCP failures preserve request IDs and every call is audited by agent/token/tool/repo/outcome. The audit row still lacks request ID, originating session, durable operation, and final async outcome links. |
+| Public agent bootstrap              | Partial            | Root `AGENTS.md`, `docs/handoff.md`, and `just bootstrap` now exist; a least-privileged public-surface demo without admin/internal setup is not yet automated.                                                         |
 
 ## Authentication and authorization
 
-| Gate | Status | Current evidence / precise gap |
-|---|---|---|
-| Route/tool permission matrix | Partial | Human role checks and scoped-agent tests exist; no complete route×identity matrix or deny-by-default test inventory. |
-| Tenant isolation | Evidence gap | Repo permission tests cover selected routes; artifacts, releases, imports, logs, secrets, providers, audits, indirect IDs, and timing behavior lack a systematic suite. |
-| Threat model | Missing | No published threat model covering token theft, confused deputy, SSRF, traversal, model metadata, webhook replay, or sandbox escape. |
-| Rotation/replay/redaction/audit export | Partial | Human/agent expiry and revoke exist; webhook HMAC exists. Secret-master rotation, replay defense, systematic redaction, and incident-safe audit export do not. |
-| Security/supply-chain CI | Missing | No complete dependency, container, license, secret, SAST, SBOM, provenance, or reporting-channel gate. |
+| Gate                                   | Status       | Current evidence / precise gap                                                                                                                                          |
+| -------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Route/tool permission matrix           | Partial      | Human role checks and scoped-agent tests exist; no complete route×identity matrix or deny-by-default test inventory.                                                    |
+| Tenant isolation                       | Evidence gap | Repo permission tests cover selected routes; artifacts, releases, imports, logs, secrets, providers, audits, indirect IDs, and timing behavior lack a systematic suite. |
+| Threat model                           | Missing      | No published threat model covering token theft, confused deputy, SSRF, traversal, model metadata, webhook replay, or sandbox escape.                                    |
+| Rotation/replay/redaction/audit export | Partial      | Human/agent expiry and revoke exist; webhook HMAC exists. Secret-master rotation, replay defense, systematic redaction, and incident-safe audit export do not.          |
+| Security/supply-chain CI               | Missing      | No complete dependency, container, license, secret, SAST, SBOM, provenance, or reporting-channel gate.                                                                  |
 
 ## Data durability and operations
 
-| Gate | Status | Current evidence / precise gap |
-|---|---|---|
-| Versioned migrations and upgrade/repair | Partial | SQLx migrations `1001`–`1015` and agent migration `0001` exist; previous-release upgrade, rollback/forward-repair, and realistic-volume tests do not. |
-| Complete backup/restore | Missing | No automated bundle covering Postgres, Git/VCS, Arachne/object data, and the secrets master key; no destructive restore drill. |
-| Dependency recovery/reconciliation | Partial | Actions/import leases recover across restarts and Arachne restart is tested; component-outage consistency and observable reconciliation are incomplete. |
-| Health/readiness/doctor | Partial | Service liveness exists. `just bootstrap`/`just doctor [--json] [--stack]` now provide read-only dependency and surface diagnostics; dependency-aware readiness endpoints are missing. |
-| Resource bounds/backpressure | Partial | Upload body, preview, import, Action timeout, and some list bounds exist; queues, logs, retries, DB queries, and all uploads lack a reviewed common policy. |
-| Supported operations envelope | Missing | Minimum Docker/Compose resources, volume ownership, upgrades, clean uninstall, and support bounds are not published as a release guide. |
+| Gate                                    | Status  | Current evidence / precise gap                                                                                                                                                         |
+| --------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Versioned migrations and upgrade/repair | Partial | SQLx migrations `1001`–`1015` and agent migration `0001` exist; previous-release upgrade, rollback/forward-repair, and realistic-volume tests do not.                                  |
+| Complete backup/restore                 | Missing | No automated bundle covering Postgres, Git/VCS, Arachne/object data, and the secrets master key; no destructive restore drill.                                                         |
+| Dependency recovery/reconciliation      | Partial | Actions/import leases recover across restarts and Arachne restart is tested; component-outage consistency and observable reconciliation are incomplete.                                |
+| Health/readiness/doctor                 | Partial | Service liveness exists. `just bootstrap`/`just doctor [--json] [--stack]` now provide read-only dependency and surface diagnostics; dependency-aware readiness endpoints are missing. |
+| Resource bounds/backpressure            | Partial | Upload body, preview, import, Action timeout, and some list bounds exist; queues, logs, retries, DB queries, and all uploads lack a reviewed common policy.                            |
+| Supported operations envelope           | Missing | Minimum Docker/Compose resources, volume ownership, upgrades, clean uninstall, and support bounds are not published as a release guide.                                                |
 
 ## Web and accessibility
 
-| Gate | Status | Current evidence / precise gap |
-|---|---|---|
-| WCAG 2.2 AA both themes | Missing | Semantic-token remediation and contrast evidence described in the design note are not implemented/verified. |
-| Explicit async/error states | Partial | Several pages have empty/error UI; no audited loading/partial/stale/unavailable/denied matrix across journeys. |
-| Public-alpha Playwright journeys | Missing | No Playwright suite for first boot, repo, import, release, Action, collab, agent, provider, and recovery errors. |
-| Responsive/long-value behavior | Evidence gap | Responsive components exist; no 320 px through desktop evidence across required routes or accessible full-value audit. |
+| Gate                             | Status  | Current evidence / precise gap                                                                                                                                                                                                                     |
+| -------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| WCAG 2.2 AA both themes          | Partial | Dark/light semantic roles now provide distinct surface tiers and automated 4.5:1 meaningful-text plus 3:1 control/focus contrast checks. Shared shell/dashboard browser review exists; journey-wide keyboard, status, and component audits remain. |
+| Explicit async/error states      | Partial | Several pages have empty/error UI; no audited loading/partial/stale/unavailable/denied matrix across journeys.                                                                                                                                     |
+| Public-alpha Playwright journeys | Missing | No Playwright suite for first boot, repo, import, release, Action, collab, agent, provider, and recovery errors.                                                                                                                                   |
+| Responsive/long-value behavior   | Partial | Dashboard was reviewed at 1280 px and 320 px; organization rail is bounded and titled, repository names truncate with a full-value title, and long-name overflow was fixed. Required repo/import/Actions/collab/settings route evidence remains.   |
 
 ## Packaging and project hygiene
 
-| Gate | Status | Current evidence / precise gap |
-|---|---|---|
-| Public brand/screenshots | Missing | `logo-placeholder.svg` and README screenshot placeholder remain. |
-| Community/security/support files | Missing | `CONTRIBUTING.md`, `SECURITY.md`, code of conduct, support/governance, templates, changelog, and release notes are absent. |
+| Gate                                   | Status  | Current evidence / precise gap                                                                                                                            |
+| -------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public brand/screenshots               | Missing | `logo-placeholder.svg` and README screenshot placeholder remain.                                                                                          |
+| Community/security/support files       | Missing | `CONTRIBUTING.md`, `SECURITY.md`, code of conduct, support/governance, templates, changelog, and release notes are absent.                                |
 | License/boundary/reproducibility audit | Partial | Apache-2.0 license and unmodified pinned Forgejo boundary are documented; notices, headers, generated ownership, and clean-clone audit remain incomplete. |
-| Signed release artifacts | Missing | No signed multi-platform CLI, pinned container bundle, checksums, SBOM, or provenance attestation. |
+| Signed release artifacts               | Missing | No signed multi-platform CLI, pinned container bundle, checksums, SBOM, or provenance attestation.                                                        |
 
 ## Agent-ready repository contract
 
-| Gate | Status | Current evidence / precise gap |
-|---|---|---|
-| Root `AGENTS.md` | Implemented | Architecture invariants, forbidden shortcuts, commands, verification matrix, and safe Git/Docker rules are present. |
-| Current handoff | Implemented | `docs/handoff.md` records Stage 22 state and next bounded acceptance. |
-| Machine capability document | Missing | No versioned capability document served by both REST and MCP. |
-| One diagnostic/bootstrap command | Implemented | `just bootstrap`; `just doctor --json --stack` emits one JSON value and actionable fixes without mutation or network-provider access. |
-| Deterministic disposable fixtures | Partial | Tests use unique names and real services; no unified disposable org/repo fixture or cleanup policy. |
-| Generated artifact ownership | Implemented (docs) | Root `AGENTS.md` records OpenAPI/SDK/protobuf/token ownership; CI enforcement remains part of structural parity. |
-| PR completion checklist | Missing | No pull-request template linked to a “do not claim complete unless” checklist. |
+| Gate                              | Status             | Current evidence / precise gap                                                                                                        |
+| --------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Root `AGENTS.md`                  | Implemented        | Architecture invariants, forbidden shortcuts, commands, verification matrix, and safe Git/Docker rules are present.                   |
+| Current handoff                   | Implemented        | `docs/handoff.md` records Stage 22 state and next bounded acceptance.                                                                 |
+| Machine capability document       | Missing            | No versioned capability document served by both REST and MCP.                                                                         |
+| One diagnostic/bootstrap command  | Implemented        | `just bootstrap`; `just doctor --json --stack` emits one JSON value and actionable fixes without mutation or network-provider access. |
+| Deterministic disposable fixtures | Partial            | Tests use unique names and real services; no unified disposable org/repo fixture or cleanup policy.                                   |
+| Generated artifact ownership      | Implemented (docs) | Root `AGENTS.md` records OpenAPI/SDK/protobuf/token ownership; CI enforcement remains part of structural parity.                      |
+| PR completion checklist           | Missing            | No pull-request template linked to a “do not claim complete unless” checklist.                                                        |
 
 ## Baseline evidence
 

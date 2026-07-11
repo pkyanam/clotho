@@ -1,20 +1,20 @@
 # @clotho/ui
 
-Clotho's design system: tokens today, components as the product surface grows.
+Clotho's shared semantic design system.
 
 ## Design language
 
-Pure black (`#000000`) and white (`#ffffff`) — no grey fills, no accent color.
-Geist Pixel as the single typeface. All copy lowercase via CSS transform
-(semantic casing preserved for accessibility). Hairline white borders are the
-only structural lines; surfaces are flat (`#070707` lift, no shadows).
-Hierarchy comes from size, weight, and spacing — never from color.
+Clotho is an operational control room: cool ink/navy foundations, clearly
+separated surface tiers, high-legibility text, and an indigo interaction
+accent. Status colors are reserved for labelled status communication.
+
+Both themes expose semantic roles rather than raw grayscale choices. Meaningful
+primary, secondary, and muted text meets WCAG 2.2 AA on canvas and surface;
+control boundaries and focus indicators meet the 3:1 non-text threshold. Run
+`pnpm --filter @clotho/ui test` to verify the palette contract.
 
 ## Exports
 
-- `@clotho/ui/tokens` — typed TS token objects (colors, typography, radii, spacing)
-- `@clotho/ui/tokens.css` — CSS custom properties + base styles + utilities
+- `@clotho/ui/tokens` — typed theme token objects
+- `@clotho/ui/tokens.css` — CSS custom properties, base styles, and utilities
 - `@clotho/ui/fonts/*` — Geist Pixel (SIL OFL 1.1, © Vercel)
-
-Consumers are Next.js apps using Tailwind 4; add `@clotho/ui` to
-`transpilePackages`.

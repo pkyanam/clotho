@@ -12,7 +12,7 @@ export function PageFrame({
 }) {
   return (
     <div
-      className={`mx-auto px-4 py-8 sm:px-6 ${
+      className={`mx-auto px-4 py-8 sm:px-6 sm:py-10 ${
         wide ? "max-w-7xl" : "max-w-7xl"
       } ${className}`}
     >
@@ -33,24 +33,28 @@ export function PageTitle({
   eyebrow?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-4 border-b border-kumo-hairline pb-6">
+    <div className="relative flex flex-wrap items-start justify-between gap-5 border-b border-kumo-hairline pb-7 after:absolute after:-bottom-px after:left-0 after:h-0.5 after:w-20 after:bg-accent">
       <div className="min-w-0 max-w-3xl">
         {eyebrow && (
-          <div className="mb-2 text-[0.8125rem] text-kumo-inactive">{eyebrow}</div>
+          <div className="mb-2 text-[0.75rem] uppercase tracking-[0.14em] text-accent-strong">
+            {eyebrow}
+          </div>
         )}
         <h1
-          className="text-balance leading-tight text-kumo-default"
+          className="text-balance font-medium leading-tight text-kumo-default"
           style={{ fontSize: "clamp(1.375rem, 2.5vw, 1.75rem)" }}
         >
           {title}
         </h1>
         {description && (
-          <p className="mt-2 text-[0.9375rem] leading-relaxed text-kumo-inactive">
+          <p className="mt-2 max-w-2xl text-[0.9375rem] leading-relaxed text-kumo-subtle">
             {description}
           </p>
         )}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {actions && (
+        <div className="flex flex-wrap items-center gap-2">{actions}</div>
+      )}
     </div>
   );
 }
@@ -66,8 +70,11 @@ export function SectionHeader({
 }) {
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-3">
-      <div className="flex items-baseline gap-3">
-        <h2 className="text-[0.9375rem] font-medium text-kumo-default">{title}</h2>
+      <div className="flex items-center gap-3">
+        <span className="h-4 w-1 rounded-full bg-accent" aria-hidden="true" />
+        <h2 className="text-[0.9375rem] font-medium text-kumo-default">
+          {title}
+        </h2>
         {meta && (
           <span className="text-[0.8125rem] text-kumo-inactive">{meta}</span>
         )}
@@ -87,7 +94,7 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="empty-enter border border-kumo-hairline bg-kumo-base px-6 py-12 text-center">
+    <div className="empty-enter clotho-panel px-6 py-12 text-center">
       <p className="text-[0.9375rem] text-kumo-default">{title}</p>
       {description && (
         <p className="mx-auto mt-2 max-w-md text-[0.875rem] leading-relaxed text-kumo-inactive">
@@ -106,11 +113,7 @@ export function Panel({
   children: ReactNode;
   className?: string;
 }) {
-  return (
-    <section className={`border border-kumo-hairline bg-kumo-base ${className}`}>
-      {children}
-    </section>
-  );
+  return <section className={`clotho-panel ${className}`}>{children}</section>;
 }
 
 export function StatCell({
@@ -123,12 +126,12 @@ export function StatCell({
   muted?: boolean;
 }) {
   return (
-    <div className="border border-kumo-hairline bg-kumo-base px-4 py-3">
-      <div className="text-[0.75rem] uppercase tracking-wide text-kumo-inactive">
+    <div className="clotho-panel relative overflow-hidden px-4 py-4 before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-accent">
+      <div className="text-[0.75rem] uppercase tracking-[0.12em] text-kumo-inactive">
         {label}
       </div>
       <div
-        className={`mt-1 truncate text-[0.9375rem] ${
+        className={`mt-1 truncate text-[1.0625rem] font-medium ${
           muted ? "text-kumo-inactive" : "text-kumo-default"
         }`}
       >
@@ -150,7 +153,7 @@ export function SettingsSection({
   badge?: ReactNode;
 }) {
   return (
-    <section className="border border-kumo-hairline bg-kumo-base">
+    <section className="clotho-panel overflow-hidden">
       <div className="border-b border-kumo-hairline px-5 py-4">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-[0.9375rem] font-medium">{title}</h2>

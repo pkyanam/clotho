@@ -48,7 +48,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="sticky top-0 z-30 border-b border-kumo-hairline bg-kumo-canvas/80 backdrop-blur-xl">
+      <header className="sticky top-0 z-30 border-b border-kumo-hairline bg-kumo-canvas/90 shadow-[0_8px_24px_-22px_var(--shadow-color)] backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4 sm:px-6">
           <button
             type="button"
@@ -61,9 +61,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <Link
             href="/"
-            className="text-[0.9375rem] font-medium tracking-wide text-kumo-default"
+            className="group flex items-center gap-2 text-[0.9375rem] font-medium tracking-wide text-kumo-default"
           >
-            clotho
+            <span className="grid h-7 w-7 place-items-center rounded-md bg-accent text-[0.75rem] text-white shadow-sm">
+              c
+            </span>
+            <span>clotho</span>
           </Link>
 
           <nav className="hidden items-center gap-1 md:flex">
@@ -71,9 +74,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`px-3 py-1.5 text-[0.8125rem] transition-colors ${
+                aria-current={
+                  isActive(pathname, item.href) ? "page" : undefined
+                }
+                className={`rounded-md px-3 py-1.5 text-[0.8125rem] transition-colors ${
                   isActive(pathname, item.href)
-                    ? "text-kumo-default"
+                    ? "clotho-active-nav font-medium"
                     : "text-kumo-inactive hover:text-kumo-default"
                 }`}
               >
@@ -87,7 +93,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
-              className="hidden h-9 items-center gap-2 border border-kumo-hairline px-3 text-[0.8125rem] text-kumo-inactive transition-colors hover:border-kumo-contrast hover:text-kumo-default sm:flex"
+              className="hidden h-9 items-center gap-2 rounded-md border border-kumo-hairline bg-kumo-base px-3 text-[0.8125rem] text-kumo-inactive transition-colors hover:border-accent hover:text-kumo-default sm:flex"
               aria-label="open command palette"
             >
               <span>search</span>
@@ -114,7 +120,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {mobileOpen && (
           <nav
             key={drawerKey}
-            className="drawer-enter border-t border-kumo-hairline px-4 py-3 md:hidden"
+            className="drawer-enter border-t border-kumo-hairline bg-kumo-base px-4 py-3 md:hidden"
           >
             <ul className="space-y-1">
               {NAV.map((item) => (
@@ -124,7 +130,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     onClick={() => setMobileOpen(false)}
                     className={`block px-3 py-2.5 text-sm ${
                       isActive(pathname, item.href)
-                        ? "bg-kumo-elevated text-kumo-default"
+                        ? "clotho-active-nav rounded-md font-medium"
                         : "text-kumo-inactive"
                     }`}
                   >
@@ -151,9 +157,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <main className="flex-1">{children}</main>
 
-      {paletteOpen && (
-        <CommandPalette onClose={() => setPaletteOpen(false)} />
-      )}
+      {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
     </div>
   );
 }
@@ -169,7 +173,11 @@ const PALETTE_COMMANDS = [
   },
   { href: "/agents", label: "agents", keywords: "sessions identity presence" },
   { href: "/activity", label: "activity", keywords: "feed events" },
-  { href: "/notifications", label: "notifications", keywords: "alerts mentions" },
+  {
+    href: "/notifications",
+    label: "notifications",
+    keywords: "alerts mentions",
+  },
   { href: "/orgs", label: "organizations", keywords: "teams members" },
   { href: "/settings", label: "settings hub", keywords: "account org" },
   {
@@ -228,7 +236,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <div
-        className="palette-enter w-full max-w-lg border border-kumo-hairline bg-kumo-base shadow-none"
+        className="palette-enter clotho-panel w-full max-w-lg overflow-hidden shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="border-b border-kumo-hairline px-4 py-3">
@@ -267,7 +275,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
                   onMouseEnter={() => setSelected(i)}
                   className={`flex items-center justify-between px-4 py-2.5 text-sm transition-colors ${
                     i === active
-                      ? "bg-kumo-elevated text-kumo-default"
+                      ? "clotho-active-nav text-kumo-default"
                       : "text-kumo-default hover:bg-kumo-elevated"
                   }`}
                 >

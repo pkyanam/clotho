@@ -15,7 +15,7 @@ The current evidence-backed gap inventory is
 
 - Added the root agent contract (`AGENTS.md`).
 - Added read-only deterministic diagnostics: `just bootstrap`, `just doctor
-  --json`, and `just doctor --stack`.
+--json`, and `just doctor --stack`.
 - Made MCP `tools/list` reflect each token's allowed-tool scope; call-time
   enforcement and audit remain unchanged.
 - Normalized Forgejo's `null` empty-assignee representation at the internal
@@ -27,7 +27,14 @@ The current evidence-backed gap inventory is
 - Preserved error codes and correlation through the JavaScript SDK, CLI, and
   REST-backed MCP tools; froze CLI exit classes `1`–`7`.
 - Corrected missing-file semantics from internal VCS through REST to `404 /
-  not_found` and added a live MCP↔REST error-equivalence assertion.
+not_found` and added a live MCP↔REST error-equivalence assertion.
+- Replaced the monotone black/white console palette with theme-specific
+  semantic roles for canvas, three surface tiers, meaningful text, controls,
+  focus, accent, and status in `@clotho/ui`.
+- Added deterministic WCAG contrast tests for both themes; restructured the
+  shared shell/dashboard with explicit active navigation, raised panels,
+  section markers, metric hierarchy, non-color row cues, and a bounded
+  long-name-safe organization rail.
 
 ## Baseline state
 
@@ -59,13 +66,21 @@ With the internal collaboration provider stopped, its issue route returned
 `502 upstream_unavailable`, `retryable: true`, the caller's request ID, and no
 provider URL/topology; the provider was restarted and passed its health probe.
 
+For the console slice, `@clotho/ui` contrast tests, web typecheck, lint, and
+production build passed. The rebuilt Docker console was reviewed in dark and
+light themes at 1280 px and at 320 px. Theme selection persisted across route
+navigation, semantic tiers resolved to distinct computed colors, desktop had
+no horizontal overflow, and the mobile overflow exposed by long generated
+repository names was corrected in the source before final verification.
+
 No live Daytona, Box, ComputeSDK upstream, managed Clerk, private/gated Hub,
 or Tailscale credential test has been run in this slice.
 
 ## Next bounded acceptance test
 
-After this slice is green and pushed, implement complete OpenAPI operation and
-SDK structural verification as the next Stage 22 blocker. Acceptance:
+After the console slice is green and pushed, implement complete OpenAPI
+operation and SDK structural verification as the next Stage 22 blocker.
+Acceptance:
 
 1. The checked-in OpenAPI parses in CI and every operation has an
    `operationId`, explicit security/stability metadata, request schema, success

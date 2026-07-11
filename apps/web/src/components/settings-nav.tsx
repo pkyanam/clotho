@@ -2,7 +2,11 @@ import Link from "next/link";
 
 const items = [
   { href: "/settings", label: "overview", key: "overview" as const },
-  { href: "/settings/appearance", label: "appearance", key: "appearance" as const },
+  {
+    href: "/settings/appearance",
+    label: "appearance",
+    key: "appearance" as const,
+  },
   { href: "/settings/compute", label: "compute", key: "compute" as const },
   { href: "/settings/network", label: "network", key: "network" as const },
   { href: "/settings/secrets", label: "secrets", key: "secrets" as const },
@@ -21,9 +25,10 @@ export function SettingsNav({
           <Link
             key={item.href}
             href={item.href}
-            className={`px-3 py-1.5 text-[0.8125rem] transition-colors ${
+            aria-current={current ? "page" : undefined}
+            className={`rounded-md px-3 py-1.5 text-[0.8125rem] transition-colors ${
               current
-                ? "border border-kumo-hairline bg-kumo-elevated text-kumo-default"
+                ? "clotho-active-nav font-medium"
                 : "text-kumo-inactive hover:text-kumo-default"
             }`}
           >

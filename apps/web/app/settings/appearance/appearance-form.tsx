@@ -1,26 +1,20 @@
 "use client";
 
 import { useTheme } from "src/components/theme-provider";
-import {
-  THEME_PREFERENCES,
-  type ThemePreference,
-} from "src/lib/theme";
+import { THEME_PREFERENCES, type ThemePreference } from "src/lib/theme";
 
-const LABELS: Record<
-  ThemePreference,
-  { title: string; body: string }
-> = {
+const LABELS: Record<ThemePreference, { title: string; body: string }> = {
   system: {
     title: "system",
     body: "match the operating system light or dark setting.",
   },
   dark: {
     title: "dark",
-    body: "pure black canvas — the default clotho console.",
+    body: "deep ink canvas with raised navy work surfaces.",
   },
   light: {
     title: "light",
-    body: "inverted belweave: white canvas, black type and hairlines.",
+    body: "soft slate canvas with crisp white work surfaces.",
   },
 };
 
@@ -46,14 +40,14 @@ export function AppearanceForm() {
                 role="radio"
                 aria-checked={selected}
                 onClick={() => setPreference(option)}
-                className={`border px-4 py-3 text-left transition-colors ${
+                className={`relative rounded-lg border px-4 py-3 text-left transition-colors ${
                   selected
-                    ? "border-kumo-contrast bg-kumo-elevated text-kumo-default"
-                    : "border-kumo-hairline text-kumo-inactive hover:border-kumo-contrast hover:text-kumo-default"
+                    ? "border-accent bg-accent-surface text-kumo-default shadow-[inset_0_-3px_0_var(--accent)]"
+                    : "border-kumo-hairline bg-kumo-base text-kumo-inactive hover:border-accent hover:text-kumo-default"
                 }`}
               >
                 <span className="block text-[0.9375rem]">{meta.title}</span>
-                <span className="mt-1.5 block text-[0.8125rem] leading-relaxed opacity-80">
+                <span className="mt-1.5 block text-[0.8125rem] leading-relaxed">
                   {meta.body}
                 </span>
               </button>

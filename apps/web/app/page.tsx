@@ -29,12 +29,11 @@ export default async function Home({
   const [orgs, repos, activity, providerList] = await Promise.all([
     client.orgs().catch(() => null),
     client.listRepos().catch(() => null),
-    client
-      .activity({ limit: 12 })
-      .catch(() => [] as ActivityEvent[]),
-    client
-      .computeProviderList()
-      .catch(() => ({ providers: [] as ComputeProvider[], default_provider_id: "" })),
+    client.activity({ limit: 12 }).catch(() => [] as ActivityEvent[]),
+    client.computeProviderList().catch(() => ({
+      providers: [] as ComputeProvider[],
+      default_provider_id: "",
+    })),
   ]);
 
   const gatewayDown = repos === null;
@@ -56,11 +55,14 @@ export default async function Home({
     <PageFrame>
       <PageTitle
         title="dashboard"
+        eyebrow="workspace overview"
         description="repositories, compute, agents, and recent activity — your control plane for humans and agents."
         actions={
           <>
             <Link href="/repos/new">
-              <Button type="button">new repository</Button>
+              <Button type="button" variant="primary">
+                new repository
+              </Button>
             </Link>
             {configuredProviders.length === 0 && (
               <Link href="/settings/compute">
@@ -89,7 +91,7 @@ export default async function Home({
         </div>
       ) : (
         <>
-          <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCell label="repositories" value={repoList.length} />
             <StatCell
               label="compute"
@@ -100,10 +102,7 @@ export default async function Home({
               }
               muted={configuredProviders.length === 0}
             />
-            <StatCell
-              label="organizations"
-              value={orgList.length}
-            />
+            <StatCell label="organizations" value={orgList.length} />
             <StatCell
               label="agents · 7d"
               value={
@@ -115,7 +114,7 @@ export default async function Home({
             />
           </div>
 
-          <div className="mt-10 grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="mt-10 grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
             <div className="min-w-0 space-y-10">
               <section>
                 <SectionHeader
@@ -161,7 +160,9 @@ export default async function Home({
                         action={
                           <div className="flex flex-wrap justify-center gap-2">
                             <Link href="/repos/new">
-                              <Button type="button">create repository</Button>
+                              <Button type="button" variant="primary">
+                                create repository
+                              </Button>
                             </Link>
                             <Link href="/?show=all">
                               <Button type="button" variant="outline">
@@ -177,14 +178,16 @@ export default async function Home({
                         description="create a repository to start collaborating with humans and agents."
                         action={
                           <Link href="/repos/new">
-                            <Button type="button">create repository</Button>
+                            <Button type="button" variant="primary">
+                              create repository
+                            </Button>
                           </Link>
                         }
                       />
                     )}
                   </div>
                 ) : (
-                  <ul className="mt-4 divide-y divide-kumo-hairline border border-kumo-hairline">
+                  <ul className="clotho-panel mt-4 divide-y divide-kumo-hairline overflow-hidden">
                     {repoList.slice(0, 12).map((repo) => (
                       <RepoRow key={repo.name} repo={repo} />
                     ))}
@@ -216,23 +219,28 @@ export default async function Home({
                       description="connect a compute provider to run Actions and agent sandboxes."
                       action={
                         <Link href="/settings/compute">
-                          <Button type="button">open compute settings</Button>
+                          <Button type="button" variant="primary">
+                            open compute settings
+                          </Button>
                         </Link>
                       }
                     />
                   </div>
                 ) : configuredProviders.length === 0 ? (
-                  <div className="mt-4 border border-kumo-hairline bg-kumo-base px-5 py-6">
+                  <div className="clotho-panel mt-4 px-5 py-6">
                     <p className="text-[0.9375rem] text-kumo-default">
                       connect compute to run Actions and agent sandboxes
                     </p>
                     <p className="mt-2 max-w-lg text-[0.8125rem] leading-relaxed text-kumo-inactive">
-                      daytona is the recommended starting provider — paste an api
-                      key once in settings and clotho stores it as an org secret.
+                      daytona is the recommended starting provider — paste an
+                      api key once in settings and clotho stores it as an org
+                      secret.
                     </p>
                     <div className="mt-5 flex flex-wrap items-center gap-3">
                       <Link href="/settings/compute">
-                        <Button type="button">connect daytona</Button>
+                        <Button type="button" variant="primary">
+                          connect daytona
+                        </Button>
                       </Link>
                       {unconfiguredProviders.length > 1 && (
                         <Link
@@ -246,7 +254,7 @@ export default async function Home({
                   </div>
                 ) : (
                   <>
-                    <ul className="mt-4 divide-y divide-kumo-hairline border border-kumo-hairline">
+                    <ul className="clotho-panel mt-4 divide-y divide-kumo-hairline overflow-hidden">
                       {configuredProviders.map((p) => (
                         <ComputeRow key={p.id} provider={p} prominent />
                       ))}
@@ -254,7 +262,8 @@ export default async function Home({
                     {unconfiguredProviders.length > 0 && (
                       <p className="mt-3 text-[0.8125rem] text-kumo-inactive">
                         {unconfiguredProviders.length} more provider
-                        {unconfiguredProviders.length === 1 ? "" : "s"} available —{" "}
+                        {unconfiguredProviders.length === 1 ? "" : "s"}{" "}
+                        available —{" "}
                         <Link
                           href="/settings/compute"
                           className="underline hover:text-kumo-default"
@@ -271,22 +280,34 @@ export default async function Home({
               </section>
             </div>
 
-            <aside className="space-y-6">
+            <aside className="min-w-0 space-y-6">
               {orgList.length > 0 && (
                 <Panel className="p-4">
-                  <SectionHeader title="organizations" meta={`${orgList.length}`} />
-                  <ul className="mt-4 space-y-2">
-                    {orgList.map((org) => (
+                  <SectionHeader
+                    title="organizations"
+                    meta={`${orgList.length}`}
+                  />
+                  <ul className="mt-4 space-y-1">
+                    {orgList.slice(0, 6).map((org) => (
                       <li key={org.name}>
                         <Link
                           href={`/orgs/${org.name}`}
-                          className="block text-[0.875rem] text-kumo-default hover:underline"
+                          title={org.display_name || org.name}
+                          className="clotho-row block truncate rounded-md px-2 py-1.5 text-[0.875rem] text-kumo-default"
                         >
                           {org.display_name || org.name}
                         </Link>
                       </li>
                     ))}
                   </ul>
+                  {orgList.length > 6 && (
+                    <Link
+                      href="/orgs"
+                      className="mt-3 block border-t border-kumo-hairline pt-3 text-[0.8125rem] text-accent-strong hover:underline"
+                    >
+                      view all {orgList.length} organizations
+                    </Link>
+                  )}
                 </Panel>
               )}
 
@@ -307,7 +328,10 @@ export default async function Home({
                   <p className="mt-4 text-[0.8125rem] leading-relaxed text-kumo-inactive">
                     no agent sessions yet. agents connect with scoped tokens and
                     show up here when they start working.{" "}
-                    <Link href="/agents" className="underline hover:text-kumo-default">
+                    <Link
+                      href="/agents"
+                      className="underline hover:text-kumo-default"
+                    >
                       view agents
                     </Link>
                   </p>
@@ -315,11 +339,15 @@ export default async function Home({
                   <dl className="mt-4 space-y-2 text-[0.8125rem]">
                     <div className="flex justify-between gap-2">
                       <dt className="text-kumo-inactive">identities</dt>
-                      <dd className="text-kumo-default">{agentSummary.identities}</dd>
+                      <dd className="text-kumo-default">
+                        {agentSummary.identities}
+                      </dd>
                     </div>
                     <div className="flex justify-between gap-2">
                       <dt className="text-kumo-inactive">recent sessions</dt>
-                      <dd className="text-kumo-default">{agentSummary.sessionCount}</dd>
+                      <dd className="text-kumo-default">
+                        {agentSummary.sessionCount}
+                      </dd>
                     </div>
                     {agentSummary.lastSeenMs !== null && (
                       <div className="flex justify-between gap-2">
@@ -348,7 +376,8 @@ export default async function Home({
                 />
                 {activity.length === 0 ? (
                   <p className="mt-4 text-[0.8125rem] text-kumo-inactive">
-                    no events yet. create a repo or connect a provider to get started.
+                    no events yet. create a repo or connect a provider to get
+                    started.
                   </p>
                 ) : (
                   <ul className="mt-4 space-y-3">
@@ -416,11 +445,16 @@ function RepoRow({ repo }: { repo: RepoInfo }) {
     <li>
       <Link
         href={`/repos/${repo.name}`}
-        className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 transition-colors hover:bg-kumo-elevated"
+        className="clotho-row flex flex-wrap items-center justify-between gap-3 px-4 py-3.5"
       >
         <span className="min-w-0">
           <span className="flex flex-wrap items-center gap-2">
-            <span className="text-[0.9375rem] text-kumo-default">{repo.name}</span>
+            <span
+              title={repo.name}
+              className="min-w-0 flex-1 truncate text-[0.9375rem] text-kumo-default"
+            >
+              {repo.name}
+            </span>
             <Badge variant="outline">{repo.visibility}</Badge>
             {repo.configured && (
               <Badge variant="outline">{repo.provider}</Badge>
@@ -453,9 +487,15 @@ function ComputeRow({
   prominent?: boolean;
 }) {
   return (
-    <li className={prominent ? "bg-kumo-base px-4 py-3" : "px-4 py-3 opacity-80"}>
+    <li
+      className={
+        prominent ? "bg-kumo-base px-4 py-3" : "bg-kumo-recessed px-4 py-3"
+      }
+    >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[0.9375rem] text-kumo-default">{provider.name}</span>
+        <span className="text-[0.9375rem] text-kumo-default">
+          {provider.name}
+        </span>
         <Badge variant="outline">
           {provider.configured ? "configured" : "not connected"}
         </Badge>

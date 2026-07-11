@@ -20,7 +20,7 @@ export default function AppearanceSettingsPage() {
       <div className="mt-8 max-w-2xl">
         <SettingsSection
           title="color scheme"
-          description="dark is the default clotho look. light inverts the belweave palette. system tracks your os preference."
+          description="both themes use the same accessible semantic hierarchy. system tracks your os preference."
         >
           <div className="px-5 py-5">
             <AppearanceForm />

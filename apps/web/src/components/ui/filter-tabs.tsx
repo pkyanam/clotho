@@ -13,9 +13,10 @@ export function FilterTab({
   return (
     <Link
       href={href}
-      className={`border px-3 py-1.5 text-[0.8125rem] transition-colors ${
+      aria-current={current ? "page" : undefined}
+      className={`rounded-md border px-3 py-1.5 text-[0.8125rem] transition-colors ${
         current
-          ? "border-kumo-hairline bg-kumo-elevated text-kumo-default"
+          ? "clotho-active-nav border-accent font-medium"
           : "border-transparent text-kumo-inactive hover:text-kumo-default"
       }`}
     >

@@ -1,35 +1,55 @@
-/* ── clotho design tokens: pure black & white. no accent color. ───────────── */
-/* dark (default product look) */
+/* Clotho semantic design tokens: an operational control-room palette. */
 :root,
 :root[data-mode="dark"] {
-  --background: #000000;
-  --foreground: #ffffff;
-  /* "muted"/"faint" map to the foreground — hierarchy is not grey. */
-  --muted: #ffffff;
-  --faint: #ffffff;
-  --border: rgba(255, 255, 255, 0.16);
-  --border-strong: rgba(255, 255, 255, 0.32);
-  --surface: #070707;
-  --surface-hover: #0c0c0c;
-  --panel: #0a0a0a;
-  --scrollbar-thumb: rgba(255, 255, 255, 0.2);
+  --background: #080d1a;
+  --foreground: #f8fafc;
+  --muted: #b7c2d6;
+  --faint: #91a0b8;
+  --disabled: #77859d;
+  --border: #607291;
+  --border-strong: #9ca8ff;
+  --surface: #11192b;
+  --surface-hover: #18243a;
+  --surface-raised: #18243a;
+  --panel: #0d1424;
+  --accent: #9ca8ff;
+  --accent-strong: #c3caff;
+  --accent-surface: #1d2850;
+  --action: #6554c0;
+  --action-hover: #5847ae;
+  --focus: #c3caff;
+  --success: #5ee6a8;
+  --warning: #ffd166;
+  --danger: #ff8f9b;
+  --scrollbar-thumb: #607291;
+  --shadow-color: rgba(0, 0, 0, 0.32);
 }
 
-/* light — exact invert of the belweave dark palette */
 :root[data-mode="light"] {
-  --background: #ffffff;
-  --foreground: #000000;
-  --muted: #000000;
-  --faint: #000000;
-  --border: rgba(0, 0, 0, 0.16);
-  --border-strong: rgba(0, 0, 0, 0.32);
-  --surface: #f8f8f8;
-  --surface-hover: #f3f3f3;
-  --panel: #f5f5f5;
-  --scrollbar-thumb: rgba(0, 0, 0, 0.2);
+  --background: #f4f6fb;
+  --foreground: #172033;
+  --muted: #475569;
+  --faint: #5b6475;
+  --disabled: #687386;
+  --border: #7f8da5;
+  --border-strong: #6554c0;
+  --surface: #ffffff;
+  --surface-hover: #eef1f8;
+  --surface-raised: #e7eaf5;
+  --panel: #edf0f7;
+  --accent: #6554c0;
+  --accent-strong: #49379b;
+  --accent-surface: #e8e5fb;
+  --action: #6554c0;
+  --action-hover: #5847ae;
+  --focus: #49379b;
+  --success: #16794b;
+  --warning: #8a5700;
+  --danger: #b4233b;
+  --scrollbar-thumb: #687386;
+  --shadow-color: rgba(30, 41, 59, 0.14);
 }
 
-/* base — tailwind consumers should keep these inside @layer base equivalents */
 html {
   background: var(--background);
   color-scheme: dark;
@@ -45,9 +65,9 @@ html[data-mode="dark"] {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-pixel), ui-monospace, "SFMono-Regular",
-    monospace;
-  text-transform: lowercase; /* all text lowercase by design */
+  font-family:
+    var(--font-geist-pixel), ui-monospace, "SFMono-Regular", monospace;
+  text-transform: lowercase;
   -webkit-font-smoothing: antialiased;
   letter-spacing: 0.01em;
   line-height: 1.6;
@@ -57,27 +77,23 @@ a {
   text-decoration: none;
 }
 ::selection {
-  background: var(--foreground);
+  background: var(--accent);
   color: var(--background);
 }
-/* visible keyboard focus — high-contrast ring; the palette carries no hue. */
 :focus-visible {
-  outline: 2px solid var(--foreground);
+  outline: 2px solid var(--focus);
   outline-offset: 3px;
 }
 :focus:not(:focus-visible) {
   outline: none;
 }
 
-/* ── component utilities ───────────────────────────────────────────────────── */
-/* hairline divider */
 .rule-hairline {
   height: 1px;
   width: 100%;
   background: var(--border);
 }
 
-/* card hover affordance — a white edge appears, no color */
 .edge-hover {
   position: relative;
 }
@@ -87,19 +103,18 @@ a {
   inset: 0;
   border-radius: inherit;
   border: 1px solid transparent;
-  transition: border-color 0.25s ease;
+  transition: border-color 0.18s ease;
   pointer-events: none;
 }
 .edge-hover:hover::after {
   border-color: var(--border-strong);
 }
 
-/* ── motion — one restrained first-load reveal ─────────────────────────────── */
 @media (prefers-reduced-motion: no-preference) {
   @keyframes reveal-up {
     from {
       opacity: 0;
-      transform: translateY(14px);
+      transform: translateY(10px);
     }
     to {
       opacity: 1;
@@ -107,7 +122,7 @@ a {
     }
   }
   .reveal {
-    animation: reveal-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: reveal-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
     animation-delay: var(--reveal-delay, 0ms);
   }
 }

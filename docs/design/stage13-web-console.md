@@ -7,14 +7,14 @@ Cloudflare control-plane modularity + agent-native presence), not a scaffold.
 
 ## Information architecture
 
-| Route | Role |
-|---|---|
-| `/` | Ops dashboard: repos, compute health, agents, activity |
-| `/repos`, `/repos/new`, `/repos/[name]/*` | Repo workspace |
-| `/settings` | Settings hub |
-| `/settings/compute` | Provider registry + connect |
-| `/settings/secrets` | Org-scoped secrets (masked) |
-| `/orgs`, `/agents`, `/activity` | Progressive: stubs → full pages |
+| Route                                     | Role                                                   |
+| ----------------------------------------- | ------------------------------------------------------ |
+| `/`                                       | Ops dashboard: repos, compute health, agents, activity |
+| `/repos`, `/repos/new`, `/repos/[name]/*` | Repo workspace                                         |
+| `/settings`                               | Settings hub                                           |
+| `/settings/compute`                       | Provider registry + connect                            |
+| `/settings/secrets`                       | Org-scoped secrets (masked)                            |
+| `/orgs`, `/agents`, `/activity`           | Progressive: stubs → full pages                        |
 
 Global nav: logo · dashboard · repos · agents · activity · settings · ⌘K · status.
 
@@ -84,6 +84,22 @@ Verification must include automated contrast/accessibility checks plus visual
 review on dashboard, repo tree, artifacts, import progress, Actions, issues,
 pulls, agents, provider settings, secrets, and dialogs at desktop and 320 px.
 Capture matching light/dark screenshots for the release evidence bundle.
+
+### Implemented semantic direction
+
+The Stage 22 console uses an operational control-room palette rather than the
+original black/white inversion: deep ink and navy surfaces in dark mode, soft
+slate and white tiers in light mode, and indigo only for interaction and
+selection. `packages/ui/styles/tokens.css` owns the semantic roles; the Kumo
+overlay maps to those roles without opacity-stacking meaningful text.
+
+`packages/ui/test/contrast.test.mjs` enforces 4.5:1 for primary, secondary, and
+muted text on canvas and working surfaces, plus 3:1 for control boundaries and
+focus indicators. This closes the palette-level blocker, not the broader
+journey-level accessibility gate: critical routes, keyboard flows, async
+states, and 320 px layouts still require continuing browser evidence.
+The first matching dashboard captures and verification notes are stored in
+[`docs/evidence/stage22-web`](../evidence/stage22-web/README.md).
 
 ## Non-goals
 
