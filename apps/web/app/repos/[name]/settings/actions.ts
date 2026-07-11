@@ -102,7 +102,7 @@ export async function importHuggingFace(repo: string, formData: FormData) {
   const maxFiles = Number(formData.get("max_files") ?? 200);
   const maxTotalBytes = Number(formData.get("max_total_bytes") ?? 10_737_418_240);
   if (!repoId) throw new Error("Hugging Face namespace/name is required");
-  await (await api()).importHuggingFace(repo, repoId, {
+  await (await api()).startHuggingFaceImport(repo, repoId, {
     revision,
     paths,
     maxFiles,
@@ -110,5 +110,5 @@ export async function importHuggingFace(repo: string, formData: FormData) {
   });
   revalidatePath(`/repos/${repo}`);
   revalidatePath(`/repos/${repo}/settings`);
-  redirect(`/repos/${repo}`);
+  redirect(`/repos/${repo}/settings#hub`);
 }

@@ -544,6 +544,75 @@ paths:
         "403":
           $ref: "#/components/responses/Error"
 
+  /api/v1/repos/{name}/hub-imports:
+    get:
+      tags: [repos, providers]
+      operationId: listHubImportJobs
+      summary: List durable Hub import jobs for a repository
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      responses:
+        "200":
+          description: Import history and live progress
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobs]
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/HubImportJob"
+    post:
+      tags: [repos, providers]
+      operationId: createHubImportJob
+      summary: Queue a durable, restart-recoverable Hugging Face import
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HubImportRequest"
+      responses:
+        "202":
+          description: Import queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HubImportJob"
+
+  /api/v1/repos/{name}/hub-imports/{id}:
+    get:
+      tags: [repos, providers]
+      operationId: getHubImportJob
+      summary: Get one Hub import job and its progress
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/repoName"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Import job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HubImportJob"
+        "404":
+          $ref: "#/components/responses/Error"
+
   /api/v1/repos/{name}/file:
     get:
       tags: [repos]
@@ -2697,6 +2766,62 @@ components:
           type: array
           items:
             type: string
+    HubImportJob:
+      type: object
+      required: [id, repo_id, provider, source_repo_id, source_revision, status, files_total, files_imported, logical_bytes, bytes_imported, arachne_files, security_counts, commit_id, operation_id, error, created_by, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        repo_id:
+          type: string
+        provider:
+          type: string
+        source_repo_id:
+          type: string
+        source_revision:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed, interrupted]
+        files_total:
+          type: integer
+          format: int64
+        files_imported:
+          type: integer
+          format: int64
+        logical_bytes:
+          type: integer
+          format: int64
+        bytes_imported:
+          type: integer
+          format: int64
+        arachne_files:
+          type: integer
+          format: int64
+        security_counts:
+          type: object
+          additionalProperties:
+            type: integer
+        commit_id:
+          type: string
+        operation_id:
+          type: string
+        error:
+          type: string
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
     FileContent:
       type: object
       properties:

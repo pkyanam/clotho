@@ -124,14 +124,19 @@ results fail closed, large responses stream directly to Arachne, and the
 result is committed/submitted through Clotho VCS:
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/repos/tiny-gpt/imports/huggingface \
+curl -s -X POST http://localhost:8080/api/v1/repos/tiny-gpt/hub-imports \
   -H 'content-type: application/json' \
   -d '{"repo_id":"hf-internal-testing/tiny-random-gpt2","revision":"main"}' | jq
+curl -s http://localhost:8080/api/v1/repos/tiny-gpt/hub-imports | jq
 ```
 
 Public imports need no credential. For private/gated sources, connect a token
 in Clotho (`provider connect huggingface`) or store `HUGGINGFACE_TOKEN` as an
 org/repo secret; environment configuration is not required.
+Imports run as durable control-plane jobs. Clotho persists preflight totals,
+per-file byte progress, Arachne counts, scanner summaries, commits, and terminal
+errors; the web app polls live state. Queued/running jobs are replayed after a
+gateway restart, with content-addressed uploads deduplicating completed work.
 
 CSV, TSV, and JSONL previews are deliberately bounded: the gateway streams at
 most 256 KiB from Arachne and returns at most 100 rows. Large datasets never

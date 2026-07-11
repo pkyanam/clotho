@@ -144,6 +144,31 @@ describe("ClothoClient", () => {
     );
   });
 
+  it("queues and monitors durable Hub imports", async () => {
+    const job = { id: "j1", status: "queued", source_repo_id: "openai/gpt-oss" };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(job, 202))
+      .mockResolvedValueOnce(jsonResponse({ jobs: [job] }))
+      .mockResolvedValueOnce(jsonResponse({ ...job, status: "running" }));
+    const client = new ClothoClient({
+      baseUrl: "http://gateway.test",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    await client.startHuggingFaceImport("weave", "openai/gpt-oss");
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://gateway.test/api/v1/repos/weave/hub-imports",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(await client.hubImportJobs("weave")).toHaveLength(1);
+    await client.hubImportJob("weave", "j1");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://gateway.test/api/v1/repos/weave/hub-imports/j1",
+      expect.objectContaining({ headers: {} }),
+    );
+  });
+
   it("surfaces gateway error bodies as ClothoApiError", async () => {
     const { client } = clientWith(
       jsonResponse({ error: 'repo "weave" already exists' }, 409),

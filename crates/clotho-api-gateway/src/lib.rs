@@ -248,6 +248,7 @@ pub fn router_with_pool(
         public_git_url: config.public_git_url.clone(),
         secrets_crypto,
     });
+    hub::recover_hub_import_jobs(state.clone());
     Ok(Router::new()
         .route("/healthz", get(healthz))
         // Stage 15: published OpenAPI contract (hand-maintained docs/openapi.yaml).
@@ -303,6 +304,14 @@ pub fn router_with_pool(
         .route(
             "/api/v1/repos/{name}/imports/huggingface",
             post(hub::import_huggingface),
+        )
+        .route(
+            "/api/v1/repos/{name}/hub-imports",
+            get(hub::list_hub_import_jobs).post(hub::create_hub_import_job),
+        )
+        .route(
+            "/api/v1/repos/{name}/hub-imports/{id}",
+            get(hub::get_hub_import_job),
         )
         .route(
             "/api/v1/repos/{name}/merge-policy",

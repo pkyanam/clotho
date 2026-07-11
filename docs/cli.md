@@ -167,6 +167,7 @@ clotho repo artifacts my-model
 clotho --json repo artifacts my-dataset
 clotho repo preview my-dataset data/train.jsonl --limit 25
 clotho repo import-hf my-model hf-internal-testing/tiny-random-gpt2 --revision main
+clotho repo imports my-model
 ```
 
 Use repeated `--path` flags for a selective snapshot. Imports default to 200
@@ -174,6 +175,8 @@ files / 10 GiB, block unsafe Hub scanner results, stream large files directly
 to Arachne, and land through the merge queue. `--allow-unsafe` is an explicit
 CLI-only override. Private/gated repositories use a Clotho-stored
 `HUGGINGFACE_TOKEN`; public repositories need no credential.
+The import command queues a durable job and returns immediately; `repo imports`
+shows live file/byte progress, commit status, and terminal errors.
 
 ## Secrets
 

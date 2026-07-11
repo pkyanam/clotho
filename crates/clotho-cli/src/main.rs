@@ -151,7 +151,7 @@ async fn cmd_auth(config: &Config, mut args: Vec<String>) -> Result<()> {
 
 async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
     let Some(sub) = args.first().cloned() else {
-        bail!("usage: clotho repo <init|list|status|log|commit|submit|tree|artifacts|preview|import-hf|get> ...");
+        bail!("usage: clotho repo <init|list|status|log|commit|submit|tree|artifacts|preview|import-hf|imports|get> ...");
     };
     args.remove(0);
     match sub.as_str() {
@@ -427,7 +427,7 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
             let body = request_value(
                 config,
                 reqwest::Method::POST,
-                &format!("/api/v1/repos/{repo}/imports/huggingface"),
+                &format!("/api/v1/repos/{repo}/hub-imports"),
                 Some(json!({
                     "repo_id": source,
                     "revision": revision,
@@ -440,24 +440,45 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
             .await?;
             emit(config, &body, || {
                 println!(
-                    "imported {} files / {} bytes from {}/{} into {} at {}",
-                    body["files_imported"].as_u64().unwrap_or(0),
-                    body["logical_bytes"].as_u64().unwrap_or(0),
+                    "queued Hub import {} from {}/{} into {}",
+                    body["id"].as_str().unwrap_or("?"),
                     body["source_repo_id"].as_str().unwrap_or(&source),
                     body["source_revision"].as_str().unwrap_or(&revision),
                     repo,
-                    short(body["commit_id"].as_str().unwrap_or("")),
                 );
                 println!(
-                    "Arachne files {} · security {}{}",
-                    body["arachne_files"].as_u64().unwrap_or(0),
-                    body["security_counts"],
-                    if body["conflicted"].as_bool().unwrap_or(false) {
-                        " · conflicted"
-                    } else {
-                        ""
-                    }
+                    "status {} · inspect with `clotho repo imports {repo}`",
+                    body["status"].as_str().unwrap_or("queued")
                 );
+            })
+        }
+        "imports" => {
+            let repo = require_one(&args, "clotho repo imports <repo>")?;
+            let body: Value = request_json(
+                config,
+                reqwest::Method::GET,
+                &format!("/api/v1/repos/{repo}/hub-imports"),
+                None,
+            )
+            .await?;
+            emit(config, &body, || {
+                for job in body["jobs"].as_array().into_iter().flatten() {
+                    println!(
+                        "{}  {}  {}/{} files  {}/{} bytes  {}{}",
+                        short(job["id"].as_str().unwrap_or("")),
+                        job["status"].as_str().unwrap_or("?"),
+                        job["files_imported"].as_i64().unwrap_or(0),
+                        job["files_total"].as_i64().unwrap_or(0),
+                        job["bytes_imported"].as_i64().unwrap_or(0),
+                        job["logical_bytes"].as_i64().unwrap_or(0),
+                        job["source_repo_id"].as_str().unwrap_or("?"),
+                        if job["error"].as_str().is_some_and(|value| !value.is_empty()) {
+                            "  failed"
+                        } else {
+                            ""
+                        }
+                    );
+                }
             })
         }
         "commit" => repo_commit(config, args).await,
@@ -2016,6 +2037,7 @@ fn usage() {
     clotho repo artifacts <repo>
     clotho repo preview <repo> <csv|tsv|jsonl-path> [--limit 1..100]
     clotho repo import-hf <target> <namespace/name> [--revision <rev>] [--path <path>]... [--max-files N] [--max-bytes N]
+    clotho repo imports <repo>
     clotho repo commit <repo> -m <msg> --file <path> [...] [--submit]
     clotho repo submit <repo> <commit-id>
 

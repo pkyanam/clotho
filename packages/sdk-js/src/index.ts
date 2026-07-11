@@ -191,6 +191,28 @@ export interface HubImportResult {
   conflicted_paths: string[];
 }
 
+export interface HubImportJob {
+  id: string;
+  repo_id: string;
+  provider: string;
+  source_repo_id: string;
+  source_revision: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "interrupted" | string;
+  files_total: number;
+  files_imported: number;
+  logical_bytes: number;
+  bytes_imported: number;
+  arachne_files: number;
+  security_counts: Record<string, number>;
+  commit_id: string;
+  operation_id: string;
+  error: string;
+  created_by: string;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
 export interface FileContent {
   commit_id: string;
   path: string;
@@ -884,6 +906,44 @@ export class ClothoClient {
           allow_unsafe: options?.allowUnsafe ?? false,
         }),
       },
+    );
+  }
+
+  startHuggingFaceImport(
+    name: string,
+    repoId: string,
+    options?: {
+      revision?: string;
+      paths?: string[];
+      maxFiles?: number;
+      maxTotalBytes?: number;
+      allowUnsafe?: boolean;
+    },
+  ): Promise<HubImportJob> {
+    return this.request(`/api/v1/repos/${encodeURIComponent(name)}/hub-imports`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repo_id: repoId,
+        revision: options?.revision ?? "main",
+        paths: options?.paths ?? [],
+        max_files: options?.maxFiles ?? 200,
+        max_total_bytes: options?.maxTotalBytes ?? 10 * 1024 * 1024 * 1024,
+        allow_unsafe: options?.allowUnsafe ?? false,
+      }),
+    });
+  }
+
+  async hubImportJobs(name: string): Promise<HubImportJob[]> {
+    const response = await this.request<{ jobs: HubImportJob[] }>(
+      `/api/v1/repos/${encodeURIComponent(name)}/hub-imports`,
+    );
+    return response.jobs;
+  }
+
+  hubImportJob(name: string, id: string): Promise<HubImportJob> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/hub-imports/${encodeURIComponent(id)}`,
     );
   }
 

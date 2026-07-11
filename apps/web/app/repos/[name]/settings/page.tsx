@@ -4,6 +4,7 @@ import {
   ClothoApiError,
   type ActionsConfig,
   type ComputeProvider,
+  type HubImportJob,
   type OrgDetail,
   type SecretMeta,
 } from "@clotho/sdk-js";
@@ -18,6 +19,7 @@ import {
 import { GeneralForm } from "./general-form";
 import { DeleteForm } from "./delete-form";
 import { MergePolicyForm } from "./merge-policy-form";
+import { HubImportJobs } from "./hub-import-jobs";
 import {
   createRepoSecret,
   deleteRepoSecret,
@@ -34,7 +36,7 @@ export default async function SettingsPage({
 }) {
   const { name } = await params;
   const client = await api();
-  const [detail, actionsConfig, providerList, repoSecrets, mergePolicy] = await Promise.all([
+  const [detail, actionsConfig, providerList, repoSecrets, mergePolicy, hubImports] = await Promise.all([
     client.getRepo(name),
     client.actionsConfig(name).catch((e) => fallbackActionsConfig(e)),
     client.computeProviderList().catch(async () => {
@@ -51,6 +53,7 @@ export default async function SettingsPage({
       protect_default_branch: false,
       updated_at: "",
     })),
+    client.hubImportJobs(name).catch(() => [] as HubImportJob[]),
   ]);
   const ownerOrg = detail.owner_org || detail.owner;
   const orgDetail: OrgDetail | null = ownerOrg
@@ -150,6 +153,7 @@ export default async function SettingsPage({
                 <code className="mx-1 text-kumo-default">HUGGINGFACE_TOKEN</code>
                 as a repository or organization secret. Suspicious Hub scan results fail closed.
               </p>
+              <HubImportJobs jobs={hubImports} />
               <form
                 action={importHuggingFace.bind(null, name)}
                 className="grid gap-4 sm:grid-cols-2"
