@@ -53,6 +53,19 @@ export interface RepoPageOptions {
   cursor?: string;
 }
 
+export interface CapabilityDocument {
+  schema_version: string;
+  release_tier: string;
+  canonical_contract: "rest";
+  rest: Record<string, unknown>;
+  surfaces: string[];
+  repository_kinds: string[];
+  agent: Record<string, unknown>;
+  limits: Record<string, unknown>;
+  providers: Record<string, unknown>;
+  stability: "alpha";
+}
+
 /** One jj commit (a real git commit) from clotho-vcs. */
 export interface Commit {
   commit_id: string;
@@ -1577,6 +1590,10 @@ export class ClothoClient {
         body: JSON.stringify(policy),
       },
     );
+  }
+
+  getCapabilities(): Promise<CapabilityDocument> {
+    return this.request("/api/v1/capabilities");
   }
 
   /**

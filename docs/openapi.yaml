@@ -274,6 +274,21 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
+  /api/v1/capabilities:
+    get:
+      tags: [platform]
+      operationId: getCapabilities
+      summary: Discover the versioned public-alpha capability contract
+      security: []
+      x-clotho-stability: alpha
+      responses:
+        "200":
+          description: Machine-readable product capabilities and limits
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityDocument"
+
   /api/v1/me:
     get:
       tags: [auth]
@@ -2934,6 +2949,20 @@ components:
         type: boolean
 
   schemas:
+    CapabilityDocument:
+      type: object
+      required: [schema_version, release_tier, canonical_contract, rest, surfaces, repository_kinds, agent, limits, providers, stability]
+      properties:
+        schema_version: { type: string, example: "1" }
+        release_tier: { type: string, example: public-alpha }
+        canonical_contract: { type: string, enum: [rest] }
+        rest: { type: object, additionalProperties: true }
+        surfaces: { type: array, items: { type: string } }
+        repository_kinds: { type: array, items: { type: string } }
+        agent: { type: object, additionalProperties: true }
+        limits: { type: object, additionalProperties: true }
+        providers: { type: object, additionalProperties: true }
+        stability: { type: string, enum: [alpha] }
     HuggingFaceObject:
       type: object
       description: Hugging Face-compatible projection; fields follow the upstream client contract

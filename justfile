@@ -19,6 +19,16 @@ doctor *args:
 # install packages, contact providers, or remove Docker volumes.
 bootstrap: doctor
 
+# Capture Postgres plus every durable Clotho/Forgejo/Arachne volume, including
+# the write-only-secrets master key. Prints the created backup directory.
+backup *args:
+    @./scripts/recovery/backup.sh {{args}}
+
+# Restore a backup into disposable Postgres and Docker volumes, verify it, and
+# remove the drill resources. The running development stack is not modified.
+restore-drill backup:
+    @./scripts/recovery/restore-drill.sh {{backup}}
+
 # Install JS dependencies
 setup:
     pnpm install

@@ -106,6 +106,7 @@ pub fn router(config: &GatewayConfig, pool: sqlx::PgPool) -> Result<Router, clot
 
     Ok(Router::new()
         .route("/healthz", axum::routing::get(healthz))
+        .route("/capabilities", axum::routing::get(capabilities))
         .merge(mcp)
         .merge(admin))
 }
@@ -116,6 +117,13 @@ async fn healthz() -> Json<serde_json::Value> {
         "version": env!("CARGO_PKG_VERSION"),
         "status": "ok",
     }))
+}
+
+async fn capabilities() -> Json<serde_json::Value> {
+    Json(
+        serde_json::from_str(include_str!("../../../docs/capabilities.json"))
+            .expect("checked-in capability document must be valid JSON"),
+    )
 }
 
 /// MCP auth middleware: resolve the bearer token to an agent identity and

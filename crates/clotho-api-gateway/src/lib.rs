@@ -258,6 +258,7 @@ pub fn router_with_pool(
     idempotency::start_cleanup(state.pool.clone());
     Ok(Router::new()
         .route("/healthz", get(healthz))
+        .route("/api/v1/capabilities", get(capabilities))
         // Stage 15: published OpenAPI contract (hand-maintained docs/openapi.yaml).
         .route("/openapi.yaml", get(openapi_yaml))
         // Slice A: human API tokens and current user.
@@ -501,6 +502,13 @@ async fn healthz() -> Json<serde_json::Value> {
         "version": env!("CARGO_PKG_VERSION"),
         "status": "ok",
     }))
+}
+
+async fn capabilities() -> Json<serde_json::Value> {
+    Json(
+        serde_json::from_str(include_str!("../../../docs/capabilities.json"))
+            .expect("checked-in capability document must be valid JSON"),
+    )
 }
 
 /// Hand-maintained OpenAPI 3 document for `/api/v1/*` (Stage 15).

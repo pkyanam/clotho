@@ -12,3 +12,7 @@ or in production belongs in a service, not here.
 - `verify-api-contract.mjs` — deterministic Stage 22 OpenAPI/Axum/SDK
   structural verification. `pnpm test:contract -- --json` emits the complete
   machine-readable operation inventory for release diffs.
+- `recovery/backup.sh` — complete logical Postgres and durable-volume backup,
+  including Git/VCS, Arachne/MinIO, Forgejo metadata, and the secrets key.
+- `recovery/restore-drill.sh` — checksum and destructive restore verification
+  inside disposable Postgres/volume resources; it never replaces live volumes.
