@@ -766,6 +766,18 @@ paths:
       responses:
         "200": {description: Hugging Face GitRefs-compatible object}
 
+  /api/models/{owner}/{name}/commits/{revision}:
+    get:
+      tags: [repos, providers]
+      operationId: huggingFaceModelCommits
+      summary: List Clotho VCS commits from a verified model release revision
+      parameters:
+        - {name: owner, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: revision, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: Hugging Face GitCommitInfo-compatible array}
+
   /api/models/{owner}/{name}/revision/{revision}:
     get:
       tags: [repos, providers]
@@ -859,6 +871,18 @@ paths:
         - {name: include_prs, in: query, schema: {type: integer, enum: [0, 1]}}
       responses:
         "200": {description: Hugging Face GitRefs-compatible object}
+
+  /api/datasets/{owner}/{name}/commits/{revision}:
+    get:
+      tags: [repos, providers]
+      operationId: huggingFaceDatasetCommits
+      summary: List Clotho VCS commits from a verified dataset release revision
+      parameters:
+        - {name: owner, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: revision, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: Hugging Face GitCommitInfo-compatible array}
 
   /api/datasets/{owner}/{name}/revision/{revision}:
     get:

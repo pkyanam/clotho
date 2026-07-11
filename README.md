@@ -167,6 +167,8 @@ Public releases are anonymously readable in managed deployments, while
 private/internal catalog entries remain token- and permission-gated.
 Standard Hub refs map `main` to the newest verified release and project every
 immutable Clotho version as a tag for existing client tooling.
+Hub commit-history calls resolve through the release binding into Clotho VCS,
+keeping Forgejo out of the public provenance path.
 Bounded JSON evaluation and benchmark artifacts are ingested into the semantic
 manifest, frozen with their source path, and surfaced beside the exact release
 commit/digest instead of floating independently from model weights.

@@ -10,6 +10,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, Response};
 use axum::Json;
 use chrono::{DateTime, SecondsFormat, Utc};
+use clotho_common::pb::vcs::v1::LogCommitsRequest;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -157,6 +158,63 @@ pub async fn dataset_refs(
     Query(query): Query<RefsCompatQuery>,
 ) -> Result<Json<Value>, ApiError> {
     repo_refs(state, headers, owner, name, query, "dataset").await
+}
+
+pub async fn model_commits(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((owner, name, revision)): Path<(String, String, String)>,
+) -> Result<Json<Vec<Value>>, ApiError> {
+    repo_commits(state, headers, owner, name, revision, "model").await
+}
+
+pub async fn dataset_commits(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((owner, name, revision)): Path<(String, String, String)>,
+) -> Result<Json<Vec<Value>>, ApiError> {
+    repo_commits(state, headers, owner, name, revision, "dataset").await
+}
+
+async fn repo_commits(
+    state: Arc<AppState>,
+    headers: HeaderMap,
+    owner: String,
+    name: String,
+    revision: String,
+    kind: &str,
+) -> Result<Json<Vec<Value>>, ApiError> {
+    let (_, release) = snapshot(&state, &headers, &owner, &name, &revision, kind).await?;
+    let log = state
+        .vcs
+        .clone()
+        .log_commits(LogCommitsRequest {
+            repo: name,
+            from_commit_id: release.commit_id,
+            limit: 500,
+        })
+        .await?
+        .into_inner();
+    let commits = log
+        .commits
+        .into_iter()
+        .map(|commit| {
+            let mut lines = commit.description.lines();
+            let title = lines.next().unwrap_or("commit").to_string();
+            let message = lines.collect::<Vec<_>>().join("\n");
+            let date = DateTime::from_timestamp_millis(commit.timestamp_millis)
+                .map(hub_datetime)
+                .unwrap_or_else(|| "1970-01-01T00:00:00.000000Z".into());
+            json!({
+                "id": commit.commit_id,
+                "authors": [{"user": commit.author_name}],
+                "date": date,
+                "title": title,
+                "message": message,
+            })
+        })
+        .collect();
+    Ok(Json(commits))
 }
 
 async fn repo_refs(

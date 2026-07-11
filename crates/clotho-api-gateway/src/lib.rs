@@ -314,6 +314,10 @@ pub fn router_with_pool(
             get(hf_compat::model_refs),
         )
         .route(
+            "/api/models/{owner}/{name}/commits/{revision}",
+            get(hf_compat::model_commits),
+        )
+        .route(
             "/api/models/{owner}/{name}/revision/{revision}",
             get(hf_compat::model_info_revision),
         )
@@ -330,6 +334,10 @@ pub fn router_with_pool(
         .route(
             "/api/datasets/{owner}/{name}/refs",
             get(hf_compat::dataset_refs),
+        )
+        .route(
+            "/api/datasets/{owner}/{name}/commits/{revision}",
+            get(hf_compat::dataset_commits),
         )
         .route(
             "/api/datasets/{owner}/{name}/revision/{revision}",
