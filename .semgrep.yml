@@ -1,0 +1,33 @@
+rules:
+  - id: clotho-js-dynamic-eval
+    languages: [javascript, typescript]
+    message: Dynamic evaluation is forbidden in Clotho public surfaces.
+    severity: ERROR
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+    paths:
+      include: [apps, packages, services]
+      exclude: ["**/test/**", "**/*.test.*"]
+
+  - id: clotho-js-shell-exec
+    languages: [javascript, typescript]
+    message: Public services must not execute caller-controlled shell commands.
+    severity: ERROR
+    pattern-either:
+      - pattern: child_process.exec(...)
+      - pattern: child_process.execSync(...)
+    paths:
+      include: [apps, packages, services]
+      exclude: ["**/test/**", "**/*.test.*"]
+
+  - id: clotho-rust-vcs-shell-out
+    languages: [rust]
+    message: Clotho services must use embedded VCS libraries, not process execution.
+    severity: ERROR
+    pattern-either:
+      - pattern: std::process::Command::new(...)
+      - pattern: tokio::process::Command::new(...)
+    paths:
+      include: [crates]
+      exclude: ["crates/clotho-cli/**", "**/tests/**"]

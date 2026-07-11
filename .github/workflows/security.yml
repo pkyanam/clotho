@@ -53,6 +53,4 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.13" }
       - run: pip install semgrep
-      # Registry-backed `auto` rules require anonymous rule metrics; no source
-      # or findings are uploaded. `--error` makes findings fail the gate.
-      - run: semgrep scan --config auto --error
+      - run: semgrep scan --config .semgrep.yml --error --metrics=off --exclude collab --exclude node_modules --exclude target

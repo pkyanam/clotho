@@ -407,7 +407,7 @@ export async function loadProviders(creds) {
         reason: e?.message ?? String(e),
       });
       if (process.env.CLOTHO_COMPUTE_SDK_DEBUG) {
-        console.warn(`skip ${spec.id}:`, e?.message ?? e);
+        console.warn("skip %s: %s", spec.id, e?.message ?? e);
       }
     }
   }
