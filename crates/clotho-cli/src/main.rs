@@ -398,7 +398,7 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
         }
         "import-hf" | "import-huggingface" => {
             if args.len() < 2 {
-                bail!("usage: clotho repo import-hf <target-repo> <namespace/name> [--revision <rev>] [--path <path>]... [--max-files N] [--max-bytes N] [--allow-unsafe]");
+                bail!("usage: clotho repo import-hf <target-repo> <source> [--revision <rev>] [--path <path>]... [--max-files N] [--max-bytes N] [--allow-unsafe]");
             }
             let repo = args.remove(0);
             let source = args.remove(0);
@@ -419,7 +419,7 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
                         .context("--max-bytes must be an integer")
                 })
                 .transpose()?
-                .unwrap_or(10 * 1024 * 1024 * 1024);
+                .unwrap_or(50 * 1024 * 1024 * 1024);
             let allow_unsafe = take_flag(&mut args, "--allow-unsafe");
             if !args.is_empty() {
                 bail!("unrecognized repo import-hf arguments: {}", args.join(" "));

@@ -163,7 +163,7 @@ export default async function SettingsPage({
                   <input
                     name="repo_id"
                     required
-                    placeholder="namespace/model-or-dataset"
+                    placeholder="namespace/name, namespace/name@revision, or Hugging Face URL"
                     className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 text-kumo-default"
                   />
                 </label>
@@ -186,6 +186,18 @@ export default async function SettingsPage({
                     className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 text-kumo-default"
                   />
                 </label>
+                <label className="text-[0.8125rem] text-kumo-inactive">
+                  max import size (GiB)
+                  <input
+                    name="max_total_gib"
+                    type="number"
+                    min="1"
+                    max="1024"
+                    step="1"
+                    defaultValue="50"
+                    className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 text-kumo-default"
+                  />
+                </label>
                 <label className="text-[0.8125rem] text-kumo-inactive sm:col-span-2">
                   exact paths (optional, comma or newline separated)
                   <textarea
@@ -195,7 +207,10 @@ export default async function SettingsPage({
                     className="mt-1.5 block w-full border border-kumo-hairline bg-kumo-base px-3 py-2 font-mono text-[0.8125rem] text-kumo-default"
                   />
                 </label>
-                <input type="hidden" name="max_total_bytes" value="10737418240" />
+                <p className="text-[0.75rem] text-kumo-muted sm:col-span-2">
+                  This preflight budget prevents accidental oversized imports. Large artifacts stream
+                  directly into Arachne instead of being buffered in the web app.
+                </p>
                 <div className="sm:col-span-2">
                   <Button type="submit">import into Clotho</Button>
                 </div>

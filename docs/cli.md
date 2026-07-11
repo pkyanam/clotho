@@ -173,8 +173,9 @@ clotho repo releases my-model
 clotho actions run my-model --workflow evaluate --release v1.0.0
 ```
 
-Use repeated `--path` flags for a selective snapshot. Imports default to 200
-files / 10 GiB, block unsafe Hub scanner results, stream large files directly
+Use repeated `--path` flags for a selective snapshot. The source accepts
+`namespace/name`, `namespace/name@revision`, or a `https://huggingface.co/...`
+repository URL. Imports default to 200 files / 50 GiB, block unsafe Hub scanner results, stream large files directly
 to Arachne, and land through the merge queue. `--allow-unsafe` is an explicit
 CLI-only override. Private/gated repositories use a Clotho-stored
 `HUGGINGFACE_TOKEN`; public repositories need no credential.

@@ -159,7 +159,17 @@ describe("ClothoClient", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       "http://gateway.test/api/v1/repos/weave/hub-imports",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          repo_id: "openai/gpt-oss",
+          revision: "main",
+          paths: [],
+          max_files: 200,
+          max_total_bytes: 50 * 1024 * 1024 * 1024,
+          allow_unsafe: false,
+        }),
+      }),
     );
     expect(await client.hubImportJobs("weave")).toHaveLength(1);
     await client.hubImportJob("weave", "j1");

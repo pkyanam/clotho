@@ -100,8 +100,15 @@ export async function importHuggingFace(repo: string, formData: FormData) {
     .map((path) => path.trim())
     .filter(Boolean);
   const maxFiles = Number(formData.get("max_files") ?? 200);
-  const maxTotalBytes = Number(formData.get("max_total_bytes") ?? 10_737_418_240);
+  const maxTotalGiB = Number(formData.get("max_total_gib") ?? 50);
   if (!repoId) throw new Error("Hugging Face namespace/name is required");
+  if (!Number.isInteger(maxFiles) || maxFiles < 1 || maxFiles > 1000) {
+    throw new Error("max files must be between 1 and 1000");
+  }
+  if (!Number.isFinite(maxTotalGiB) || maxTotalGiB < 1 || maxTotalGiB > 1024) {
+    throw new Error("max import size must be between 1 and 1024 GiB");
+  }
+  const maxTotalBytes = Math.floor(maxTotalGiB * 1024 ** 3);
   await (await api()).startHuggingFaceImport(repo, repoId, {
     revision,
     paths,

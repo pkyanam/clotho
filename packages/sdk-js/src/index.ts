@@ -945,7 +945,7 @@ export class ClothoClient {
           revision: options?.revision ?? "main",
           paths: options?.paths ?? [],
           max_files: options?.maxFiles ?? 200,
-          max_total_bytes: options?.maxTotalBytes ?? 10 * 1024 * 1024 * 1024,
+          max_total_bytes: options?.maxTotalBytes ?? 50 * 1024 * 1024 * 1024,
           allow_unsafe: options?.allowUnsafe ?? false,
         }),
       },
@@ -971,7 +971,7 @@ export class ClothoClient {
         revision: options?.revision ?? "main",
         paths: options?.paths ?? [],
         max_files: options?.maxFiles ?? 200,
-        max_total_bytes: options?.maxTotalBytes ?? 10 * 1024 * 1024 * 1024,
+        max_total_bytes: options?.maxTotalBytes ?? 50 * 1024 * 1024 * 1024,
         allow_unsafe: options?.allowUnsafe ?? false,
       }),
     });

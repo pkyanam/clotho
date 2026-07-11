@@ -24,7 +24,7 @@ use crate::{validate_commit_path, AppState};
 const DEFAULT_MAX_FILES: usize = 200;
 const MAX_IMPORT_FILES: usize = 1_000;
 const MAX_DISCOVERY_FILES: usize = 5_000;
-const DEFAULT_MAX_BYTES: u64 = 10 * 1024 * 1024 * 1024;
+const DEFAULT_MAX_BYTES: u64 = 50 * 1024 * 1024 * 1024;
 const MAX_IMPORT_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -294,6 +294,82 @@ fn default_max_bytes() -> u64 {
     DEFAULT_MAX_BYTES
 }
 
+fn normalize_huggingface_source(
+    raw_repo_id: &str,
+    requested_revision: &str,
+) -> Result<(String, String), ApiError> {
+    let raw = raw_repo_id.trim();
+    if raw.is_empty() {
+        return Err(ApiError::InvalidRequest(
+            "Hugging Face namespace/name is required".into(),
+        ));
+    }
+    let mut embedded_revision = None;
+    let repo_id = if raw.starts_with("http://") || raw.starts_with("https://") {
+        let url = reqwest::Url::parse(raw)
+            .map_err(|_| ApiError::InvalidRequest("invalid Hugging Face URL".into()))?;
+        if url.scheme() != "https"
+            || !matches!(
+                url.host_str(),
+                Some("huggingface.co" | "www.huggingface.co")
+            )
+        {
+            return Err(ApiError::InvalidRequest(
+                "Hugging Face URL must use https://huggingface.co".into(),
+            ));
+        }
+        let mut parts = url
+            .path_segments()
+            .map(|segments| segments.filter(|part| !part.is_empty()).collect::<Vec<_>>())
+            .unwrap_or_default();
+        if parts.first() == Some(&"datasets") {
+            parts.remove(0);
+        }
+        if parts.len() >= 4 && matches!(parts[2], "tree" | "resolve") {
+            embedded_revision = Some(parts[3..].join("/"));
+            parts.truncate(2);
+        }
+        if parts.len() != 2 {
+            return Err(ApiError::InvalidRequest(
+                "Hugging Face URL must identify namespace/name".into(),
+            ));
+        }
+        format!("{}/{}", parts[0], parts[1])
+    } else {
+        raw.trim_start_matches("huggingface.co/")
+            .trim_start_matches("www.huggingface.co/")
+            .trim_start_matches("datasets/")
+            .to_string()
+    };
+    let repo_id = if let Some((repo_id, revision)) = repo_id.rsplit_once('@') {
+        if revision.is_empty() {
+            return Err(ApiError::InvalidRequest(
+                "Hugging Face revision after @ cannot be empty".into(),
+            ));
+        }
+        embedded_revision = Some(revision.to_string());
+        repo_id.to_string()
+    } else {
+        repo_id
+    };
+    let requested_revision = requested_revision.trim();
+    let revision = if requested_revision.is_empty() || requested_revision == "main" {
+        embedded_revision.unwrap_or_else(|| "main".into())
+    } else {
+        requested_revision.to_string()
+    };
+    HuggingFaceHub::repo_parts(&repo_id)?;
+    HuggingFaceHub::validate_revision(&revision)?;
+    Ok((repo_id, revision))
+}
+
+fn normalize_huggingface_request(request: &mut ImportHubRequest) -> Result<(), ApiError> {
+    let (repo_id, revision) = normalize_huggingface_source(&request.repo_id, &request.revision)?;
+    request.repo_id = repo_id;
+    request.revision = revision;
+    Ok(())
+}
+
 #[derive(Debug, Serialize)]
 pub struct ImportHubResponse {
     pub provider: String,
@@ -493,8 +569,9 @@ pub async fn create_hub_import_job(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(name): Path<String>,
-    Json(request): Json<ImportHubRequest>,
+    Json(mut request): Json<ImportHubRequest>,
 ) -> Result<(StatusCode, Json<HubImportJob>), ApiError> {
+    normalize_huggingface_request(&mut request)?;
     validate_import_limits(&request)?;
     let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = state
@@ -646,8 +723,9 @@ pub async fn import_huggingface(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(name): Path<String>,
-    Json(request): Json<ImportHubRequest>,
+    Json(mut request): Json<ImportHubRequest>,
 ) -> Result<Json<ImportHubResponse>, ApiError> {
+    normalize_huggingface_request(&mut request)?;
     let auth = auth::resolve_auth(&headers, &state).await?;
     if let Some(pool) = &state.pool {
         control::require_repo_permission(pool, &name, &auth.user_id, "write").await?;
@@ -661,9 +739,10 @@ async fn perform_import(
     state: Arc<AppState>,
     name: String,
     user_id: String,
-    request: ImportHubRequest,
+    mut request: ImportHubRequest,
     job: Option<&JobLease>,
 ) -> Result<ImportHubResponse, ApiError> {
+    normalize_huggingface_request(&mut request)?;
     validate_import_limits(&request)?;
     let repo = match &state.pool {
         Some(pool) => control::get_repo_by_name(pool, &name).await?,
@@ -953,5 +1032,31 @@ mod tests {
             next_cursor("<https://evil.example/tree?cursor=abc>; rel=\"next\""),
             None
         );
+    }
+
+    #[test]
+    fn normalizes_hugging_face_urls_and_inline_revisions() {
+        assert_eq!(
+            normalize_huggingface_source("https://huggingface.co/belweave/kai-2@main", "main")
+                .unwrap(),
+            ("belweave/kai-2".into(), "main".into())
+        );
+        assert_eq!(
+            normalize_huggingface_source("belweave/kai-2@v2", "main").unwrap(),
+            ("belweave/kai-2".into(), "v2".into())
+        );
+        assert_eq!(
+            normalize_huggingface_source(
+                "https://huggingface.co/datasets/acme/corpus/tree/release-1",
+                "main"
+            )
+            .unwrap(),
+            ("acme/corpus".into(), "release-1".into())
+        );
+        assert_eq!(
+            normalize_huggingface_source("belweave/kai-2@v2", "explicit").unwrap(),
+            ("belweave/kai-2".into(), "explicit".into())
+        );
+        assert!(normalize_huggingface_source("https://evil.example/a/b", "main").is_err());
     }
 }

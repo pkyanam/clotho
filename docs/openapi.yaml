@@ -3169,7 +3169,7 @@ components:
           format: int64
           minimum: 1
           maximum: 1099511627776
-          default: 10737418240
+          default: 53687091200
         allow_unsafe:
           type: boolean
           default: false
