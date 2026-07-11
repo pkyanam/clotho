@@ -210,6 +210,10 @@ release commit IDs are supported. Model/dataset info, tree traversal, and
 `resolve`/`HEAD` downloads come from the frozen manifest and Arachne. The
 compatibility layer is deliberately read-only—writes still go through Clotho's
 audited commit, import, release, and Actions control plane.
+Public verified releases support anonymous discovery and downloads even in a
+managed profile with authentication required. Private/internal repositories
+still require a valid Clotho/Clerk credential and explicit read access; an
+invalid supplied credential is never ignored just because a repo is public.
 
 CSV, TSV, and JSONL previews are deliberately bounded: the gateway streams at
 most 256 KiB from Arachne and returns at most 100 rows. Large datasets never

@@ -57,12 +57,13 @@ async fn snapshot(
     revision: &str,
     kind: &str,
 ) -> Result<(control::RepoWithOrg, ReleaseSnapshot), ApiError> {
-    let auth = auth::resolve_auth(headers, state).await?;
     let pool = state
         .pool
         .as_ref()
         .ok_or_else(|| ApiError::Internal("Hub compatibility requires the control plane".into()))?;
-    let repo = control::require_repo_permission(pool, name, &auth.user_id, "read").await?;
+    let repo = control::get_repo_with_org(pool, name)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("repository {owner}/{name} not found")))?;
     if repo.org_name != owner && repo.repo.forgejo_owner != owner {
         return Err(ApiError::NotFound(format!(
             "repository {owner}/{name} not found"
@@ -73,8 +74,32 @@ async fn snapshot(
             "{kind} repository {owner}/{name} not found"
         )));
     }
+    authorize_hub_read(state, headers, &repo).await?;
     let release = releases::resolve_release_snapshot(pool, &repo.repo.id, revision).await?;
     Ok((repo, release))
+}
+
+async fn authorize_hub_read(
+    state: &AppState,
+    headers: &HeaderMap,
+    repo: &control::RepoWithOrg,
+) -> Result<(), ApiError> {
+    let explicit_token = auth::extract_bearer(headers).is_some();
+    if repo.repo.visibility == "public" {
+        // Anonymous public reads are intentional. If a caller did send a
+        // credential, still validate it so a bad token is never ignored.
+        if explicit_token {
+            auth::resolve_auth(headers, state).await?;
+        }
+        return Ok(());
+    }
+    let auth = auth::resolve_auth(headers, state).await?;
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("Hub compatibility requires the control plane".into()))?;
+    control::require_repo_permission(pool, &repo.repo.name, &auth.user_id, "read").await?;
+    Ok(())
 }
 
 pub async fn model_info(
@@ -117,12 +142,16 @@ async fn list_hub_repos(
     query: ListCompatQuery,
     kind: &str,
 ) -> Result<Json<Vec<Value>>, ApiError> {
-    let auth = auth::resolve_auth(&headers, &state).await?;
     let pool = state
         .pool
         .as_ref()
         .ok_or_else(|| ApiError::Internal("Hub compatibility requires the control plane".into()))?;
     let candidates = control::list_repos_with_orgs(pool).await?;
+    let auth = if auth::extract_bearer(&headers).is_some() || !state.auth_required {
+        Some(auth::resolve_auth(&headers, &state).await?)
+    } else {
+        None
+    };
     let search = query.search.as_deref().map(str::to_ascii_lowercase);
     let filter = query.filter.as_deref().map(str::to_ascii_lowercase);
     let author = query.author.as_deref().map(str::to_ascii_lowercase);
@@ -141,12 +170,22 @@ async fn list_hub_repos(
         {
             continue;
         }
-        match control::require_repo_permission(pool, &candidate.repo.name, &auth.user_id, "read")
+        if candidate.repo.visibility != "public" {
+            let Some(auth) = &auth else {
+                continue;
+            };
+            match control::require_repo_permission(
+                pool,
+                &candidate.repo.name,
+                &auth.user_id,
+                "read",
+            )
             .await
-        {
-            Ok(_) => {}
-            Err(ApiError::Forbidden(_) | ApiError::NotFound(_)) => continue,
-            Err(error) => return Err(error),
+            {
+                Ok(_) => {}
+                Err(ApiError::Forbidden(_) | ApiError::NotFound(_)) => continue,
+                Err(error) => return Err(error),
+            }
         }
         let release =
             match releases::resolve_release_snapshot(pool, &candidate.repo.id, "main").await {

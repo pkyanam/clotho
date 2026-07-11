@@ -163,6 +163,8 @@ Clotho also projects releases through the standard Hugging Face read routes:
 `huggingface_hub` clients can point at Clotho and keep their familiar API while
 Clotho remains the source of truth underneath. Standard model/dataset discovery
 searches only permission-checked, verified releases in Clotho's catalog.
+Public releases are anonymously readable in managed deployments, while
+private/internal catalog entries remain token- and permission-gated.
 
 Tailscale is a first-class NetworkProvider: connect an org OAuth client from
 Clotho settings, verify it live, and mark repositories `public` or `tailscale`
