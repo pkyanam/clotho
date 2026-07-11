@@ -35,11 +35,7 @@ jobs:
           skip-dirs: node_modules,target,collab/forgejo,apps/web/.next,apps/site/.next
           severity: HIGH,CRITICAL
           exit-code: "1"
-          format: sarif
-          output: trivy.sarif
-      - uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with: { sarif_file: trivy.sarif }
+          format: table
 
   sast:
     runs-on: ubuntu-latest
