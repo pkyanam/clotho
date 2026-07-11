@@ -754,6 +754,18 @@ paths:
             application/json:
               schema: {type: array, items: {type: object}}
 
+  /api/models/{owner}/{name}/refs:
+    get:
+      tags: [repos, providers]
+      operationId: huggingFaceModelRefs
+      summary: List main and verified immutable releases as Hugging Face refs
+      parameters:
+        - {name: owner, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: include_prs, in: query, schema: {type: integer, enum: [0, 1]}}
+      responses:
+        "200": {description: Hugging Face GitRefs-compatible object}
+
   /api/models/{owner}/{name}/revision/{revision}:
     get:
       tags: [repos, providers]
@@ -835,6 +847,18 @@ paths:
         - {name: expand, in: query, schema: {type: boolean, default: false}}
       responses:
         "200": {description: RepoFile and RepoFolder-compatible entries}
+
+  /api/datasets/{owner}/{name}/refs:
+    get:
+      tags: [repos, providers]
+      operationId: huggingFaceDatasetRefs
+      summary: List main and verified immutable releases as Hugging Face refs
+      parameters:
+        - {name: owner, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: include_prs, in: query, schema: {type: integer, enum: [0, 1]}}
+      responses:
+        "200": {description: Hugging Face GitRefs-compatible object}
 
   /api/datasets/{owner}/{name}/revision/{revision}:
     get:

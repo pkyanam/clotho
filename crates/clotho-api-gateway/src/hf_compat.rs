@@ -49,6 +49,11 @@ pub struct ListCompatQuery {
     pub card_data: bool,
 }
 
+#[derive(Deserialize, Default)]
+pub struct RefsCompatQuery {
+    pub include_prs: Option<u8>,
+}
+
 async fn snapshot(
     state: &AppState,
     headers: &HeaderMap,
@@ -134,6 +139,71 @@ pub async fn list_datasets(
     Query(query): Query<ListCompatQuery>,
 ) -> Result<Json<Vec<Value>>, ApiError> {
     list_hub_repos(state, headers, query, "dataset").await
+}
+
+pub async fn model_refs(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((owner, name)): Path<(String, String)>,
+    Query(query): Query<RefsCompatQuery>,
+) -> Result<Json<Value>, ApiError> {
+    repo_refs(state, headers, owner, name, query, "model").await
+}
+
+pub async fn dataset_refs(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((owner, name)): Path<(String, String)>,
+    Query(query): Query<RefsCompatQuery>,
+) -> Result<Json<Value>, ApiError> {
+    repo_refs(state, headers, owner, name, query, "dataset").await
+}
+
+async fn repo_refs(
+    state: Arc<AppState>,
+    headers: HeaderMap,
+    owner: String,
+    name: String,
+    query: RefsCompatQuery,
+    kind: &str,
+) -> Result<Json<Value>, ApiError> {
+    let (repo, latest) = snapshot(&state, &headers, &owner, &name, "main", kind).await?;
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("Hub compatibility requires the control plane".into()))?;
+    let versions = sqlx::query_scalar::<_, String>(
+        "select version from repo_releases where repo_id = $1 order by created_at desc",
+    )
+    .bind(&repo.repo.id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| ApiError::Internal(format!("list Hub release refs: {error}")))?;
+    let mut tags = Vec::new();
+    for version in versions {
+        match releases::resolve_release_snapshot(pool, &repo.repo.id, &version).await {
+            Ok(release) => tags.push(json!({
+                "name": version,
+                "ref": format!("refs/tags/{}", release.version),
+                "targetCommit": release.commit_id,
+            })),
+            Err(ApiError::Conflict(_) | ApiError::NotFound(_)) => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    let mut value = json!({
+        "branches": [{
+            "name": "main",
+            "ref": "refs/heads/main",
+            "targetCommit": latest.commit_id,
+        }],
+        "converts": [],
+        "tags": tags,
+    });
+    if query.include_prs.unwrap_or(0) > 0 {
+        value["pullRequests"] = json!([]);
+    }
+    Ok(Json(value))
 }
 
 async fn list_hub_repos(

@@ -203,11 +203,14 @@ models = list(hub.list_models(search="text-generation", limit=20))
 datasets = list(hub.list_datasets(search="training", limit=20))
 info = hub.model_info("clotho/tiny-gpt", revision="v1.0.0", files_metadata=True)
 files = hub.list_repo_files("clotho/tiny-gpt", revision="v1.0.0")
+refs = hub.list_repo_refs("clotho/tiny-gpt")
 ```
 
 `main` resolves to the newest immutable release; explicit Clotho versions and
 release commit IDs are supported. Model/dataset info, tree traversal, and
 `resolve`/`HEAD` downloads come from the frozen manifest and Arachne. The
+standard refs API maps `main` to the newest verified release and exposes every
+verified immutable Clotho version as a tag. The
 compatibility layer is deliberately read-only—writes still go through Clotho's
 audited commit, import, release, and Actions control plane.
 Structured JSON files under evaluation/metric/benchmark paths (up to 256 KiB)
