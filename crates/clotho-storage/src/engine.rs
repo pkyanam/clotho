@@ -59,6 +59,13 @@ pub enum EngineError {
     #[error("no file stored with hash {0}")]
     FileNotFound(String),
 
+    #[error("invalid byte range: offset {offset}, length {length}, file size {file_size}")]
+    InvalidRange {
+        offset: u64,
+        length: u64,
+        file_size: u64,
+    },
+
     #[error("object store error: {0}")]
     Store(#[from] object_store::Error),
 
@@ -355,7 +362,19 @@ impl ArachneEngine {
     /// Errors are delivered through the channel so the caller sees them
     /// mid-stream.
     pub async fn download(&self, file_hash: &str, tx: mpsc::Sender<Result<Bytes, EngineError>>) {
-        if let Err(e) = self.download_inner(file_hash, &tx).await {
+        self.download_range(file_hash, 0, 0, tx).await;
+    }
+
+    /// Reconstruct only the requested logical byte range. A zero length means
+    /// through EOF, preserving the original full-download API semantics.
+    pub async fn download_range(
+        &self,
+        file_hash: &str,
+        offset: u64,
+        length: u64,
+        tx: mpsc::Sender<Result<Bytes, EngineError>>,
+    ) {
+        if let Err(e) = self.download_inner(file_hash, offset, length, &tx).await {
             let _ = tx.send(Err(e)).await;
         }
     }
@@ -363,6 +382,8 @@ impl ArachneEngine {
     async fn download_inner(
         &self,
         file_hash: &str,
+        offset: u64,
+        length: u64,
         tx: &mpsc::Sender<Result<Bytes, EngineError>>,
     ) -> Result<(), EngineError> {
         let hash = MerkleHash::from_hex(file_hash)
@@ -373,11 +394,38 @@ impl ArachneEngine {
             .await?
             .ok_or_else(|| EngineError::FileNotFound(file_hash.to_string()))?;
 
+        let file_size = file_info
+            .segments
+            .iter()
+            .map(|segment| u64::from(segment.unpacked_segment_bytes))
+            .sum::<u64>();
+        if offset > file_size || length.checked_add(offset).is_none() {
+            return Err(EngineError::InvalidRange {
+                offset,
+                length,
+                file_size,
+            });
+        }
+        let range_end = if length == 0 {
+            file_size
+        } else {
+            offset.saturating_add(length).min(file_size)
+        };
+
         // Segments referencing the same xorb are typically adjacent, so a
         // one-entry cache avoids refetching without holding many xorbs in
         // memory.
         let mut cached: Option<(MerkleHash, XorbObject, Bytes)> = None;
+        let mut segment_start = 0u64;
         for segment in &file_info.segments {
+            let segment_end = segment_start + u64::from(segment.unpacked_segment_bytes);
+            if segment_end <= offset {
+                segment_start = segment_end;
+                continue;
+            }
+            if segment_start >= range_end {
+                break;
+            }
             if cached.as_ref().map(|(h, _, _)| *h) != Some(segment.xorb_hash) {
                 let bytes = self
                     .store
@@ -395,7 +443,9 @@ impl ArachneEngine {
                 segment.chunk_index_end,
             )?;
             debug_assert_eq!(data.len() as u32, segment.unpacked_segment_bytes);
-            let data = Bytes::from(data);
+            let slice_start = offset.saturating_sub(segment_start) as usize;
+            let slice_end = (range_end.min(segment_end) - segment_start) as usize;
+            let data = Bytes::from(data).slice(slice_start..slice_end);
             for offset in (0..data.len()).step_by(DOWNLOAD_BLOCK_BYTES) {
                 let end = (offset + DOWNLOAD_BLOCK_BYTES).min(data.len());
                 if tx.send(Ok(data.slice(offset..end))).await.is_err() {
@@ -403,6 +453,7 @@ impl ArachneEngine {
                     return Ok(());
                 }
             }
+            segment_start = segment_end;
         }
         Ok(())
     }

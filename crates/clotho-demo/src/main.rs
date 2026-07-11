@@ -453,6 +453,8 @@ async fn download(
     let mut stream = storage
         .download_file(DownloadFileRequest {
             file_hash: file_hash.to_string(),
+            offset: 0,
+            length: 0,
         })
         .await?
         .into_inner();

@@ -12,6 +12,8 @@ pub enum ApiError {
     NotFound(String),
     #[error("{0}")]
     Conflict(String),
+    #[error("{message}")]
+    RangeNotSatisfiable { message: String, size: u64 },
     /// A backing service (clotho-vcs, Forgejo) failed or is unreachable.
     #[error("{0}")]
     Upstream(String),
@@ -29,6 +31,7 @@ impl ApiError {
             Self::InvalidRequest(_) => StatusCode::BAD_REQUEST,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::RangeNotSatisfiable { .. } => StatusCode::RANGE_NOT_SATISFIABLE,
             Self::Upstream(_) => StatusCode::BAD_GATEWAY,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
@@ -39,8 +42,18 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        let content_range = match &self {
+            Self::RangeNotSatisfiable { size, .. } => Some(format!("bytes */{size}")),
+            _ => None,
+        };
         let body = Json(serde_json::json!({ "error": self.to_string() }));
-        (self.status(), body).into_response()
+        let mut response = (self.status(), body).into_response();
+        if let Some(value) = content_range.and_then(|value| value.parse().ok()) {
+            response
+                .headers_mut()
+                .insert(axum::http::header::CONTENT_RANGE, value);
+        }
+        response
     }
 }
 

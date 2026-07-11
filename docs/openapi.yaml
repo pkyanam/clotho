@@ -637,6 +637,13 @@ paths:
           description: Slash-containing repository path
           schema:
             type: string
+        - name: Range
+          in: header
+          required: false
+          description: One RFC 9110 byte range; Arachne reconstructs only intersecting segments
+          schema:
+            type: string
+            example: bytes=1048576-2097151
       responses:
         "200":
           description: Byte-identical release file
@@ -658,6 +665,17 @@ paths:
               schema:
                 type: string
                 format: binary
+        "206":
+          description: Requested byte range
+          headers:
+            Accept-Ranges: {schema: {type: string, example: bytes}}
+            Content-Range: {schema: {type: string, example: bytes 1048576-2097151/8388608}}
+            ETag: {schema: {type: string}}
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "416":
+          description: Unsatisfiable or multiple byte ranges
         "404":
           $ref: "#/components/responses/Error"
         "409":

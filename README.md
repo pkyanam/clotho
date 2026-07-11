@@ -152,7 +152,9 @@ the recovery attempt visible in Clotho.
 Release files have a Clotho-native `HEAD`/streaming `GET` distribution path.
 Multi-GB weights flow from Arachne with immutable cache headers, SHA-256 ETags,
 and commit/manifest provenance—never through Forgejo and never through a JSON
-base64 response.
+base64 response. Single HTTP byte ranges are served as `206 Partial Content`,
+and Arachne skips unrelated Xet segments so interrupted GPU/model transfers can
+resume without reconstructing the whole artifact.
 Clotho also projects releases through the standard Hugging Face read routes:
 `model_info`, `dataset_info`, repository trees, `resolve`, and `HEAD`. Existing
 `huggingface_hub` clients can point at Clotho and keep their familiar API while

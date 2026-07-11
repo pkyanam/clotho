@@ -759,7 +759,7 @@ export class ClothoClient {
     this.fetchImpl = options.fetch ?? fetch;
   }
 
-  private headers(init?: RequestInit): HeadersInit {
+  private headers(init?: RequestInit): Record<string, string> {
     const h: Record<string, string> = {};
     if (this.token) {
       h.authorization = `Bearer ${this.token}`;
@@ -1004,13 +1004,25 @@ export class ClothoClient {
     name: string,
     version: string,
     path: string,
-    options?: { head?: boolean },
+    options?: { head?: boolean; range?: { start: number; end?: number } },
   ): Promise<Response> {
     const encodedPath = path.split("/").map(encodeURIComponent).join("/");
     const endpoint = `/api/v1/repos/${encodeURIComponent(name)}/releases/${encodeURIComponent(version)}/resolve/${encodedPath}`;
+    const headers = this.headers();
+    if (options?.range) {
+      const { start, end } = options.range;
+      if (
+        !Number.isSafeInteger(start) ||
+        start < 0 ||
+        (end != null && (!Number.isSafeInteger(end) || end < start))
+      ) {
+        throw new RangeError("release byte range must be non-negative and ordered");
+      }
+      headers.range = `bytes=${options.range.start}-${options.range.end ?? ""}`;
+    }
     const response = await this.fetchImpl(`${this.baseUrl}${endpoint}`, {
       method: options?.head ? "HEAD" : "GET",
-      headers: this.headers(),
+      headers,
     });
     if (!response.ok) {
       let message = `${options?.head ? "HEAD" : "GET"} ${endpoint} failed: ${response.status}`;

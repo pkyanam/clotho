@@ -105,6 +105,8 @@ pub async fn materialize_pointer(
     let mut stream = storage
         .download_file(DownloadFileRequest {
             file_hash: pointer.arachne_hash.clone(),
+            offset: 0,
+            length: 0,
         })
         .await?
         .into_inner();
@@ -140,6 +142,8 @@ pub async fn read_prefix(
     let mut stream = storage
         .download_file(DownloadFileRequest {
             file_hash: pointer.arachne_hash.clone(),
+            offset: 0,
+            length: max_bytes as u64,
         })
         .await?
         .into_inner();

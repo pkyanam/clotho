@@ -46,6 +46,10 @@ message UploadFileResponse {
 message DownloadFileRequest {
   // Content hash returned by UploadFile.
   string file_hash = 1;
+  // First logical byte to return. Zero preserves full-download behavior.
+  uint64 offset = 2;
+  // Number of logical bytes to return. Zero means through end-of-file.
+  uint64 length = 3;
 }
 
 message DownloadFileResponse {

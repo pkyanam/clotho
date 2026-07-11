@@ -27,7 +27,9 @@ impl StorageService {
 impl From<EngineError> for Status {
     fn from(err: EngineError) -> Self {
         match &err {
-            EngineError::InvalidHash(_) => Status::invalid_argument(err.to_string()),
+            EngineError::InvalidHash(_) | EngineError::InvalidRange { .. } => {
+                Status::invalid_argument(err.to_string())
+            }
             EngineError::FileNotFound(_) => Status::not_found(err.to_string()),
             EngineError::Config(_)
             | EngineError::Store(_)
@@ -79,7 +81,11 @@ impl Storage for StorageService {
         let (tx, rx) = tokio::sync::mpsc::channel(4);
         let (out_tx, out_rx) = tokio::sync::mpsc::channel(4);
         let engine = self.engine.clone();
-        tokio::spawn(async move { engine.download(&req.file_hash, tx).await });
+        tokio::spawn(async move {
+            engine
+                .download_range(&req.file_hash, req.offset, req.length, tx)
+                .await
+        });
         tokio::spawn(async move {
             let mut rx: tokio::sync::mpsc::Receiver<Result<bytes::Bytes, EngineError>> = rx;
             while let Some(item) = rx.recv().await {

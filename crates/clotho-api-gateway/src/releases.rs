@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
-use axum::http::header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, ETAG};
+use axum::http::header::{
+    ACCEPT_RANGES, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, RANGE,
+};
 use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
 use axum::Json;
 use chrono::{DateTime, Utc};
@@ -401,32 +403,69 @@ pub(crate) async fn serve_release_file(
         ));
     }
 
-    let (body, size, oid, arachne_hash) = match LfsPointer::parse(&file.content) {
-        Ok(pointer) => {
-            let body = if head_only {
-                Body::empty()
-            } else {
-                stream_arachne_release(&state, pointer.clone()).await?
-            };
-            (body, pointer.size, pointer.oid_sha256, pointer.arachne_hash)
-        }
-        Err(PointerError::NotPointer) => {
-            let oid = format!("{:x}", Sha256::digest(&file.content));
-            let size = file.content.len() as u64;
-            let body = if head_only {
-                Body::empty()
-            } else {
-                Body::from(file.content)
-            };
-            (body, size, oid, String::new())
-        }
-        Err(error) => return Err(ApiError::Upstream(error.to_string())),
-    };
+    let (body, response_size, total_size, byte_range, oid, arachne_hash) =
+        match LfsPointer::parse(&file.content) {
+            Ok(pointer) => {
+                let byte_range = parse_byte_range(&headers, pointer.size)?;
+                let (offset, length) = byte_range
+                    .map(|range| (range.start, range.len()))
+                    .unwrap_or((0, pointer.size));
+                let body = if head_only {
+                    Body::empty()
+                } else {
+                    stream_arachne_release(&state, pointer.clone(), offset, length).await?
+                };
+                (
+                    body,
+                    length,
+                    pointer.size,
+                    byte_range,
+                    pointer.oid_sha256,
+                    pointer.arachne_hash,
+                )
+            }
+            Err(PointerError::NotPointer) => {
+                let oid = format!("{:x}", Sha256::digest(&file.content));
+                let total_size = file.content.len() as u64;
+                let byte_range = parse_byte_range(&headers, total_size)?;
+                let (start, length) = byte_range
+                    .map(|range| (range.start, range.len()))
+                    .unwrap_or((0, total_size));
+                let body = if head_only {
+                    Body::empty()
+                } else {
+                    let start = usize::try_from(start).map_err(|_| {
+                        ApiError::Internal("release range exceeds host limits".into())
+                    })?;
+                    let end = usize::try_from(start as u64 + length).map_err(|_| {
+                        ApiError::Internal("release range exceeds host limits".into())
+                    })?;
+                    Body::from(file.content[start..end].to_vec())
+                };
+                (body, length, total_size, byte_range, oid, String::new())
+            }
+            Err(error) => return Err(ApiError::Upstream(error.to_string())),
+        };
     let mut response = Response::new(body);
+    if let Some(range) = byte_range {
+        *response.status_mut() = StatusCode::PARTIAL_CONTENT;
+        insert_header(
+            response.headers_mut(),
+            CONTENT_RANGE,
+            &format!("bytes {}-{}/{}", range.start, range.end, total_size),
+        )?;
+    }
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static(content_type(&path)));
-    insert_header(response.headers_mut(), CONTENT_LENGTH, &size.to_string())?;
+    response
+        .headers_mut()
+        .insert(ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    insert_header(
+        response.headers_mut(),
+        CONTENT_LENGTH,
+        &response_size.to_string(),
+    )?;
     insert_header(response.headers_mut(), ETAG, &format!("\"sha256:{oid}\""))?;
     response.headers_mut().insert(
         CACHE_CONTROL,
@@ -443,7 +482,7 @@ pub(crate) async fn serve_release_file(
     // cache files by Clotho's immutable release commit.
     insert_named_header(&mut response, "x-repo-commit", &release.commit_id)?;
     insert_named_header(&mut response, "x-linked-etag", &format!("\"{oid}\""))?;
-    insert_named_header(&mut response, "x-linked-size", &size.to_string())?;
+    insert_named_header(&mut response, "x-linked-size", &total_size.to_string())?;
     insert_named_header(
         &mut response,
         "x-clotho-manifest-sha256",
@@ -455,32 +494,104 @@ pub(crate) async fn serve_release_file(
     Ok(response)
 }
 
-async fn stream_arachne_release(state: &AppState, pointer: LfsPointer) -> Result<Body, ApiError> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ByteRange {
+    start: u64,
+    end: u64,
+}
+
+impl ByteRange {
+    fn len(self) -> u64 {
+        self.end - self.start + 1
+    }
+}
+
+fn parse_byte_range(headers: &HeaderMap, size: u64) -> Result<Option<ByteRange>, ApiError> {
+    let Some(raw) = headers.get(RANGE) else {
+        return Ok(None);
+    };
+    let raw = raw.to_str().map_err(|_| ApiError::RangeNotSatisfiable {
+        message: "Range must contain visible ASCII".into(),
+        size,
+    })?;
+    let Some(spec) = raw.strip_prefix("bytes=") else {
+        return Err(range_error(size));
+    };
+    if spec.contains(',') || size == 0 {
+        return Err(range_error(size));
+    }
+    let Some((start, end)) = spec.split_once('-') else {
+        return Err(range_error(size));
+    };
+    let range = if start.is_empty() {
+        let suffix = end.parse::<u64>().ok().filter(|value| *value > 0);
+        let Some(suffix) = suffix else {
+            return Err(range_error(size));
+        };
+        ByteRange {
+            start: size.saturating_sub(suffix.min(size)),
+            end: size - 1,
+        }
+    } else {
+        let Some(start) = start.parse::<u64>().ok().filter(|start| *start < size) else {
+            return Err(range_error(size));
+        };
+        let end = if end.is_empty() {
+            size - 1
+        } else {
+            let Some(end) = end.parse::<u64>().ok().filter(|end| *end >= start) else {
+                return Err(range_error(size));
+            };
+            end.min(size - 1)
+        };
+        ByteRange { start, end }
+    };
+    Ok(Some(range))
+}
+
+fn range_error(size: u64) -> ApiError {
+    ApiError::RangeNotSatisfiable {
+        message: "only one satisfiable byte range is supported".into(),
+        size,
+    }
+}
+
+async fn stream_arachne_release(
+    state: &AppState,
+    pointer: LfsPointer,
+    offset: u64,
+    length: u64,
+) -> Result<Body, ApiError> {
     let mut stream = state
         .storage
         .clone()
         .download_file(DownloadFileRequest {
             file_hash: pointer.arachne_hash.clone(),
+            offset,
+            length,
         })
         .await?
         .into_inner();
     let (sender, receiver) = mpsc::channel::<Result<Bytes, std::io::Error>>(4);
     tokio::spawn(async move {
+        let verify_full_payload = offset == 0 && length == pointer.size;
         let mut hasher = Sha256::new();
         let mut received = 0u64;
         while let Ok(Some(block)) = stream.message().await {
             received = received.saturating_add(block.data.len() as u64);
-            hasher.update(&block.data);
+            if verify_full_payload {
+                hasher.update(&block.data);
+            }
             if sender.send(Ok(Bytes::from(block.data))).await.is_err() {
                 return;
             }
         }
         let digest = format!("{:x}", hasher.finalize());
-        if received != pointer.size || digest != pointer.oid_sha256 {
+        if received != length || (verify_full_payload && digest != pointer.oid_sha256) {
             let _ = sender
                 .send(Err(std::io::Error::other(format!(
-                    "Arachne release integrity failure: expected {}/{}, received {received}/{digest}",
-                    pointer.size, pointer.oid_sha256
+                    "Arachne release integrity failure: expected {length}/{}, received {received}/{digest}",
+                    pointer.oid_sha256
                 ))))
                 .await;
         }
@@ -563,5 +674,28 @@ mod tests {
             content_type("weights/model.bin"),
             "application/octet-stream"
         );
+    }
+
+    #[test]
+    fn release_downloads_parse_standard_single_ranges() {
+        let headers = |value: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(RANGE, HeaderValue::from_str(value).unwrap());
+            headers
+        };
+        assert_eq!(
+            parse_byte_range(&headers("bytes=10-19"), 100).unwrap(),
+            Some(ByteRange { start: 10, end: 19 })
+        );
+        assert_eq!(
+            parse_byte_range(&headers("bytes=90-"), 100).unwrap(),
+            Some(ByteRange { start: 90, end: 99 })
+        );
+        assert_eq!(
+            parse_byte_range(&headers("bytes=-10"), 100).unwrap(),
+            Some(ByteRange { start: 90, end: 99 })
+        );
+        assert!(parse_byte_range(&headers("bytes=100-101"), 100).is_err());
+        assert!(parse_byte_range(&headers("bytes=0-1,4-5"), 100).is_err());
     }
 }

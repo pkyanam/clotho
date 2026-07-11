@@ -101,6 +101,30 @@ async fn download(client: &mut StorageClient<Channel>, file_hash: &str) -> Vec<u
     let mut stream = client
         .download_file(DownloadFileRequest {
             file_hash: file_hash.to_string(),
+            offset: 0,
+            length: 0,
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    let mut out = Vec::new();
+    while let Some(msg) = stream.message().await.unwrap() {
+        out.extend_from_slice(&msg.data);
+    }
+    out
+}
+
+async fn download_range(
+    client: &mut StorageClient<Channel>,
+    file_hash: &str,
+    offset: u64,
+    length: u64,
+) -> Vec<u8> {
+    let mut stream = client
+        .download_file(DownloadFileRequest {
+            file_hash: file_hash.to_string(),
+            offset,
+            length,
         })
         .await
         .unwrap()
@@ -200,6 +224,20 @@ async fn dedup_is_measured_and_reconstruction_is_byte_identical() {
     assert!(
         roundtrip_b == file_b,
         "file B did not reconstruct byte-identical"
+    );
+    let range_start = (size / 3) as u64;
+    let range_length = 3 * 1024 * 1024 + 17;
+    let ranged = download_range(
+        &mut client,
+        &resp_a.file_hash,
+        range_start,
+        range_length as u64,
+    )
+    .await;
+    assert_eq!(
+        ranged,
+        file_a[range_start as usize..range_start as usize + range_length],
+        "ranged reconstruction crossed Xet segments incorrectly"
     );
 
     eprintln!(

@@ -230,6 +230,19 @@ describe("ClothoClient", () => {
         headers: { authorization: "Bearer secret" },
       }),
     );
+    await client.downloadReleaseFile("weave", "v1.0.0", "weights/model.bin", {
+      range: { start: 1024, end: 2047 },
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://gateway.test/api/v1/repos/weave/releases/v1.0.0/resolve/weights/model.bin",
+      expect.objectContaining({
+        method: "GET",
+        headers: {
+          authorization: "Bearer secret",
+          range: "bytes=1024-2047",
+        },
+      }),
+    );
   });
 
   it("surfaces gateway error bodies as ClothoApiError", async () => {

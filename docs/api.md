@@ -179,6 +179,9 @@ Arachne hash. `GET` streams large payloads directly from Arachne:
 ```bash
 curl -I http://localhost:8080/api/v1/repos/tiny-gpt/releases/v1.0.0/resolve/model.safetensors
 curl -o model.safetensors http://localhost:8080/api/v1/repos/tiny-gpt/releases/v1.0.0/resolve/model.safetensors
+# Resume or shard a large transfer without reconstructing unrelated segments.
+curl -H 'Range: bytes=1048576-2097151' -o model.part \
+  http://localhost:8080/api/v1/repos/tiny-gpt/releases/v1.0.0/resolve/model.safetensors
 ```
 
 ### Hugging Face client compatibility
