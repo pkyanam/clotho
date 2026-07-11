@@ -283,6 +283,10 @@ pub fn router_with_pool(
             "/api/v1/repos/{name}/artifacts",
             get(repos::artifact_manifest),
         )
+        .route(
+            "/api/v1/repos/{name}/artifacts/preview",
+            get(repos::artifact_preview),
+        )
         .route("/api/v1/repos/{name}/file", get(repos::file))
         .route("/api/v1/repos/{name}/storage", get(repos::storage_stats))
         .route(

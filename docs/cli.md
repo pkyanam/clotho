@@ -72,7 +72,7 @@ clotho --json actions list demo-loop
 | Group | Subcommands |
 |---|---|
 | `auth` | `whoami`, `token create\|list\|revoke` |
-| `repo` | `init`, `list`, `status`, `log`, `tree`, `artifacts`, `commit`, `submit`, `update`, `delete`, `merge-policy get\|set` |
+| `repo` | `init`, `list`, `status`, `log`, `tree`, `artifacts`, `preview`, `commit`, `submit`, `update`, `delete`, `merge-policy get\|set` |
 | `issue` | `list`, `create`, `get`, `comment`, `update` |
 | `label` | `list`, `create` |
 | `milestone` | `list`, `create` |
@@ -164,6 +164,7 @@ metadata / primary-artifact readiness directly from the Clotho control plane:
 ```bash
 clotho repo artifacts my-model
 clotho --json repo artifacts my-dataset
+clotho repo preview my-dataset data/train.jsonl --limit 25
 ```
 
 ## Secrets

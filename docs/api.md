@@ -103,11 +103,16 @@ schemas, cards, and evaluations without downloading large Arachne payloads:
 ```bash
 curl -s http://localhost:8080/api/v1/repos/weave/artifacts | jq
 clotho repo artifacts weave
+curl -s 'http://localhost:8080/api/v1/repos/my-dataset/artifacts/preview?path=data/train.jsonl&limit=25' | jq
 ```
 
 The response includes logical sizes, Git/Arachne placement, format and role
 counts, and publication-readiness warnings. This is Clotho-owned metadata;
 Forgejo remains an implementation detail.
+
+CSV, TSV, and JSONL previews are deliberately bounded: the gateway streams at
+most 256 KiB from Arachne and returns at most 100 rows. Large datasets never
+need to be materialized in gateway memory just to inspect their shape.
 
 ## Quick start
 

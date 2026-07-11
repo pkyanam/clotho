@@ -151,7 +151,7 @@ async fn cmd_auth(config: &Config, mut args: Vec<String>) -> Result<()> {
 
 async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
     let Some(sub) = args.first().cloned() else {
-        bail!("usage: clotho repo <init|list|status|log|commit|submit|tree|artifacts|get> ...");
+        bail!("usage: clotho repo <init|list|status|log|commit|submit|tree|artifacts|preview|get> ...");
     };
     args.remove(0);
     match sub.as_str() {
@@ -335,6 +335,57 @@ async fn cmd_repo(config: &Config, mut args: Vec<String>) -> Result<()> {
                     .flatten()
                 {
                     println!("warning: {}", warning.as_str().unwrap_or(""));
+                }
+            })
+        }
+        "preview" => {
+            if args.len() < 2 {
+                bail!("usage: clotho repo preview <repo> <path> [--limit 1..100]");
+            }
+            let repo = args.remove(0);
+            let path = args.remove(0);
+            let limit = take_option(&mut args, "--limit")
+                .map(|value| value.parse::<u32>().context("--limit must be an integer"))
+                .transpose()?
+                .unwrap_or(25);
+            if !args.is_empty() {
+                bail!("unrecognized repo preview arguments: {}", args.join(" "));
+            }
+            let mut query = reqwest::Url::parse("http://clotho.invalid/")?;
+            query
+                .query_pairs_mut()
+                .append_pair("path", &path)
+                .append_pair("limit", &limit.to_string());
+            let body: Value = request_json(
+                config,
+                reqwest::Method::GET,
+                &format!(
+                    "/api/v1/repos/{repo}/artifacts/preview?{}",
+                    query.query().unwrap_or_default()
+                ),
+                None,
+            )
+            .await?;
+            emit(config, &body, || {
+                println!(
+                    "{} ({}) — {} row{}{}",
+                    body["path"].as_str().unwrap_or(&path),
+                    body["format"].as_str().unwrap_or("dataset"),
+                    body["rows"].as_array().map_or(0, Vec::len),
+                    if body["rows"].as_array().map_or(0, Vec::len) == 1 {
+                        ""
+                    } else {
+                        "s"
+                    },
+                    if body["truncated"].as_bool().unwrap_or(false) {
+                        " (bounded)"
+                    } else {
+                        ""
+                    }
+                );
+                println!("{}", body["columns"]);
+                for row in body["rows"].as_array().into_iter().flatten() {
+                    println!("{row}");
                 }
             })
         }
@@ -1892,6 +1943,7 @@ fn usage() {
     clotho repo log <repo>
     clotho repo tree <repo>
     clotho repo artifacts <repo>
+    clotho repo preview <repo> <csv|tsv|jsonl-path> [--limit 1..100]
     clotho repo commit <repo> -m <msg> --file <path> [...] [--submit]
     clotho repo submit <repo> <commit-id>
 

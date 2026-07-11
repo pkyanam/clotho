@@ -54,3 +54,45 @@ pub async fn materialize_pointer(
         .map_err(|err| ApiError::Upstream(err.to_string()))?;
     Ok(Some(payload))
 }
+
+/// Read at most `max_bytes` of a logical Git/Arachne file. This is intended
+/// for previews: it deliberately stops the Arachne stream early for a huge
+/// artifact instead of materializing the full payload in gateway memory.
+pub async fn read_prefix(
+    state: &AppState,
+    blob: &[u8],
+    max_bytes: usize,
+) -> Result<(Vec<u8>, bool), ApiError> {
+    let pointer = match LfsPointer::parse(blob) {
+        Ok(pointer) => pointer,
+        Err(PointerError::NotPointer) => {
+            let truncated = blob.len() > max_bytes;
+            return Ok((blob[..blob.len().min(max_bytes)].to_vec(), truncated));
+        }
+        Err(err) => return Err(ApiError::Upstream(err.to_string())),
+    };
+    let mut storage = state.storage.clone();
+    let mut stream = storage
+        .download_file(DownloadFileRequest {
+            file_hash: pointer.arachne_hash.clone(),
+        })
+        .await?
+        .into_inner();
+    let truncated = pointer.size > max_bytes as u64;
+    let expected = usize::try_from(pointer.size.min(max_bytes as u64))
+        .map_err(|_| ApiError::Upstream("Arachne preview is too large for this host".into()))?;
+    let mut payload = Vec::with_capacity(expected);
+    while payload.len() < expected {
+        let Some(block) = stream.message().await? else {
+            break;
+        };
+        let remaining = expected - payload.len();
+        payload.extend_from_slice(&block.data[..block.data.len().min(remaining)]);
+    }
+    if !truncated {
+        pointer
+            .verify_payload(&payload)
+            .map_err(|err| ApiError::Upstream(err.to_string()))?;
+    }
+    Ok((payload, truncated))
+}

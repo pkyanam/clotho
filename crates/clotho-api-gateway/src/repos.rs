@@ -720,6 +720,170 @@ pub async fn artifact_manifest(
     }))
 }
 
+const PREVIEW_MAX_BYTES: usize = 256 * 1024;
+
+#[derive(Deserialize)]
+pub struct ArtifactPreviewQuery {
+    pub path: String,
+    #[serde(default)]
+    pub commit_id: String,
+    #[serde(default = "default_preview_limit")]
+    pub limit: usize,
+}
+
+fn default_preview_limit() -> usize {
+    50
+}
+
+#[derive(Serialize)]
+pub struct ArtifactPreviewResponse {
+    pub commit_id: String,
+    pub path: String,
+    pub format: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<serde_json::Value>>,
+    pub bytes_read: u64,
+    pub truncated: bool,
+}
+
+type PreviewRows = Vec<Vec<serde_json::Value>>;
+type ParsedPreview = (Vec<String>, PreviewRows, bool);
+
+fn parse_tabular_preview(
+    format: &str,
+    bytes: &[u8],
+    limit: usize,
+    byte_truncated: bool,
+) -> Result<ParsedPreview, ApiError> {
+    if format == "jsonl" {
+        let text = String::from_utf8_lossy(bytes);
+        let mut lines = text.lines().collect::<Vec<_>>();
+        if byte_truncated && !text.ends_with('\n') {
+            lines.pop();
+        }
+        let mut objects = Vec::new();
+        let mut columns = Vec::new();
+        for line in lines.into_iter().filter(|line| !line.trim().is_empty()) {
+            let value: serde_json::Value = serde_json::from_str(line).map_err(|err| {
+                ApiError::InvalidRequest(format!("invalid JSONL row in preview: {err}"))
+            })?;
+            if let Some(object) = value.as_object() {
+                for key in object.keys() {
+                    if !columns.contains(key) {
+                        columns.push(key.clone());
+                    }
+                }
+            } else if columns.is_empty() {
+                columns.push("value".into());
+            }
+            objects.push(value);
+            if objects.len() >= limit {
+                break;
+            }
+        }
+        let rows = objects
+            .into_iter()
+            .map(|value| {
+                if let Some(object) = value.as_object() {
+                    columns
+                        .iter()
+                        .map(|column| {
+                            object
+                                .get(column)
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null)
+                        })
+                        .collect()
+                } else {
+                    vec![value]
+                }
+            })
+            .collect::<Vec<_>>();
+        let truncated = byte_truncated || rows.len() >= limit;
+        return Ok((columns, rows, truncated));
+    }
+
+    let delimiter = if format == "tsv" { b'\t' } else { b',' };
+    let mut reader = csv::ReaderBuilder::new()
+        .delimiter(delimiter)
+        .flexible(true)
+        .from_reader(bytes);
+    let columns = reader
+        .headers()
+        .map_err(|err| ApiError::InvalidRequest(format!("invalid {format} header: {err}")))?
+        .iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let mut rows = Vec::new();
+    for record in reader.records() {
+        let record = match record {
+            Ok(record) => record,
+            Err(_) if byte_truncated => break,
+            Err(err) => {
+                return Err(ApiError::InvalidRequest(format!(
+                    "invalid {format} row in preview: {err}"
+                )))
+            }
+        };
+        rows.push(
+            record
+                .iter()
+                .map(|value| serde_json::Value::String(value.to_string()))
+                .collect(),
+        );
+        if rows.len() >= limit {
+            break;
+        }
+    }
+    let truncated = byte_truncated || rows.len() >= limit;
+    Ok((columns, rows, truncated))
+}
+
+/// Bounded, server-side preview for portable row-oriented dataset formats.
+/// At most 256 KiB is streamed from Arachne and at most 100 rows are returned.
+pub async fn artifact_preview(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Query(query): Query<ArtifactPreviewQuery>,
+) -> Result<Json<ArtifactPreviewResponse>, ApiError> {
+    if !(1..=100).contains(&query.limit) {
+        return Err(ApiError::InvalidRequest(
+            "preview limit must be between 1 and 100".into(),
+        ));
+    }
+    let class = artifact_class(&query.path);
+    if class.role != "dataset_shard" || !matches!(class.format, "csv" | "tsv" | "jsonl") {
+        return Err(ApiError::InvalidRequest(
+            "preview supports CSV, TSV, and JSONL dataset artifacts".into(),
+        ));
+    }
+    // Resolve through the Clotho control plane first; this prevents Forgejo
+    // from becoming the source of repository existence or metadata.
+    let _ = load_repo_detail(&state, &name).await?;
+    let mut vcs = state.vcs.clone();
+    let file = vcs
+        .get_file(GetFileRequest {
+            repo: name,
+            commit_id: query.commit_id,
+            path: query.path,
+        })
+        .await?
+        .into_inner();
+    let (bytes, byte_truncated) =
+        crate::arachne::read_prefix(&state, &file.content, PREVIEW_MAX_BYTES).await?;
+    let (columns, rows, truncated) =
+        parse_tabular_preview(class.format, &bytes, query.limit, byte_truncated)?;
+    Ok(Json(ArtifactPreviewResponse {
+        commit_id: file.commit_id,
+        path: file.path,
+        format: class.format.into(),
+        columns,
+        rows,
+        bytes_read: bytes.len() as u64,
+        truncated,
+    }))
+}
+
 #[derive(Deserialize)]
 pub struct FileQuery {
     pub path: String,
@@ -910,6 +1074,34 @@ mod artifact_tests {
             artifact_class("benchmarks/eval_results.json").role,
             "evaluation"
         );
+    }
+
+    #[test]
+    fn parses_csv_and_jsonl_previews_without_flattening_types() {
+        let (columns, rows, _) =
+            parse_tabular_preview("csv", b"name,score\nClotho,10\nArachne,9\n", 10, false).unwrap();
+        assert_eq!(columns, ["name", "score"]);
+        assert_eq!(rows[0][0], "Clotho");
+
+        let (columns, rows, _) = parse_tabular_preview(
+            "jsonl",
+            b"{\"name\":\"Clotho\",\"score\":10}\n{\"name\":\"Arachne\",\"ok\":true}\n",
+            10,
+            false,
+        )
+        .unwrap();
+        assert_eq!(columns, ["name", "score", "ok"]);
+        assert_eq!(rows[0][1], 10);
+        assert_eq!(rows[1][1], serde_json::Value::Null);
+        assert_eq!(rows[1][2], true);
+    }
+
+    #[test]
+    fn drops_partial_jsonl_tail_from_a_bounded_read() {
+        let (_, rows, truncated) =
+            parse_tabular_preview("jsonl", b"{\"id\":1}\n{\"id\":", 10, true).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(truncated);
     }
 }
 

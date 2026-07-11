@@ -123,6 +123,8 @@ shards (Parquet, Arrow, JSONL, CSV), schemas, cards, and evaluations are
 classified with logical sizes and publication-readiness checks. The web app,
 CLI, and SDK consume that control-plane view without exposing Forgejo or
 downloading multi-gigabyte Arachne payloads.
+Dataset repositories add bounded CSV, TSV, and JSONL row previews; repository
+cards render CommonMark plus GFM while refusing implicit remote-image loads.
 
 Tailscale is a first-class NetworkProvider: connect an org OAuth client from
 Clotho settings, verify it live, and mark repositories `public` or `tailscale`

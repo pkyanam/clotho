@@ -11,6 +11,7 @@ import {
   timeAgo,
 } from "src/lib/api";
 import { PresencePanel } from "src/components/presence-panel";
+import { MarkdownCard } from "src/components/markdown-card";
 import { RepoNav } from "src/components/repo-nav";
 import {
   EmptyState,
@@ -67,6 +68,24 @@ export default async function RepoPage({
   const logicalFileBytes = new Map(
     storage.large_files.map((file) => [file.path, file.logical_bytes]),
   );
+  const cardArtifact = manifest.artifacts.find(
+    (artifact) => artifact.role === "card" && artifact.size_bytes <= 1024 * 1024,
+  );
+  const previewArtifact = manifest.artifacts.find(
+    (artifact) =>
+      artifact.role === "dataset_shard" &&
+      ["csv", "tsv", "jsonl"].includes(artifact.format),
+  );
+  const [cardFile, datasetPreview] = await Promise.all([
+    cardArtifact
+      ? client.file(name, cardArtifact.path).catch(() => null)
+      : Promise.resolve(null),
+    detail.kind === "dataset" && previewArtifact
+      ? client
+          .artifactPreview(name, previewArtifact.path, { limit: 25 })
+          .catch(() => null)
+      : Promise.resolve(null),
+  ]);
 
   let actionsLabel = "actions idle";
   if (failedActions > 0) actionsLabel = `${failedActions} failing`;
@@ -222,6 +241,59 @@ export default async function RepoPage({
             </section>
           )}
 
+          {cardFile?.content && (
+            <section>
+              <SectionHeader title={`${detail.kind} card`} meta={cardFile.path} />
+              <div className="mt-4">
+                <MarkdownCard repo={name} content={cardFile.content} />
+              </div>
+            </section>
+          )}
+
+          {datasetPreview && (
+            <section>
+              <SectionHeader
+                title="dataset preview"
+                meta={`${datasetPreview.rows.length} rows from ${datasetPreview.path}${datasetPreview.truncated ? " · bounded preview" : ""}`}
+              />
+              <div className="mt-4 overflow-x-auto border border-kumo-hairline">
+                <table className="w-full border-collapse text-left text-[0.8125rem]">
+                  <thead>
+                    <tr className="bg-kumo-base">
+                      {datasetPreview.columns.map((column) => (
+                        <th
+                          key={column}
+                          className="whitespace-nowrap border-b border-r border-kumo-hairline px-3 py-2 font-medium last:border-r-0"
+                        >
+                          {column}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {datasetPreview.rows.map((row, rowIndex) => (
+                      <tr key={rowIndex} className="border-b border-kumo-hairline last:border-b-0">
+                        {datasetPreview.columns.map((column, columnIndex) => (
+                          <td
+                            key={`${column}-${columnIndex}`}
+                            className="max-w-[24rem] truncate border-r border-kumo-hairline px-3 py-2 last:border-r-0"
+                            title={previewCell(row[columnIndex])}
+                          >
+                            {previewCell(row[columnIndex])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-[0.75rem] text-kumo-inactive">
+                read {formatBytes(datasetPreview.bytes_read)} through Clotho; previews are capped at
+                256 KiB and 100 rows.
+              </p>
+            </section>
+          )}
+
           <section>
             <SectionHeader
               title="repository files"
@@ -363,6 +435,19 @@ export default async function RepoPage({
       </div>
     </PageFrame>
   );
+}
+
+function previewCell(value: unknown) {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string") return value;
+  if (typeof value === "number") {
+    return value.toLocaleString("en-US", {
+      maximumSignificantDigits: 6,
+      useGrouping: false,
+    });
+  }
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
 }
 
 function ReadinessItem({ label, ready }: { label: string; ready: boolean }) {

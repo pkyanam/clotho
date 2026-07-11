@@ -163,6 +163,16 @@ export interface ArtifactManifest {
   artifacts: ArtifactEntry[];
 }
 
+export interface ArtifactPreview {
+  commit_id: string;
+  path: string;
+  format: "csv" | "tsv" | "jsonl" | string;
+  columns: string[];
+  rows: unknown[][];
+  bytes_read: number;
+  truncated: boolean;
+}
+
 export interface FileContent {
   commit_id: string;
   path: string;
@@ -814,6 +824,20 @@ export class ClothoClient {
   artifacts(name: string, commitId?: string): Promise<ArtifactManifest> {
     return this.request(
       `/api/v1/repos/${encodeURIComponent(name)}/artifacts${qs({ commit_id: commitId })}`,
+    );
+  }
+
+  artifactPreview(
+    name: string,
+    path: string,
+    options?: { commitId?: string; limit?: number },
+  ): Promise<ArtifactPreview> {
+    return this.request(
+      `/api/v1/repos/${encodeURIComponent(name)}/artifacts/preview${qs({
+        path,
+        commit_id: options?.commitId,
+        limit: options?.limit,
+      })}`,
     );
   }
 
