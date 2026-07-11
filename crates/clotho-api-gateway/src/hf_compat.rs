@@ -301,6 +301,7 @@ fn repo_info_value(
         "clotho": {
             "release": release.version,
             "manifest_sha256": release.manifest_sha256,
+            "evaluation_count": metadata.get("evaluations").and_then(Value::as_array).map_or(0, Vec::len),
             "source_of_truth": true
         }
     })

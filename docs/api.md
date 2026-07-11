@@ -210,6 +210,10 @@ release commit IDs are supported. Model/dataset info, tree traversal, and
 `resolve`/`HEAD` downloads come from the frozen manifest and Arachne. The
 compatibility layer is deliberately read-only—writes still go through Clotho's
 audited commit, import, release, and Actions control plane.
+Structured JSON files under evaluation/metric/benchmark paths (up to 256 KiB)
+are embedded with their source path in the immutable semantic manifest. Hub
+metadata exposes the evaluation count, and Clotho's repository page renders
+task, dataset, hardware, and metric evidence against the release digest.
 Public verified releases support anonymous discovery and downloads even in a
 managed profile with authentication required. Private/internal repositories
 still require a valid Clotho/Clerk credential and explicit read access; an

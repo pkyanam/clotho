@@ -491,7 +491,7 @@ fn artifact_class(path: &str) -> ArtifactClass {
             family: "model",
         };
     }
-    if name.contains("eval") || name.contains("metric") || name.contains("benchmark") {
+    if lower.contains("eval") || lower.contains("metric") || lower.contains("benchmark") {
         return ArtifactClass {
             role: "evaluation",
             format: structured_format(extension),
@@ -724,6 +724,15 @@ fn selected_json_metadata(content: &[u8], keys: &[&str]) -> Option<serde_json::V
     (!selected.is_empty()).then_some(serde_json::Value::Object(selected))
 }
 
+fn evaluation_document(content: &[u8]) -> Option<serde_json::Value> {
+    let value: serde_json::Value = serde_json::from_slice(content).ok()?;
+    matches!(
+        value,
+        serde_json::Value::Object(_) | serde_json::Value::Array(_)
+    )
+    .then_some(value)
+}
+
 /// Semantic inventory for code, model, and dataset repositories. Clotho owns
 /// this view: clients do not need to download multi-GB payloads or inspect the
 /// backing Forgejo repository to understand what a repository contains.
@@ -756,7 +765,10 @@ pub async fn artifact_manifest(
         let mut storage = "git";
         let mut oid_sha256 = String::new();
         let mut arachne_hash = String::new();
-        let inspect_metadata = matches!(class.role, "card" | "model_config" | "dataset_schema");
+        let inspect_metadata = matches!(
+            class.role,
+            "card" | "model_config" | "dataset_schema" | "evaluation"
+        );
         let should_read = entry.size_bytes <= 1024
             || (inspect_metadata && entry.size_bytes <= ARTIFACT_INSPECTION_MAX_BYTES as u64);
         let mut inspection = None;
@@ -830,6 +842,19 @@ pub async fn artifact_manifest(
                     ],
                 ) {
                     metadata.insert("dataset_schema".into(), schema);
+                    metadata_sources.push(entry.path.clone());
+                }
+            } else if class.role == "evaluation" {
+                if let Some(evaluation) = evaluation_document(&content) {
+                    metadata
+                        .entry("evaluations".into())
+                        .or_insert_with(|| serde_json::Value::Array(Vec::new()))
+                        .as_array_mut()
+                        .expect("evaluations is initialized as an array")
+                        .push(serde_json::json!({
+                            "path": entry.path.clone(),
+                            "data": evaluation,
+                        }));
                     metadata_sources.push(entry.path.clone());
                 }
             }
@@ -1256,6 +1281,21 @@ mod artifact_tests {
             artifact_class("benchmarks/eval_results.json").role,
             "evaluation"
         );
+        assert_eq!(
+            artifact_class("evaluations/hellaswag.json").role,
+            "evaluation"
+        );
+    }
+
+    #[test]
+    fn evaluation_documents_accept_structured_json_only() {
+        let document = br#"{"task":"hellaswag","metrics":{"accuracy":0.82}}"#;
+        assert_eq!(
+            evaluation_document(document).unwrap()["metrics"]["accuracy"],
+            0.82
+        );
+        assert!(evaluation_document(b"not json").is_none());
+        assert!(evaluation_document(b"42").is_none());
     }
 
     #[test]

@@ -165,6 +165,9 @@ Clotho remains the source of truth underneath. Standard model/dataset discovery
 searches only permission-checked, verified releases in Clotho's catalog.
 Public releases are anonymously readable in managed deployments, while
 private/internal catalog entries remain token- and permission-gated.
+Bounded JSON evaluation and benchmark artifacts are ingested into the semantic
+manifest, frozen with their source path, and surfaced beside the exact release
+commit/digest instead of floating independently from model weights.
 
 Tailscale is a first-class NetworkProvider: connect an org OAuth client from
 Clotho settings, verify it live, and mark repositories `public` or `tailscale`

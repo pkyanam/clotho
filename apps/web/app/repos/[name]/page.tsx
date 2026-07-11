@@ -92,6 +92,7 @@ export default async function RepoPage({
   const latestRelease = releases[0]
     ? await client.release(name, releases[0].version).catch(() => null)
     : null;
+  const evaluations = releaseEvaluations(latestRelease?.manifest.metadata ?? {});
 
   let actionsLabel = "actions idle";
   if (failedActions > 0) actionsLabel = `${failedActions} failing`;
@@ -359,6 +360,47 @@ export default async function RepoPage({
             </div>
           </section>
 
+          {evaluations.length > 0 && latestRelease && (
+            <section>
+              <SectionHeader
+                title="evaluations"
+                meta={`${evaluations.length} frozen in ${latestRelease.version}`}
+              />
+              <ul className="mt-4 divide-y divide-kumo-hairline border border-kumo-hairline">
+                {evaluations.map((evaluation) => {
+                  const metrics =
+                    evaluation.data.metrics && typeof evaluation.data.metrics === "object"
+                      ? (evaluation.data.metrics as Record<string, unknown>)
+                      : {};
+                  return (
+                    <li key={evaluation.path} className="px-4 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-[0.875rem]">{evaluation.path}</span>
+                        <span className="flex flex-wrap gap-1.5">
+                          {["task", "dataset", "hardware"].map((key) =>
+                            evaluation.data[key] == null ? null : (
+                              <Badge key={key} variant="outline">
+                                {key} · {previewCell(evaluation.data[key])}
+                              </Badge>
+                            ),
+                          )}
+                          {Object.entries(metrics).slice(0, 8).map(([metric, value]) => (
+                            <Badge key={metric} variant="outline">
+                              {metric.replaceAll("_", " ")} · {previewCell(value)}
+                            </Badge>
+                          ))}
+                        </span>
+                      </div>
+                      <p className="mt-2 font-mono text-[0.6875rem] text-kumo-inactive">
+                        commit {shortId(latestRelease.commit_id)} · manifest {shortId(latestRelease.manifest_sha256)}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
+
           {cardFile?.content && (
             <section>
               <SectionHeader title={`${detail.kind} card`} meta={cardFile.path} />
@@ -566,6 +608,18 @@ function previewCell(value: unknown) {
   }
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function releaseEvaluations(metadata: Record<string, unknown>) {
+  if (!Array.isArray(metadata.evaluations)) return [];
+  return metadata.evaluations.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const record = entry as Record<string, unknown>;
+    if (typeof record.path !== "string" || !record.data || typeof record.data !== "object") {
+      return [];
+    }
+    return [{ path: record.path, data: record.data as Record<string, unknown> }];
+  });
 }
 
 function artifactMetadataChips(metadata: Record<string, unknown>) {

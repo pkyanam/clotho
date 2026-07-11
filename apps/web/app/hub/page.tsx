@@ -97,6 +97,9 @@ export default async function HubPage({ searchParams }: HubPageProps) {
                         <Badge variant="outline">{entry.private ? "private" : "public"}</Badge>
                         {entry.pipeline_tag && <Badge variant="outline">{entry.pipeline_tag}</Badge>}
                         {entry.library_name && <Badge variant="outline">{entry.library_name}</Badge>}
+                        {(entry.clotho.evaluation_count ?? 0) > 0 && (
+                          <Badge variant="outline">{entry.clotho.evaluation_count} evaluations</Badge>
+                        )}
                         {entry.tags
                           .filter((tag) => ![kind.slice(0, -1), "clotho", "arachne"].includes(tag))
                           .slice(0, 4)

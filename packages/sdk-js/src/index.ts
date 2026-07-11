@@ -247,6 +247,7 @@ export interface HubCatalogEntry {
   clotho: {
     release: string;
     manifest_sha256: string;
+    evaluation_count?: number;
     source_of_truth: true;
   };
 }
