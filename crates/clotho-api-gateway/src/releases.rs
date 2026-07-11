@@ -140,6 +140,59 @@ pub(crate) struct ReleaseBinding {
     pub ready: bool,
 }
 
+pub(crate) struct ReleaseSnapshot {
+    pub version: String,
+    pub commit_id: String,
+    pub manifest_sha256: String,
+    pub manifest: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+}
+
+pub(crate) async fn resolve_release_snapshot(
+    pool: &sqlx::PgPool,
+    repo_id: &str,
+    revision: &str,
+) -> Result<ReleaseSnapshot, ApiError> {
+    let row = if revision == "main" || revision.is_empty() {
+        sqlx::query_as::<_, DbRelease>(
+            r#"select id, version, commit_id, manifest, manifest_sha256,
+                      created_by, created_at from repo_releases
+               where repo_id = $1 order by created_at desc limit 1"#,
+        )
+        .bind(repo_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| ApiError::Internal(format!("resolve latest release: {error}")))?
+        .ok_or_else(|| ApiError::NotFound("repository has no immutable releases".into()))?
+    } else {
+        sqlx::query_as::<_, DbRelease>(
+            r#"select id, version, commit_id, manifest, manifest_sha256,
+                      created_by, created_at from repo_releases
+               where repo_id = $1 and (version = $2 or commit_id = $2)
+               order by created_at desc limit 1"#,
+        )
+        .bind(repo_id)
+        .bind(revision)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| ApiError::Internal(format!("resolve release revision: {error}")))?
+        .ok_or_else(|| ApiError::NotFound(format!("release revision {revision:?} not found")))?
+    };
+    if !summary(&row)?.verified {
+        return Err(ApiError::Conflict(format!(
+            "release {:?} failed manifest verification",
+            row.version
+        )));
+    }
+    Ok(ReleaseSnapshot {
+        version: row.version,
+        commit_id: row.commit_id,
+        manifest_sha256: row.manifest_sha256,
+        manifest: row.manifest,
+        created_at: row.created_at,
+    })
+}
+
 pub(crate) async fn release_binding(
     pool: &sqlx::PgPool,
     repo_id: &str,
@@ -301,7 +354,7 @@ pub async fn head_release_file(
     serve_release_file(state, headers, name, version, path, true).await
 }
 
-async fn serve_release_file(
+pub(crate) async fn serve_release_file(
     state: Arc<AppState>,
     headers: HeaderMap,
     name: String,
@@ -385,6 +438,12 @@ async fn serve_release_file(
     );
     insert_named_header(&mut response, "x-clotho-release-version", &version)?;
     insert_named_header(&mut response, "x-clotho-commit-id", &release.commit_id)?;
+    // Keep the native provenance headers while also speaking the standard Hub
+    // download metadata protocol. This lets unmodified huggingface_hub clients
+    // cache files by Clotho's immutable release commit.
+    insert_named_header(&mut response, "x-repo-commit", &release.commit_id)?;
+    insert_named_header(&mut response, "x-linked-etag", &format!("\"{oid}\""))?;
+    insert_named_header(&mut response, "x-linked-size", &size.to_string())?;
     insert_named_header(
         &mut response,
         "x-clotho-manifest-sha256",

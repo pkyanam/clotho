@@ -23,6 +23,7 @@ pub mod computesdk_catalog;
 pub mod control;
 pub mod error;
 pub mod forgejo;
+mod hf_compat;
 mod hub;
 mod issues;
 mod labels;
@@ -304,6 +305,33 @@ pub fn router_with_pool(
         .route(
             "/api/v1/repos/{name}/releases/{version}/resolve/{*path}",
             get(releases::get_release_file).head(releases::head_release_file),
+        )
+        // Hugging Face-compatible, read-only projection over immutable Clotho releases.
+        .route("/api/models/{owner}/{name}", get(hf_compat::model_info))
+        .route(
+            "/api/models/{owner}/{name}/revision/{revision}",
+            get(hf_compat::model_info_revision),
+        )
+        .route(
+            "/api/models/{owner}/{name}/tree/{revision}",
+            get(hf_compat::model_tree),
+        )
+        .route(
+            "/{owner}/{name}/resolve/{revision}/{*path}",
+            get(hf_compat::model_resolve_get).head(hf_compat::model_resolve_head),
+        )
+        .route("/api/datasets/{owner}/{name}", get(hf_compat::dataset_info))
+        .route(
+            "/api/datasets/{owner}/{name}/revision/{revision}",
+            get(hf_compat::dataset_info_revision),
+        )
+        .route(
+            "/api/datasets/{owner}/{name}/tree/{revision}",
+            get(hf_compat::dataset_tree),
+        )
+        .route(
+            "/datasets/{owner}/{name}/resolve/{revision}/{*path}",
+            get(hf_compat::dataset_resolve_get).head(hf_compat::dataset_resolve_head),
         )
         .route(
             "/api/v1/repos/{name}/commits",

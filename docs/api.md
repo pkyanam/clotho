@@ -181,6 +181,24 @@ curl -I http://localhost:8080/api/v1/repos/tiny-gpt/releases/v1.0.0/resolve/mode
 curl -o model.safetensors http://localhost:8080/api/v1/repos/tiny-gpt/releases/v1.0.0/resolve/model.safetensors
 ```
 
+### Hugging Face client compatibility
+
+Immutable releases are projected through Hugging Face's standard read API:
+
+```python
+from huggingface_hub import HfApi
+
+hub = HfApi(endpoint="http://localhost:8080", token="clotho_...")
+info = hub.model_info("clotho/tiny-gpt", revision="v1.0.0", files_metadata=True)
+files = hub.list_repo_files("clotho/tiny-gpt", revision="v1.0.0")
+```
+
+`main` resolves to the newest immutable release; explicit Clotho versions and
+release commit IDs are supported. Model/dataset info, tree traversal, and
+`resolve`/`HEAD` downloads come from the frozen manifest and Arachne. The
+compatibility layer is deliberately read-only—writes still go through Clotho's
+audited commit, import, release, and Actions control plane.
+
 CSV, TSV, and JSONL previews are deliberately bounded: the gateway streams at
 most 256 KiB from Arachne and returns at most 100 rows. Large datasets never
 need to be materialized in gateway memory just to inspect their shape.

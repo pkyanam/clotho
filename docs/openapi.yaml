@@ -684,6 +684,139 @@ paths:
         "200":
           description: Release file metadata in headers
 
+  /api/models/{owner}/{name}:
+    get:
+      tags: [repos, providers]
+      operationId: huggingFaceModelInfo
+      summary: Hugging Face-compatible model info projected from a Clotho release
+      parameters:
+        - {name: owner, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: revision, in: query, schema: {type: string, default: main}}
+        - {name: files_metadata, in: query, schema: {type: boolean, default: false}}
+      responses:
+        "200": {description: Hugging Face ModelInfo-compatible object}
+        "404": {$ref: "#/components/responses/Error"}
+
+  /api/models/{owner}/{name}/tree/{revision}:
+    get:
+      tags: [repos, providers]
+      operationId: huggingFaceModelTree
+      summary: Hugging Face-compatible model release tree
+      parameters:
+        - {name: owner, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: revision, in: path, required: true, schema: {type: string}}
+        - {name: recursive, in: query, schema: {type: boolean, default: false}}
+        - {name: expand, in: query, schema: {type: boolean, default: false}}
+      responses:
+        "200":
+          description: RepoFile and RepoFolder-compatible entries
+          content:
+            application/json:
+              schema: {type: array, items: {type: object}}
+
+  /api/models/{owner}/{name}/revision/{revision}:
+    get:
+      tags: [repos, providers]
+      operationId: huggingFaceModelInfoRevision
+      summary: Hugging Face-compatible model info for a path revision
+      parameters:
+        - {name: owner, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: revision, in: path, required: true, schema: {type: string}}
+        - {name: blobs, in: query, schema: {type: boolean, default: false}}
+      responses:
+        "200": {description: Hugging Face ModelInfo-compatible object}
+
+  /{owner}/{name}/resolve/{revision}/{path}:
+    get:
+      tags: [repos, providers]
+      operationId: huggingFaceResolveModelFile
+      summary: Hugging Face-compatible model file resolution through Arachne
+      parameters:
+        - {name: owner, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: revision, in: path, required: true, schema: {type: string}}
+        - {name: path, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: Immutable model release bytes}
+    head:
+      tags: [repos, providers]
+      operationId: huggingFaceHeadModelFile
+      summary: Inspect model release file metadata
+      parameters:
+        - {name: owner, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: revision, in: path, required: true, schema: {type: string}}
+        - {name: path, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: Immutable file headers}
+
+  /api/datasets/{owner}/{name}:
+    get:
+      tags: [repos, providers]
+      operationId: huggingFaceDatasetInfo
+      summary: Hugging Face-compatible dataset info projected from a Clotho release
+      parameters:
+        - {name: owner, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: revision, in: query, schema: {type: string, default: main}}
+        - {name: files_metadata, in: query, schema: {type: boolean, default: false}}
+      responses:
+        "200": {description: Hugging Face DatasetInfo-compatible object}
+
+  /api/datasets/{owner}/{name}/tree/{revision}:
+    get:
+      tags: [repos, providers]
+      operationId: huggingFaceDatasetTree
+      summary: Hugging Face-compatible dataset release tree
+      parameters:
+        - {name: owner, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: revision, in: path, required: true, schema: {type: string}}
+        - {name: recursive, in: query, schema: {type: boolean, default: false}}
+        - {name: expand, in: query, schema: {type: boolean, default: false}}
+      responses:
+        "200": {description: RepoFile and RepoFolder-compatible entries}
+
+  /api/datasets/{owner}/{name}/revision/{revision}:
+    get:
+      tags: [repos, providers]
+      operationId: huggingFaceDatasetInfoRevision
+      summary: Hugging Face-compatible dataset info for a path revision
+      parameters:
+        - {name: owner, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: revision, in: path, required: true, schema: {type: string}}
+        - {name: blobs, in: query, schema: {type: boolean, default: false}}
+      responses:
+        "200": {description: Hugging Face DatasetInfo-compatible object}
+
+  /datasets/{owner}/{name}/resolve/{revision}/{path}:
+    get:
+      tags: [repos, providers]
+      operationId: huggingFaceResolveDatasetFile
+      summary: Hugging Face-compatible dataset file resolution through Arachne
+      parameters:
+        - {name: owner, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: revision, in: path, required: true, schema: {type: string}}
+        - {name: path, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: Immutable dataset release bytes}
+    head:
+      tags: [repos, providers]
+      operationId: huggingFaceHeadDatasetFile
+      summary: Inspect dataset release file metadata
+      parameters:
+        - {name: owner, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: revision, in: path, required: true, schema: {type: string}}
+        - {name: path, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: Immutable file headers}
+
   /api/v1/repos/{name}/hub-imports:
     get:
       tags: [repos, providers]
@@ -2747,7 +2880,7 @@ components:
               $ref: "#/components/schemas/TreeEntry"
     ArtifactEntry:
       type: object
-      required: [path, role, format, family, size_bytes, storage, conflicted]
+      required: [path, role, format, family, size_bytes, storage, oid_sha256, arachne_hash, conflicted]
       properties:
         path:
           type: string
@@ -2765,6 +2898,12 @@ components:
         storage:
           type: string
           enum: [git, arachne]
+        oid_sha256:
+          type: string
+          description: SHA-256 of logical bytes when inspected or Arachne-backed
+        arachne_hash:
+          type: string
+          description: Arachne content address; empty for ordinary Git blobs
         conflicted:
           type: boolean
     ArtifactReadiness:

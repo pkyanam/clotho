@@ -153,6 +153,10 @@ Release files have a Clotho-native `HEAD`/streaming `GET` distribution path.
 Multi-GB weights flow from Arachne with immutable cache headers, SHA-256 ETags,
 and commit/manifest provenance—never through Forgejo and never through a JSON
 base64 response.
+Clotho also projects releases through the standard Hugging Face read routes:
+`model_info`, `dataset_info`, repository trees, `resolve`, and `HEAD`. Existing
+`huggingface_hub` clients can point at Clotho and keep their familiar API while
+Clotho remains the source of truth underneath.
 
 Tailscale is a first-class NetworkProvider: connect an org OAuth client from
 Clotho settings, verify it live, and mark repositories `public` or `tailscale`

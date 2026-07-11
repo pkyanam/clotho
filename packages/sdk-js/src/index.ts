@@ -142,6 +142,8 @@ export interface ArtifactEntry {
   /** Logical bytes after Arachne pointer composition. */
   size_bytes: number;
   storage: "git" | "arachne" | string;
+  oid_sha256: string;
+  arachne_hash: string;
   conflicted: boolean;
 }
 

@@ -19,6 +19,7 @@ use clotho_common::pb::vcs::v1::{
     QueryOpLogRequest,
 };
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 
 use crate::auth;
 use crate::control::{self, ActivityEventInput, UpdateRepoRequest};
@@ -424,6 +425,10 @@ pub struct ArtifactEntryJson {
     /// Logical bytes after composing an Arachne pointer.
     pub size_bytes: u64,
     pub storage: String,
+    /// SHA-256 of the logical bytes when Clotho inspected or stored them.
+    pub oid_sha256: String,
+    /// Arachne content address for large artifacts; empty for Git blobs.
+    pub arachne_hash: String,
     pub conflicted: bool,
 }
 
@@ -749,6 +754,8 @@ pub async fn artifact_manifest(
         let class = artifact_class(&entry.path);
         let mut logical_bytes = entry.size_bytes;
         let mut storage = "git";
+        let mut oid_sha256 = String::new();
+        let mut arachne_hash = String::new();
         let inspect_metadata = matches!(class.role, "card" | "model_config" | "dataset_schema");
         let should_read = entry.size_bytes <= 1024
             || (inspect_metadata && entry.size_bytes <= ARTIFACT_INSPECTION_MAX_BYTES as u64);
@@ -765,6 +772,8 @@ pub async fn artifact_manifest(
             if let Ok(pointer) = clotho_common::lfs_pointer::LfsPointer::parse(&file.content) {
                 logical_bytes = pointer.size;
                 storage = "arachne";
+                oid_sha256 = pointer.oid_sha256.clone();
+                arachne_hash = pointer.arachne_hash.clone();
                 arachne_files += 1;
                 if inspect_metadata && pointer.size <= ARTIFACT_INSPECTION_MAX_BYTES as u64 {
                     inspection = Some(
@@ -777,8 +786,11 @@ pub async fn artifact_manifest(
                         .0,
                     );
                 }
-            } else if inspect_metadata {
-                inspection = Some(file.content);
+            } else {
+                oid_sha256 = format!("{:x}", sha2::Sha256::digest(&file.content));
+                if inspect_metadata {
+                    inspection = Some(file.content);
+                }
             }
         }
         if let Some(content) = inspection {
@@ -832,6 +844,8 @@ pub async fn artifact_manifest(
             family: class.family.into(),
             size_bytes: logical_bytes,
             storage: storage.into(),
+            oid_sha256,
+            arachne_hash,
             conflicted: entry.conflicted,
         });
     }
