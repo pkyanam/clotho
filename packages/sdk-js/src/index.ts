@@ -757,13 +757,53 @@ export interface ClothoClientOptions {
   fetch?: typeof fetch;
 }
 
+export interface ErrorEnvelope {
+  version: "1";
+  code: string;
+  message: string;
+  request_id: string;
+  retryable: boolean;
+  details?: unknown;
+}
+
 export class ClothoApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly code = "http_error",
+    public readonly requestId = "",
+    public readonly retryable = false,
+    public readonly details?: unknown,
   ) {
     super(message);
     this.name = "ClothoApiError";
+  }
+}
+
+async function responseError(
+  response: Response,
+  fallback: string,
+): Promise<ClothoApiError> {
+  try {
+    const body = (await response.json()) as Partial<ErrorEnvelope> & {
+      error?: string;
+    };
+    const message = body.message ?? body.error ?? fallback;
+    return new ClothoApiError(
+      response.status,
+      message,
+      body.code ?? "http_error",
+      body.request_id ?? response.headers.get("x-request-id") ?? "",
+      body.retryable ?? false,
+      body.details,
+    );
+  } catch {
+    return new ClothoApiError(
+      response.status,
+      fallback,
+      "http_error",
+      response.headers.get("x-request-id") ?? "",
+    );
   }
 }
 
@@ -802,14 +842,10 @@ export class ClothoClient {
       headers: this.headers(init),
     });
     if (!res.ok) {
-      let message = `${init?.method ?? "GET"} ${path} failed: ${res.status}`;
-      try {
-        const body = (await res.json()) as { error?: string };
-        if (body.error) message = body.error;
-      } catch {
-        // non-JSON error body; keep the generic message
-      }
-      throw new ClothoApiError(res.status, message);
+      throw await responseError(
+        res,
+        `${init?.method ?? "GET"} ${path} failed: ${res.status}`,
+      );
     }
     if (res.status === 204 || res.headers.get("content-length") === "0") {
       return undefined as T;
@@ -1080,14 +1116,10 @@ export class ClothoClient {
       headers,
     });
     if (!response.ok) {
-      let message = `${options?.head ? "HEAD" : "GET"} ${endpoint} failed: ${response.status}`;
-      try {
-        const body = (await response.json()) as { error?: string };
-        if (body.error) message = body.error;
-      } catch {
-        // Binary endpoints can still fail without a JSON edge envelope.
-      }
-      throw new ClothoApiError(response.status, message);
+      throw await responseError(
+        response,
+        `${options?.head ? "HEAD" : "GET"} ${endpoint} failed: ${response.status}`,
+      );
     }
     return response;
   }

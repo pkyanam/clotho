@@ -421,8 +421,8 @@ reachable by humans (CLI) and agents (MCP) with the same semantics as the SDK.
    - Publish OpenAPI 3 for `/api/v1/*` (generated from Axum routes or a single
      hand-maintained `openapi.yaml` that CI checks against).
    - Generate or validate `@clotho/sdk-js` against that contract; fail CI on drift.
-   - Document auth model (bootstrap → real tokens later) and error envelope
-     (`{ "error": "..." }` + status codes).
+   - Document auth model and the versioned stable error envelope with request
+     correlation (Stage 22 supersedes the original `{ "error": "..." }`).
    - Fill REST gaps needed for CLI/MCP parity before inventing CLI-only behavior:
      at minimum stable list/get/create for issues, PRs, Actions, providers,
      secrets metadata, activity; optional `/api/v1/sandboxes` only if CCI

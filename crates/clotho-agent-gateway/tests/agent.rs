@@ -23,6 +23,7 @@ struct TestEnv {
     mcp_base_url: String,
     admin_token: String,
     vcs_grpc_url: String,
+    api_url: String,
 }
 
 fn test_env() -> Option<TestEnv> {
@@ -35,6 +36,7 @@ fn test_env() -> Option<TestEnv> {
         mcp_base_url,
         admin_token: env_or("CLOTHO_AGENT_TEST_ADMIN_TOKEN", "clotho-agent-admin-dev"),
         vcs_grpc_url: env_or("CLOTHO_AGENT_TEST_VCS_GRPC_URL", "http://localhost:50051"),
+        api_url: env_or("CLOTHO_AGENT_TEST_API_URL", "http://localhost:8080"),
     })
 }
 
@@ -122,7 +124,7 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
         .unwrap()
         .into_inner();
 
-    // 1. Provision a scoped agent identity: this repo, these six tools.
+    // 1. Provision a scoped agent identity: this repo, these seven tools.
     let agent_name = format!("weaver-{nanos}");
     admin_post(
         &env,
@@ -142,7 +144,8 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
                 "orient_repo",
                 "diff_symbol",
                 "commit",
-                "submit_change"
+                "submit_change",
+                "get_file"
             ],
         }),
         "mint token",
@@ -195,6 +198,7 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
             "checkpoint",
             "commit",
             "diff_symbol",
+            "get_file",
             "orient_repo",
             "restore_to",
             "submit_change"
@@ -207,6 +211,33 @@ async fn scoped_agent_checkpoints_breaks_and_restores_over_mcp() {
     assert_eq!(orient["main_commit_id"], good.commit_id);
     assert_eq!(orient["files"][0]["path"], "src/lib.rs");
     assert!(orient["op_log"].as_array().unwrap().len() >= 2);
+
+    // REST-backed failures remain tool results and preserve the canonical
+    // Clotho code plus request correlation in MCP error data.
+    let (err, missing) = call_tool(
+        &client,
+        "get_file",
+        json!({ "repo": repo.clone(), "path": "does-not-exist.txt" }),
+    )
+    .await;
+    assert!(err, "missing file unexpectedly succeeded: {missing}");
+    let rest_missing: Value = reqwest::get(format!(
+        "{}/api/v1/repos/{repo}/file?path=does-not-exist.txt",
+        env.api_url
+    ))
+    .await
+    .unwrap()
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(missing["data"]["code"], rest_missing["code"]);
+    assert_eq!(missing["data"]["code"], "not_found");
+    assert!(
+        missing["data"]["request_id"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()),
+        "MCP error omitted REST request correlation: {missing}"
+    );
 
     // 4. Checkpoint the known-good state.
     let (err, checkpoint) = call_tool(

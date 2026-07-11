@@ -999,7 +999,15 @@ impl AgentGateway {
                 let message = err.message.to_string();
                 self.audit(&agent, tool, repo, &digest, "error", Some(&message))
                     .await?;
-                Err(err)
+                let payload = serde_json::to_value(&err).unwrap_or_else(|_| {
+                    json!({
+                        "code": -32603,
+                        "message": "tool failed and its typed error could not be encoded"
+                    })
+                });
+                Ok(CallToolResult::error(vec![ContentBlock::text(
+                    payload.to_string(),
+                )]))
             }
         }
     }

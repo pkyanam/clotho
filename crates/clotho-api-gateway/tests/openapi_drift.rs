@@ -83,10 +83,14 @@ fn openapi_documents_every_stable_route() {
 
 #[test]
 fn openapi_declares_error_envelope() {
-    assert!(
-        OPENAPI.contains("error:") && OPENAPI.contains("$ref: \"#/components/schemas/Error\""),
-        "OpenAPI must document the {{ \"error\": \"...\" }} envelope"
-    );
+    for field in ["version:", "code:", "message:", "request_id:", "retryable:"] {
+        assert!(
+            OPENAPI.contains(field),
+            "OpenAPI error envelope missing {field}"
+        );
+    }
+    assert!(OPENAPI.contains("$ref: \"#/components/schemas/Error\""));
+    assert!(OPENAPI.contains("X-Request-Id:"));
 }
 
 #[test]

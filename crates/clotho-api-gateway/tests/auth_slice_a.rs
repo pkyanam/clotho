@@ -94,10 +94,40 @@ async fn invalid_token_returns_unauthorized_when_auth_required() {
     let res = reqwest::Client::new()
         .get(format!("http://{addr}/api/v1/me"))
         .header("Authorization", "Bearer clotho_tok_invalid")
+        .header("X-Request-Id", "auth-test-request")
         .send()
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        res.headers().get("x-request-id").unwrap(),
+        "auth-test-request"
+    );
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["version"], "1");
+    assert_eq!(body["code"], "unauthenticated");
+    assert_eq!(body["request_id"], "auth-test-request");
+    assert_eq!(body["retryable"], false);
+    assert!(body.get("error").is_none());
+
+    let missing = reqwest::Client::new()
+        .get(format!("http://{addr}/does-not-exist"))
+        .header("X-Request-Id", "invalid/request/id")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    let generated = missing
+        .headers()
+        .get("x-request-id")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(generated, "invalid/request/id");
+    let missing_body: serde_json::Value = missing.json().await.unwrap();
+    assert_eq!(missing_body["code"], "not_found");
+    assert_eq!(missing_body["request_id"], generated);
 }
 
 #[tokio::test]
@@ -152,15 +182,14 @@ async fn token_mint_patch_and_delete_repo() {
     let token = created["token"].as_str().unwrap().to_string();
     let auth = format!("Bearer {token}");
 
-    let me: serde_json::Value = client
+    let me_response = client
         .get(format!("{base}/api/v1/me"))
         .header("Authorization", &auth)
         .send()
         .await
-        .unwrap()
-        .json()
-        .await
         .unwrap();
+    assert!(me_response.headers().get("x-request-id").is_some());
+    let me: serde_json::Value = me_response.json().await.unwrap();
     assert_eq!(me["user"]["name"], "clotho");
 
     let patched = client

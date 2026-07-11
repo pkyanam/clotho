@@ -47,6 +47,8 @@ pub enum EngineError {
     InvalidId(String),
     #[error("invalid path {0:?}: {1}")]
     InvalidPath(String, String),
+    #[error("file {0:?} not found at this commit")]
+    FileNotFound(String),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -677,9 +679,7 @@ impl VcsEngine {
         let read = self
             .read_tree_value(store, &repo_path, value)
             .await?
-            .ok_or_else(|| {
-                EngineError::InvalidPath(path.to_string(), "no such file at this commit".into())
-            })?;
+            .ok_or_else(|| EngineError::FileNotFound(path.to_string()))?;
         Ok(FileContent {
             commit_id: commit_id.hex(),
             path: path.to_string(),

@@ -6,8 +6,9 @@ edge), the web console, and `@clotho/sdk-js`.
 
 > **Pre-release contract:** `/api/v1` is the intended compatibility boundary,
 > but the public-alpha hardening gate is not complete. Consumers should pin a
-> Clotho release until stable error codes, pagination, idempotency, async
-> operations, and full OpenAPI schema verification land. Track the contract in
+> Clotho release until pagination, idempotency, async-operation conventions,
+> and full OpenAPI schema verification land. Error envelope version `1` and
+> request correlation are stable. Track the remaining contract in
 > [`release-readiness.md`](release-readiness.md).
 
 ## Contract
@@ -17,7 +18,31 @@ edge), the web console, and `@clotho/sdk-js`.
 | OpenAPI 3 | [`docs/openapi.yaml`](openapi.yaml) |
 | Live YAML | `GET /openapi.yaml` on a running gateway |
 | Drift CI | `crates/clotho-api-gateway/tests/openapi_drift.rs` |
-| Error envelope | `{ "error": "…" }` with 4xx/5xx |
+| Error envelope | version `1`: `code`, `message`, `request_id`, `retryable`, optional `details` |
+
+Every response includes `X-Request-Id`. A caller may supply a 1–128 character
+opaque id containing ASCII letters, digits, `.`, `_`, or `-`; invalid values
+are replaced with a generated UUID. Logs use the same id. Never put secrets or
+user content in a request id.
+
+Error responses are safe and machine-readable:
+
+```json
+{
+  "version": "1",
+  "code": "permission_denied",
+  "message": "requires repo write permission",
+  "request_id": "0190f3b6-3b44-7d4c-a180-2f87ef7e20f1",
+  "retryable": false
+}
+```
+
+Stable codes in envelope version `1` are `invalid_request`,
+`unauthenticated`, `permission_denied`, `not_found`, `method_not_allowed`,
+`conflict`, `policy_conflict`, `payload_too_large`,
+`range_not_satisfiable`, `rate_limited`, `upstream_unavailable`,
+`service_unavailable`, `upstream_timeout`, and `internal_error`. Internal and
+provider topology is logged server-side but never returned in the safe message.
 
 ### Auth model (Stage 17 / ADR-0018)
 
@@ -358,8 +383,9 @@ where applicable.
 | `GET` | `/api/v1/repos/{name}/merge-policy` | Current gates |
 | `PUT` | `/api/v1/repos/{name}/merge-policy` | Update gates |
 
-`POST …/pulls/{n}/merge` returns **409** with `{ "error": "…" }` when policy
-blocks merge (conflicts, missing approvals, failing Actions, etc.).
+`POST …/pulls/{n}/merge` returns **409** with `code: conflict` (or the more
+specific `policy_conflict` as individual gates adopt it) when policy blocks
+merge, plus the request id for support correlation.
 
 | Webhooks | `/api/v1/webhooks/forgejo` (internal; not part of the public product API) |
 
@@ -387,8 +413,9 @@ const logs = await clotho.actionLogs("weave", run.id);
 
 - `/api/v1` is the stable-path candidate. During `0.x`, release notes must call
   out any behavioral or schema incompatibility; clients should pin a release.
-- The public-alpha gate freezes a machine-readable error envelope, cursor
-  pagination, idempotency, conditional-write, asynchronous-operation,
+- Error envelope version `1`, request correlation, and CLI error classes are
+  frozen. The remaining public-alpha gate covers cursor pagination,
+  idempotency, conditional-write, asynchronous-operation,
   cancellation, rate/size-limit, and request/audit-correlation conventions.
 - Additive changes remain compatible. A removal or semantic change after the
   beta freeze requires a deprecation window, migration note, and versioned path.

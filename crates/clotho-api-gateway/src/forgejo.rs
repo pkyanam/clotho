@@ -328,7 +328,8 @@ impl ForgejoClient {
             let body = response.text().await.unwrap_or_default();
             let message = format!("forgejo: {path} returned {status}: {body}");
             if status == reqwest::StatusCode::NOT_FOUND {
-                Err(ApiError::NotFound(message))
+                tracing::warn!(provider = "collaboration", %status, path, body, "internal provider resource not found");
+                Err(ApiError::NotFound("resource not found".into()))
             } else {
                 Err(ApiError::Upstream(message))
             }

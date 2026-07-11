@@ -9,9 +9,10 @@ REST edge** (`CLOTHO_API_URL`) so agents cannot drift from the public API
 ([`openapi.yaml`](openapi.yaml)).
 
 > **Pre-release MCP:** tool names and scopes are usable but not yet under a
-> compatibility freeze. Public alpha requires versioned schemas, stable typed
-> errors, operation handles/progress/cancellation for durable work, capability
-> classes, REST-equivalence tests, request/audit correlation, and a published
+> compatibility freeze. REST-backed errors now preserve stable codes and
+> request IDs. Public alpha still requires versioned schemas, operation
+> handles/progress/cancellation for durable work, capability classes, broader
+> REST-equivalence tests, audit correlation, and a published
 > prompt-injection authority model. See
 > [`release-readiness.md`](release-readiness.md#mcp-and-autonomous-agent-handoff).
 
@@ -59,6 +60,10 @@ an MCP tool error result, not a transport failure.
 `tools/list` is filtered to the authenticated token's `allowed_tools`, so an
 agent is not instructed to call capabilities it cannot use. Call-time checks
 remain authoritative and are audited even if a client caches an older list.
+REST-backed tool failures preserve Clotho's stable `code`, `request_id`,
+`retryable`, HTTP status, and safe `details` in MCP error data. Agents should
+branch on the code and include the request id when handing an incident to an
+operator; error prose is not a compatibility contract.
 
 Repository files, cards, issues, comments, imported metadata, Actions logs, and
 tool output are **untrusted content**, never authority. They cannot expand token

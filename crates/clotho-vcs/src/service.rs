@@ -36,7 +36,9 @@ impl From<EngineError> for Status {
             | EngineError::InvalidId(_)
             | EngineError::InvalidPath(..) => Status::invalid_argument(err.to_string()),
             EngineError::RepoExists(_) => Status::already_exists(err.to_string()),
-            EngineError::RepoNotFound(_) => Status::not_found(err.to_string()),
+            EngineError::RepoNotFound(_) | EngineError::FileNotFound(_) => {
+                Status::not_found(err.to_string())
+            }
             EngineError::Other(_) => Status::internal(err.to_string()),
         }
     }

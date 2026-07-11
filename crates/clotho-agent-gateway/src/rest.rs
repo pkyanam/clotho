@@ -4,9 +4,28 @@
 //! cannot drift from the public product contract (docs/openapi.yaml).
 
 use reqwest::StatusCode;
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::mcp::ToolError;
+
+#[derive(Debug, Deserialize)]
+struct ErrorEnvelope {
+    #[serde(default = "default_error_code")]
+    code: String,
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    request_id: String,
+    #[serde(default)]
+    retryable: bool,
+    #[serde(default)]
+    details: Option<Value>,
+}
+
+fn default_error_code() -> String {
+    "http_error".into()
+}
 
 #[derive(Clone)]
 pub struct RestClient {
@@ -59,30 +78,54 @@ impl RestClient {
             if status.is_success() {
                 return Ok(Value::Null);
             }
-            return Err(map_status(status, &format!("{method} {path} failed")));
+            return Err(map_status(
+                status,
+                ErrorEnvelope {
+                    code: default_error_code(),
+                    message: format!("{method} {path} failed"),
+                    request_id: String::new(),
+                    retryable: false,
+                    details: None,
+                },
+            ));
         }
 
         let value: Value =
             serde_json::from_str(&text).unwrap_or_else(|_| Value::String(text.clone()));
 
         if !status.is_success() {
-            let msg = value
-                .get("error")
-                .and_then(|e| e.as_str())
-                .map(str::to_string)
-                .unwrap_or_else(|| text.clone());
-            return Err(map_status(status, &msg));
+            let envelope =
+                serde_json::from_value::<ErrorEnvelope>(value.clone()).unwrap_or(ErrorEnvelope {
+                    code: default_error_code(),
+                    message: value
+                        .get("error")
+                        .and_then(|error| error.as_str())
+                        .unwrap_or(&text)
+                        .to_owned(),
+                    request_id: String::new(),
+                    retryable: false,
+                    details: None,
+                });
+            return Err(map_status(status, envelope));
         }
         Ok(value)
     }
 }
 
-fn map_status(status: StatusCode, message: &str) -> ToolError {
+fn map_status(status: StatusCode, envelope: ErrorEnvelope) -> ToolError {
     use rmcp::ErrorData as McpError;
+    let data = Some(serde_json::json!({
+        "version": "1",
+        "code": envelope.code,
+        "request_id": envelope.request_id,
+        "retryable": envelope.retryable,
+        "details": envelope.details,
+        "http_status": status.as_u16(),
+    }));
     let err = if status == StatusCode::BAD_REQUEST || status == StatusCode::NOT_FOUND {
-        McpError::invalid_params(message.to_string(), None)
+        McpError::invalid_params(envelope.message, data)
     } else {
-        McpError::internal_error(format!("api-gateway {status}: {message}"), None)
+        McpError::internal_error(envelope.message, data)
     };
     ToolError::Mcp(err)
 }

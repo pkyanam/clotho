@@ -34,6 +34,7 @@ mod providers;
 mod pulls;
 mod releases;
 mod repos;
+mod request_context;
 mod secrets;
 mod status;
 mod webhooks;
@@ -43,7 +44,7 @@ use std::sync::Arc;
 use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{delete, get, post};
-use axum::{Json, Router};
+use axum::{middleware, Json, Router};
 use clotho_common::pb::compute::v1::compute_client::ComputeClient;
 use clotho_common::pb::diff::v1::diff_client::DiffClient;
 use clotho_common::pb::mergequeue::v1::merge_queue_client::MergeQueueClient;
@@ -485,6 +486,9 @@ pub fn router_with_pool(
         // different origin in dev (Next on :3100, gateway on :8080).
         .merge(secrets::routes())
         .layer(CorsLayer::permissive())
+        .layer(middleware::from_fn(
+            request_context::correlate_and_normalize,
+        ))
         .with_state(state))
 }
 

@@ -4,9 +4,9 @@
 shells out to local `git` binaries — all reads and writes go through the gateway.
 
 > **Pre-release CLI:** command groups are usable today, but grammar and exit-code
-> compatibility are not frozen. The public-alpha gate adds generated command
-> reference, named contexts with OS-keychain tokens, strict stdout/stderr and
-> JSON behavior, stable exit-code classes, completions, signed binaries, and
+> compatibility are not frozen. Error exit classes are stable; the remaining
+> public-alpha gate adds generated command reference, named contexts with
+> OS-keychain tokens, strict stdout/stderr and JSON tests, completions, signed binaries, and
 > retry/idempotency controls. See
 > [`release-readiness.md`](release-readiness.md#cli).
 
@@ -32,15 +32,26 @@ bootstrap logs or `clotho auth token create`) before mutating commands.
 session JWT or org API key as `--token` / `CLOTHO_TOKEN`, or keep minting
 Clotho `clotho_tok_…` (§11 #7). Agents stay on `clotho_agt_…` via MCP only.
 
-Exit status is non-zero on HTTP or usage errors (script-friendly). Gateway error
-envelopes (`{ "error": "…" }`) are surfaced in stderr-style messages, including
-merge **409** policy blocks from `clotho pr merge`.
+stdout is reserved for requested data and stderr for errors. Gateway error
+codes and request IDs are preserved in diagnostics, including merge **409**
+policy blocks from `clotho pr merge`.
 
-For current automation, pin the Clotho release, pass `--json`, and do not parse
-human-formatted tables. The compatibility freeze will reserve stdout for the
-requested value, stderr for diagnostics/progress, and publish distinct exit
-classes for usage, authentication, permission, policy conflict, not-found,
-retryable unavailability, and internal failure.
+Stable exit classes:
+
+| Exit | Class |
+|---:|---|
+| `0` | success |
+| `1` | internal/unclassified failure |
+| `2` | CLI usage error |
+| `3` | authentication required/expired |
+| `4` | permission denied |
+| `5` | conflict or policy block |
+| `6` | not found |
+| `7` | retryable unavailability/rate limit |
+
+For automation, pin the Clotho release, pass `--json`, read exactly one success
+value from stdout, and branch on the stable exit class. Error text includes the
+stable code and request id on stderr; do not parse its prose.
 
 ## Demo loop
 

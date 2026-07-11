@@ -14,10 +14,17 @@ use crate::args::{
     require_one, require_two, strip_globals, take_flag, take_option, take_repeated,
     take_repeated_str,
 };
-use crate::client::{emit, first_line, request_json, request_value, short, Config};
+use crate::client::{emit, exit_code, first_line, request_json, request_value, short, Config};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
+    if let Err(error) = run().await {
+        eprintln!("{error:#}");
+        std::process::exit(exit_code(&error));
+    }
+}
+
+async fn run() -> Result<()> {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let (api_opt, json, token_opt) = strip_globals(&mut args);
     let api_url = api_opt

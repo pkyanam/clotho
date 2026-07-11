@@ -22,6 +22,12 @@ The current evidence-backed gap inventory is
   provider boundary so Clotho's issue schema remains stable.
 - Repaired invalid OpenAPI YAML indentation and an unresolved schema reference.
 - Added this current handoff and the implemented/missing/evidence gap matrix.
+- Added stable REST error envelope version `1`, safe topology redaction, and
+  `X-Request-Id` propagation/generation for every success and error response.
+- Preserved error codes and correlation through the JavaScript SDK, CLI, and
+  REST-backed MCP tools; froze CLI exit classes `1`–`7`.
+- Corrected missing-file semantics from internal VCS through REST to `404 /
+  not_found` and added a live MCP↔REST error-equivalence assertion.
 
 ## Baseline state
 
@@ -42,23 +48,34 @@ recreated without removing volumes. `just test-collab`, `just test-agent`, and
 `just doctor --json --stack` then passed; the live OpenAPI SHA-256 matched the
 checked-in document.
 
+For the error/correlation slice, live HTTP probes verified caller-supplied and
+generated request IDs on 200/400/404 responses, catch-all JSON normalization,
+and topology-safe provider errors. CLI probes verified exit `2` (usage), `3`
+(auth), `5` (conflict), `6` (not found), and `7` (unavailable). A live MCP test
+compared the REST and MCP missing-file code and required the REST request ID in
+the tool error. VCS, agent gateway, and API gateway were restarted; an existing
+repository and the stable error contract remained available afterward.
+With the internal collaboration provider stopped, its issue route returned
+`502 upstream_unavailable`, `retryable: true`, the caller's request ID, and no
+provider URL/topology; the provider was restarted and passed its health probe.
+
 No live Daytona, Box, ComputeSDK upstream, managed Clerk, private/gated Hub,
 or Tailscale credential test has been run in this slice.
 
 ## Next bounded acceptance test
 
-After this slice is green and pushed, implement the versioned REST error
-envelope and request ID middleware as the next Stage 22 blocker. Acceptance:
+After this slice is green and pushed, implement complete OpenAPI operation and
+SDK structural verification as the next Stage 22 blocker. Acceptance:
 
-1. Every gateway-generated 4xx/5xx response has stable `code`, safe `message`,
-   `request_id`, optional structured `details`, and explicit retry metadata.
-2. The same request ID is returned in `X-Request-Id`, accepted from a valid
-   inbound header where safe, and recorded in structured logs/audit links.
-3. OpenAPI declares the envelope and common errors; SDK preserves all fields;
-   CLI maps error codes to stable exit classes; MCP preserves code and request
-   correlation for REST-backed tools.
-4. Unit, contract, Docker HTTP, and restart probes pass without exposing
-   internal topology or secret values.
+1. The checked-in OpenAPI parses in CI and every operation has an
+   `operationId`, explicit security/stability metadata, request schema, success
+   schema, common error references, and bounded collection behavior.
+2. CI compares Axum method/path inventory—not paths alone—and verifies every
+   SDK method's request and response structures against the contract.
+3. The malformed indentation/unresolved-reference class found in the first
+   Stage 22 slice has a deterministic regression test.
+4. An API diff report identifies additive, breaking, and documentation-only
+   changes for release evidence.
 
-Do not broaden that slice into pagination, idempotency, or speculative Stage
-23 work until the error/correlation acceptance is complete.
+Do not broaden that slice into pagination semantics, idempotency, or
+speculative Stage 23 work until structural contract verification is complete.

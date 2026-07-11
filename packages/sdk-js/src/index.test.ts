@@ -279,12 +279,24 @@ describe("ClothoClient", () => {
 
   it("surfaces gateway error bodies as ClothoApiError", async () => {
     const { client } = clientWith(
-      jsonResponse({ error: 'repo "weave" already exists' }, 409),
+      jsonResponse(
+        {
+          version: "1",
+          code: "conflict",
+          message: 'repo "weave" already exists',
+          request_id: "req-test-123",
+          retryable: false,
+        },
+        409,
+      ),
     );
     await expect(client.createRepo("weave")).rejects.toMatchObject({
       name: "ClothoApiError",
       status: 409,
       message: 'repo "weave" already exists',
+      code: "conflict",
+      requestId: "req-test-123",
+      retryable: false,
     });
   });
 
